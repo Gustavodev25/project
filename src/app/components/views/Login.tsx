@@ -123,7 +123,6 @@ export default function Login() {
       }
 
       // Login bem-sucedido - a API fará o redirecionamento automático
-      console.log("✅ Login realizado com sucesso - redirecionamento automático pela API");
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Erro inesperado no login.";
