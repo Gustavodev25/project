@@ -133,7 +133,8 @@ export default function Login() {
       await new Promise(resolve => setTimeout(resolve, 200));
 
       // Redirecionar para a página solicitada ou dashboard
-      const redirect = searchParams.get("redirect") || "/dashboard";
+      const redirectParam = searchParams.get("redirect");
+      const redirect = (redirectParam && redirectParam !== "/") ? redirectParam : "/dashboard";
       router.replace(redirect);
     } catch (err: unknown) {
       const message =
