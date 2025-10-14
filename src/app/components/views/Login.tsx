@@ -113,10 +113,12 @@ export default function Login() {
         headers: { "Content-Type": "application/json" },
         credentials: "include", // Importante para incluir cookies
         body: JSON.stringify({ email: normalizedEmail, senha }),
-        redirect: "manual", // Não seguir redirecionamentos automaticamente
       });
 
-      if (res.status === 302) {
+      // Primeiro tentar parsear a resposta como JSON
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
         // Login bem-sucedido - redirecionar para dashboard
         toast({
           variant: "success",
@@ -132,13 +134,10 @@ export default function Login() {
         return;
       }
 
-      // Se não for redirecionamento, tentar parsear como JSON de erro
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = data?.error || "Falha no login";
-        toast({ variant: "error", title: "Erro no login", description: msg });
-        return;
-      }
+      // Se não foi sucesso, mostrar erro
+      const msg = data?.error || "Falha no login";
+      toast({ variant: "error", title: "Erro no login", description: msg });
+      return;
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Erro inesperado no login.";
