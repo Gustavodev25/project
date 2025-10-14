@@ -101,21 +101,24 @@ export async function POST(req: Request) {
     { expiresIn: "7d" },
   );
 
-  const res = NextResponse.json({ ok: true }, { status: 200 });
-  
   // Detectar se é desenvolvimento local (apenas localhost, não ngrok)
   const host = req.headers.get("host") || "";
   const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
   const isNgrok = host.includes("ngrok");
-  
+
+  // Determinar URL de redirecionamento
+  const redirectParam = req.nextUrl.searchParams.get("redirect");
+  const redirectUrl = (redirectParam && redirectParam !== "/") ? redirectParam : "/dashboard";
+  const fullRedirectUrl = `${req.nextUrl.protocol}//${host}${redirectUrl}`;
+
+  const res = NextResponse.redirect(fullRedirectUrl, { status: 302 });
+
   res.cookies.set("session", token, {
     httpOnly: true,
     secure: !isLocalhost, // true para ngrok e produção, false apenas para localhost
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 dias
-    // Para ngrok, não definir domain para evitar problemas
-    ...(isNgrok ? {} : {})
   });
 
   return res;
