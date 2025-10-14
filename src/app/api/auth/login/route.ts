@@ -1,7 +1,7 @@
 // src/app/api/auth/login/route.ts
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import { SignJWT } from "jose";
 import prisma from "@/lib/prisma";
 import { LoginSchema } from "@/lib/validators";
 
@@ -95,11 +95,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const token = jwt.sign(
-    { sub: String(user.id), email: user.email, name: user.name },
-    secret,
-    { expiresIn: "7d" },
-  );
+  const token = await new SignJWT({
+    sub: String(user.id),
+    email: user.email,
+    name: user.name,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("7d")
+    .sign(new TextEncoder().encode(secret));
 
   // Detectar se é desenvolvimento local (apenas localhost, não ngrok)
   const host = req.headers.get("host") || "";

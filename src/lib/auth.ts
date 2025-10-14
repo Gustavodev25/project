@@ -1,6 +1,6 @@
-import jwt, { JwtPayload } from "jsonwebtoken";
+import { jwtVerify, type JWTPayload } from "jose";
 
-export interface SessionPayload extends JwtPayload {
+export interface SessionPayload extends JWTPayload {
   sub: string;
   email?: string;
   name?: string;
@@ -16,13 +16,14 @@ export function getAuthSecret(): string {
   return secret;
 }
 
-export function tryVerifySessionToken(
+export async function tryVerifySessionToken(
   token: string | undefined,
-): SessionPayload | null {
+): Promise<SessionPayload | null> {
   if (!token) return null;
   try {
-    // Ajuste 'algorithms' se sua emissão usar algo diferente
-    const payload = jwt.verify(token, getAuthSecret()) as JwtPayload;
+    const secret = new TextEncoder().encode(getAuthSecret());
+    const { payload } = await jwtVerify(token, secret);
+
     if (!payload || typeof payload === "string" || !payload.sub) return null;
     return payload as SessionPayload;
   } catch (error) {
@@ -34,14 +35,14 @@ export function tryVerifySessionToken(
   }
 }
 
-export function verifySessionToken(token: string | undefined): SessionPayload {
-  const session = tryVerifySessionToken(token);
+export async function verifySessionToken(token: string | undefined): Promise<SessionPayload> {
+  const session = await tryVerifySessionToken(token);
   if (!session) throw new Error("Sessão inválida ou expirada.");
   return session;
 }
 
-export function assertSessionToken(token: string | undefined): SessionPayload {
-  const session = tryVerifySessionToken(token);
+export async function assertSessionToken(token: string | undefined): Promise<SessionPayload> {
+  const session = await tryVerifySessionToken(token);
   if (!session) throw new Error("Sessão inválida ou expirada.");
   return session;
 }
