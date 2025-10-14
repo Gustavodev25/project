@@ -248,19 +248,31 @@ export function useVendas(platform: string = "Mercado Livre") {
   const loadVendasFromDatabase = async () => {
     try {
       setIsTableLoading(true);
+      console.log("Iniciando carregamento de vendas...");
+
       const res = await fetch("/api/meli/vendas", {
         cache: "no-store",
         credentials: "include"
       });
 
+      console.log("Resposta da API:", res.status, res.statusText);
+
       if (!res.ok) {
-        throw new Error(`Erro ${res.status}`);
+        const errorText = await res.text();
+        console.error("Erro na resposta:", errorText);
+        throw new Error(`Erro ${res.status}: ${errorText}`);
       }
 
       const data = await res.json();
+      console.log("Dados recebidos:", data);
       setVendas(data.vendas || []);
+      console.log("Vendas carregadas:", data.vendas?.length || 0);
     } catch (error) {
       console.error("Erro ao carregar vendas:", error);
+      // Não mostrar erro em dev mode com strict mode (double render)
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        console.warn("Fetch falhou - provavelmente servidor não está rodando ou rota incorreta");
+      }
       setVendas([]);
     } finally {
       setIsTableLoading(false);

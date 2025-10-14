@@ -22,7 +22,11 @@
       "Bash(npm install:*)",
       "Bash(npm run build:*)",
       "Bash(find:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git log:*)",
+      "Bash(git restore:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []
