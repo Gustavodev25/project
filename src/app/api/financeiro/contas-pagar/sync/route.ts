@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     }
 
     // Verificar o token JWT de sessao
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
 
     if (!session) {
       return NextResponse.json(

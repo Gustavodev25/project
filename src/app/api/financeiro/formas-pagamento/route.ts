@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verificar o token JWT de sessão
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     
     if (!session) {
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Verificar o token JWT de sessão
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     
     if (!session) {
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
@@ -105,7 +105,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Verificar o token JWT de sessão
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     
     if (!session) {
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
@@ -179,7 +179,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Verificar o token JWT de sessão
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     
     if (!session) {
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });

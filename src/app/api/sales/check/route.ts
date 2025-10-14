@@ -5,7 +5,7 @@ import prisma from '@/lib/prisma';
 export async function GET(req: NextRequest) {
   try {
     const sessionToken = req.cookies.get('session')?.value;
-    const session = tryVerifySessionToken(sessionToken);
+    const session = await tryVerifySessionToken(sessionToken);
 
     if (!session?.sub) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });

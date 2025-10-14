@@ -6,12 +6,12 @@ import prisma from "@/lib/prisma";
 export async function GET(req: NextRequest) {
   try {
     const sessionCookie = req.cookies.get("session")?.value;
-    
+
     if (!sessionCookie) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
-    
-    const payload = verifySessionToken(sessionCookie);
+
+    const payload = await verifySessionToken(sessionCookie);
 
     const notifications = await prisma.syncNotification.findMany({
       where: {
@@ -38,12 +38,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const sessionCookie = req.cookies.get("session")?.value;
-    
+
     if (!sessionCookie) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
-    
-    const payload = verifySessionToken(sessionCookie);
+
+    const payload = await verifySessionToken(sessionCookie);
 
     const body = await req.json();
     const { notificationId } = body;
@@ -80,12 +80,12 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const sessionCookie = req.cookies.get("session")?.value;
-    
+
     if (!sessionCookie) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
-    
-    const payload = verifySessionToken(sessionCookie);
+
+    const payload = await verifySessionToken(sessionCookie);
 
     await prisma.syncNotification.updateMany({
       where: {

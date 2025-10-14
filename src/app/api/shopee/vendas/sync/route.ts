@@ -151,7 +151,7 @@ async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string;
 
 
 export async function POST(req: NextRequest) {
-  const session = assertSessionToken(req.cookies.get("session")?.value);
+  const session = await assertSessionToken(req.cookies.get("session")?.value);
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {

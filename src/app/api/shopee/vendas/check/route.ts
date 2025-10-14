@@ -5,7 +5,7 @@ import { assertSessionToken } from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const session = assertSessionToken(req.cookies.get("session")?.value);
+  const session = await assertSessionToken(req.cookies.get("session")?.value);
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {

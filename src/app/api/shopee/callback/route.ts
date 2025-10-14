@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
   const clearAuthCookies = (res: NextResponse) => {
     const base = {
       httpOnly: true,
-      sameSite: "lax" as const,      secure: cookieSettings.secure,
+      sameSite: "lax" as const,
+      secure: cookieSettings.secure,
       path: "/",
       maxAge: 0,
       ...(cookieSettings.domain ? { domain: cookieSettings.domain } : {}),
@@ -104,7 +105,7 @@ export async function GET(req: NextRequest) {
     return respondWithText("Missing code/shop_id", 400);
   }
 
-  const session = tryVerifySessionToken(req.cookies.get("session")?.value);
+  const session = await tryVerifySessionToken(req.cookies.get("session")?.value);
   if (!session) {
     if (oauthMode === "popup") {
       return respondWithPopup({ success: false, message: "Sessao expirada. Faca login novamente.", status: 401 });

@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
     
-    const payload = verifySessionToken(sessionCookie);
+    const payload = await verifySessionToken(sessionCookie);
 
     // Buscar ou criar configurações do usuário
     let settings = await prisma.userSettings.findUnique({
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
     
-    const payload = verifySessionToken(sessionCookie);
+    const payload = await verifySessionToken(sessionCookie);
 
     const body = await req.json();
     const { enabled } = body;

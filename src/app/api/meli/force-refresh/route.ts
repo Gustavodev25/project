@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const session = assertSessionToken(req.cookies.get("session")?.value);
+    const session = await assertSessionToken(req.cookies.get("session")?.value);
     if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
     const { accountId } = await req.json();

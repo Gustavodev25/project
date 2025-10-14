@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     // Temporariamente sem autenticação para teste
-    // const session = assertSessionToken(req.cookies.get("session")?.value);
+    // const session = await assertSessionToken(req.cookies.get("session")?.value);
     // if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
     console.log(`[meli][ensure-tokens] Iniciando verificação e renovação de tokens`);
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     // Temporariamente sem autenticação para teste
-    // const session = assertSessionToken(req.cookies.get("session")?.value);
+    // const session = await assertSessionToken(req.cookies.get("session")?.value);
     // if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
     // Listar status atual das contas (sem filtro de usuário para teste)

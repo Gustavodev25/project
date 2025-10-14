@@ -6,18 +6,18 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
-  
+
   if (!sessionCookie) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  const session = verifySessionToken(sessionCookie);
-  
-  if (!session) {
-    return NextResponse.json({ error: "Sessão inválida" }, { status: 401 });
-  }
-
   try {
+    const session = await verifySessionToken(sessionCookie);
+
+    if (!session || !session.sub) {
+      return NextResponse.json({ error: "Sessão inválida" }, { status: 401 });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: session.sub },
       select: { id: true, email: true, name: true },

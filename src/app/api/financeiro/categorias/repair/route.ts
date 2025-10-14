@@ -13,7 +13,7 @@ export async function POST() {
     if (!sessionCookie?.value) {
       return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
     }
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     if (!session) {
       return NextResponse.json({ error: "Sessao invalida ou expirada" }, { status: 401 });
     }

@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(loginUrl, { headers });
   }
 
-  const session = tryVerifySessionToken(req.cookies.get("session")?.value);
+  const session = await tryVerifySessionToken(req.cookies.get("session")?.value);
   if (!session) {
     console.error("Sessão inexistente no callback do MercadoLibre");
     const loginUrl = new URL("/login", req.url);

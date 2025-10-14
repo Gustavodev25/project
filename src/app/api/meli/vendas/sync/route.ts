@@ -859,7 +859,7 @@ export async function POST(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
-    session = assertSessionToken(sessionCookie);
+    session = await assertSessionToken(sessionCookie);
   } catch {
     return new NextResponse("Unauthorized", { status: 401 });
   }

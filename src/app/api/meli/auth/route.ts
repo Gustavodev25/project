@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const { domain, secure } = resolveMeliCookieSettings(req);
 
   const state = crypto.randomUUID();
-  const session = tryVerifySessionToken(req.cookies.get("session")?.value);
+  const session = await tryVerifySessionToken(req.cookies.get("session")?.value);
   if (!session) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }

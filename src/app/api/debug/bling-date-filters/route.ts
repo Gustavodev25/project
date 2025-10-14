@@ -19,7 +19,7 @@ export async function GET(_request: Request) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     if (!session) {
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
     }

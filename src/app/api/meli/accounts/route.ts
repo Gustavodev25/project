@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
   try {
-    const { sub } = assertSessionToken(sessionCookie);
+    const {sub } = await assertSessionToken(sessionCookie);
     const rows = await prisma.meliAccount.findMany({
       where: { userId: sub },
       orderBy: { created_at: "desc" },

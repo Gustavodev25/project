@@ -15,7 +15,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
     }
     
-    const session = verifySessionToken(sessionCookie);
+    const session = await verifySessionToken(sessionCookie);
 
     const body = await request.json();
     const {
@@ -206,7 +206,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
     }
     
-    const session = verifySessionToken(sessionCookie);
+    const session = await verifySessionToken(sessionCookie);
 
     // Verificar se SKU existe
     const existingSku = await prisma.sKU.findFirst({

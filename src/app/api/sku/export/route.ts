@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
     }
     
-    const session = verifySessionToken(sessionCookie);
+    const session = await verifySessionToken(sessionCookie);
 
     const { searchParams } = new URL(request.url);
     const tipo = searchParams.get('tipo') || '';
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
-    const session = verifySessionToken(token);
+    const session = await verifySessionToken(token);
 
     const formData = await request.formData();
     const file = formData.get('file') as File;

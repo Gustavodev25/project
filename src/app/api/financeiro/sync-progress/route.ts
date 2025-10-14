@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       return new Response("Não autenticado", { status: 401 });
     }
 
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
     if (!session) {
       return new Response("Sessão inválida", { status: 401 });
     }

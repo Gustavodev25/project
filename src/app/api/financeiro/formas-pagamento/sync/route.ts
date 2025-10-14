@@ -19,7 +19,7 @@ export async function POST(_request: Request) {
     }
 
     // Verificar o token JWT de sessão
-    const session = tryVerifySessionToken(sessionCookie.value);
+    const session = await tryVerifySessionToken(sessionCookie.value);
 
     if (!session) {
       console.log(`[Sync] Erro: Sessão inválida ou expirada`);

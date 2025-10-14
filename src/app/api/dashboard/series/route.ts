@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
-    session = assertSessionToken(sessionCookie);
+    session = await assertSessionToken(sessionCookie);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
