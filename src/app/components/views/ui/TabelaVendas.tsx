@@ -336,10 +336,10 @@ export default function TabelaVendas({
     const { exposicao } = item.venda;
     const lowerExposicao = exposicao?.toLowerCase();
     if (filtro === "premium") {
-      return lowerExposicao === "premium" || lowerExposicao === "gold_special" || lowerExposicao === "gold_pro";
+      return lowerExposicao === "premium";
     }
     if (filtro === "classico") {
-      return lowerExposicao === "classic" || lowerExposicao === "gold" || lowerExposicao === "free";
+      return lowerExposicao === "clássico";
     }
     return true;
   };
@@ -383,8 +383,7 @@ export default function TabelaVendas({
   // Função para filtrar por Conta
   const filtrarPorConta = (item: ProcessedVenda, contaId: string) => {
     if (contaId === "todas") return true;
-    const vendaContaId = item.venda.raw?.seller?.id?.toString();
-    return vendaContaId === contaId;
+    return item.venda.meliAccountId === contaId;
   };
 
   const vendasFiltradas = useMemo(() => {

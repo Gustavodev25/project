@@ -13,6 +13,7 @@ export interface Venda {
   dataVenda: string; // data - Data da venda
   status: string; // status - Status da venda (paid, cancelled, payment_required)
   conta?: string | null; // conta - Nome da conta ML
+  meliAccountId?: string | null; // ID da conta ML para filtro
   
   // 2. Dados Financeiros
   valorTotal: number; // valor - Valor total da venda

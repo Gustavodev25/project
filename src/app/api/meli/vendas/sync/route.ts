@@ -118,11 +118,17 @@ function convertLogisticTypeName(logisticType: string | null): string | null {
 function mapListingTypeToExposure(listingType: string | null): string | null {
   if (!listingType) return null;
   const normalized = listingType.toLowerCase();
-  // Gold types (including gold_special, gold_pro, gold, etc.) are Premium
-  if (normalized.startsWith("gold")) return "Premium";
-  // Silver types are Clássico
+
+  // gold_pro é Premium
+  if (normalized === "gold_pro") return "Premium";
+
+  // gold_special e outros tipos gold são Clássico
+  if (normalized.startsWith("gold")) return "Clássico";
+
+  // Silver é Clássico
   if (normalized === "silver") return "Clássico";
-  // All other types default to Clássico
+
+  // Outros tipos defaultam para Clássico
   return "Clássico";
 }
 
@@ -697,9 +703,7 @@ async function saveVendaToDatabase(
               shippingId: truncateString(shippingId, 255) || null,
               exposicao: (() => {
                 const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-                if (listingTypeId === "gold_pro") return "Premium";
-                if (listingTypeId === "gold_special") return "Clássico";
-                return null;
+                return mapListingTypeToExposure(listingTypeId);
               })(),
               tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
               ads: internalTags.includes("ads") ? "ADS" : null,
@@ -824,9 +828,7 @@ async function saveVendaToDatabase(
               shippingId: truncateString(shippingId, 255) || null,
               exposicao: (() => {
                 const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-                if (listingTypeId === "gold_pro") return "Premium";
-                if (listingTypeId === "gold_special") return "Clássico";
-                return null;
+                return mapListingTypeToExposure(listingTypeId);
               })(),
               tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
               ads: internalTags.includes("ads") ? "ADS" : null,

@@ -148,6 +148,7 @@ export async function GET(req: NextRequest) {
         dataVenda: venda.dataVenda.toISOString(),
         status: venda.status,
         conta: venda.conta,
+        meliAccountId: venda.meliAccountId,
         valorTotal,
         quantidade: venda.quantidade,
         unitario: Number(venda.unitario),
