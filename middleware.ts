@@ -94,6 +94,7 @@ export async function middleware(request: NextRequest) {
     if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {
       dashboardUrl.protocol = "http:";
     }
+    console.log("🔄 Middleware: Usuário autenticado em rota de auth, redirecionando para dashboard");
     return NextResponse.redirect(dashboardUrl);
   }
 
