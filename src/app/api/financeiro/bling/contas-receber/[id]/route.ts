@@ -6,7 +6,7 @@ import { tryVerifySessionToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get("session");
@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     const isExpired = new Date(blingAccount.expires_at) <= new Date();
     const refreshed = await refreshBlingAccountToken(blingAccount, isExpired);
 
-    const id = params.id;
+    const { id } = await params;
     const url = `${BLING_API_BASE_URL}/contas/receber/${encodeURIComponent(id)}`;
     const resp = await fetch(url, {
       method: "GET",
