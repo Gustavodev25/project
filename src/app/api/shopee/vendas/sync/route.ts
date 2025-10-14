@@ -9,7 +9,7 @@ import {
 } from "@/lib/shopee";
 
 export const runtime = "nodejs";
-export const maxDuration = 600; // 10 minutos de tempo de execução máximo
+export const maxDuration = 300; // 5 minutos de tempo de execução máximo (limite do plano hobby)
 
 // Tipos auxiliares
 type SyncError = { accountId: string; shopId: string; message: string; };
