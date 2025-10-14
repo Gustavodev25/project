@@ -125,7 +125,7 @@ export default function Login() {
       });
 
       if (res.ok && data.ok) {
-        // Login bem-sucedido - redirecionar para dashboard
+        // Login bem-sucedido - atualizar contexto de auth e redirecionar
         console.log("✅ Login bem-sucedido! Redirecionando...");
         toast({
           variant: "success",
@@ -134,11 +134,15 @@ export default function Login() {
           duration: 2000,
         });
 
-        // Pequeno delay para garantir que o cookie seja definido
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Atualizar estado de autenticação
+        await checkAuth();
 
-        console.log("🔄 Tentando redirecionar para /dashboard...");
-        window.location.href = "/dashboard";
+        // Obter URL de redirecionamento ou usar dashboard como padrão
+        const redirectUrl = searchParams.get("redirect") || "/dashboard";
+        console.log("🔄 Redirecionando para:", redirectUrl);
+
+        // Usar window.location para forçar um reload completo e garantir que o middleware processe o cookie
+        window.location.href = redirectUrl;
         return;
       }
 

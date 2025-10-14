@@ -87,15 +87,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(cbUrl);
   }
 
+  // Proteger rotas que precisam de autenticação
   if (protectedRoutes.some((route) => pathname.startsWith(route)) && !isAuthenticated) {
     const loginUrl = new URL("/login", request.url);
     if (loginUrl.hostname === "localhost" || loginUrl.hostname === "127.0.0.1") {
       loginUrl.protocol = "http:";
     }
-    loginUrl.searchParams.set("redirect", `${pathname}${currentUrl.search}`);
+    loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
+  // Redirecionar usuários autenticados que tentam acessar rotas de auth
   if (authRoutes.some((route) => pathname.startsWith(route)) && isAuthenticated) {
     const dashboardUrl = new URL("/dashboard", request.url);
     if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {
@@ -105,21 +107,21 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(dashboardUrl);
   }
 
-  if (pathname === "/" && isAuthenticated) {
-    const dashboardUrl = new URL("/dashboard", request.url);
-    if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {
-      dashboardUrl.protocol = "http:";
+  // Redirecionar root baseado em autenticação
+  if (pathname === "/") {
+    if (isAuthenticated) {
+      const dashboardUrl = new URL("/dashboard", request.url);
+      if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {
+        dashboardUrl.protocol = "http:";
+      }
+      return NextResponse.redirect(dashboardUrl);
+    } else {
+      const loginUrl = new URL("/login", request.url);
+      if (loginUrl.hostname === "localhost" || loginUrl.hostname === "127.0.0.1") {
+        loginUrl.protocol = "http:";
+      }
+      return NextResponse.redirect(loginUrl);
     }
-    return NextResponse.redirect(dashboardUrl);
-  }
-
-  if (pathname === "/" && !isAuthenticated) {
-    const loginUrl = new URL("/login", request.url);
-    if (loginUrl.hostname === "localhost" || loginUrl.hostname === "127.0.0.1") {
-      loginUrl.protocol = "http:";
-    }
-    loginUrl.searchParams.set("redirect", `${currentUrl.pathname}${currentUrl.search}`);
-    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
