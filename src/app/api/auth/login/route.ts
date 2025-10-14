@@ -87,10 +87,10 @@ export async function POST(req: Request) {
   }
 
   // 7) Gera token de sessão (JWT em cookie HttpOnly)
-  const secret = process.env.AUTH_SECRET;
+  const secret = process.env.JWT_SECRET;
   if (!secret) {
     return NextResponse.json(
-      { error: "Faltando AUTH_SECRET no .env" },
+      { error: "Faltando JWT_SECRET no .env" },
       { status: 500 },
     );
   }

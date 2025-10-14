@@ -7,10 +7,10 @@ export interface SessionPayload extends JwtPayload {
 }
 
 export function getAuthSecret(): string {
-  const secret = process.env.AUTH_SECRET;
+  const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error(
-      "AUTH_SECRET não configurado. Defina a variável de ambiente antes de usar autenticação.",
+      "JWT_SECRET não configurado. Defina a variável de ambiente antes de usar autenticação.",
     );
   }
   return secret;
