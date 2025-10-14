@@ -130,11 +130,28 @@ export default function Login() {
       });
 
       // Pequeno delay para garantir que o cookie seja definido
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verificar se a autenticação está funcionando
+      try {
+        const response = await fetch("/api/auth/me", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (response.ok) {
+          console.log("✅ Autenticação verificada com sucesso");
+        } else {
+          console.log("❌ Falha na verificação de autenticação:", response.status);
+        }
+      } catch (error) {
+        console.error("Erro ao verificar autenticação:", error);
+      }
 
       // Redirecionar para a página solicitada ou dashboard
       const redirectParam = searchParams.get("redirect");
       const redirect = (redirectParam && redirectParam !== "/") ? redirectParam : "/dashboard";
+      console.log("🔄 Redirecionando para:", redirect);
       router.replace(redirect);
     } catch (err: unknown) {
       const message =
