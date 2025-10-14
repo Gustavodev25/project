@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Consolidar vendas baseado no filtro de canal
-    let vendas;
+    let vendas: any[];
     if (canalParam === 'mercado_livre') {
       vendas = vendasMeli;
     } else if (canalParam === 'shopee') {

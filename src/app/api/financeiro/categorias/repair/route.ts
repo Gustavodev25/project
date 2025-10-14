@@ -41,7 +41,7 @@ export async function POST() {
     let updated = 0;
     // Atualiza nomes "Categoria" por nomes reais quando houver blingId e no mapa
     const toFix = await prisma.categoria.findMany({
-      where: { userId, OR: [{ nome: "Categoria" }, { nome: null }], blingId: { not: null } },
+      where: { userId, nome: "Categoria", blingId: { not: null } },
       select: { id: true, blingId: true },
     });
     for (const row of toFix) {
