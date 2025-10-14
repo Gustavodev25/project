@@ -137,7 +137,8 @@ export default function Login() {
         // Pequeno delay para garantir que o cookie seja definido
         await new Promise(resolve => setTimeout(resolve, 200));
 
-        router.replace("/dashboard");
+        console.log("🔄 Tentando redirecionar para /dashboard...");
+        window.location.href = "/dashboard";
         return;
       }
 
