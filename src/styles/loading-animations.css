@@ -1,0 +1,85 @@
+/* Loading Screen Animations */
+
+/* Animação da barra de progresso infinita */
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.5s ease-in-out infinite;
+}
+
+/* Animação do cadeado abrindo */
+@keyframes lock-open {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.1) rotate(-5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* Animação do cadeado fechando */
+@keyframes lock-close {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.1) rotate(5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-lock-open {
+  animation: lock-open 0.3s ease-out forwards;
+}
+
+.animate-lock-close {
+  animation: lock-close 0.3s ease-out forwards;
+}
+
+/* Animação slide-down para mensagem informativa */
+@keyframes slide-down {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.6s ease-out forwards;
+}
+
+/* Otimizações de performance para as animações */
+.animate-spin,
+.animate-pulse,
+.animate-bounce,
+.animate-ping,
+.animate-loading-bar,
+.animate-lock-open,
+.animate-lock-close,
+.animate-slide-down {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}

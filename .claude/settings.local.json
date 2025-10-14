@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npx prisma db execute:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout:*)",
+      "Bash(Select-String -Pattern \"(error|Error|generated|success)\" -Context 0,2)",
+      "Bash(npx prisma db push:*)",
+      "Bash(curl http://localhost:3000/api/shopee/accounts -H \"Cookie: session=FAKE_TEST\")",
+      "Bash(Select-String -Pattern \"Generated|generated|error|Error\" -Context 0,1)",
+      "Bash(psql:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(tasklist)",
+      "Bash(Select-String -Pattern \"node.exe\")",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

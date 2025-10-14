@@ -1,0 +1,381 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useSmartDropdown } from "@/hooks/useSmartDropdown";
+import FiltrosDashboard, { FiltroPeriodo } from "./FiltrosDashboard";
+import FiltrosDashboardExtra, { type FiltroCanal, type FiltroStatus, type FiltroTipoAnuncio, type FiltroModalidadeEnvio } from "./FiltrosDashboardExtra";
+import FiltroSKU, { type FiltroAgrupamentoSKU } from "./FiltroSKU";
+
+interface HeaderDashboardProps {
+  periodoAtivo: FiltroPeriodo;
+  onPeriodoChange: (periodo: FiltroPeriodo) => void;
+  onPeriodoPersonalizadoChange?: (dataInicio: Date, dataFim: Date) => void;
+  canalAtivo: FiltroCanal;
+  onCanalChange: (v: FiltroCanal) => void;
+  statusAtivo: FiltroStatus;
+  onStatusChange: (v: FiltroStatus) => void;
+  tipoAnuncioAtivo: FiltroTipoAnuncio;
+  onTipoAnuncioChange: (v: FiltroTipoAnuncio) => void;
+  modalidadeEnvioAtiva: FiltroModalidadeEnvio;
+  onModalidadeEnvioChange: (v: FiltroModalidadeEnvio) => void;
+  agrupamentoSKUAtivo: FiltroAgrupamentoSKU;
+  onAgrupamentoSKUChange: (v: FiltroAgrupamentoSKU) => void;
+  onForceRefresh: () => void;
+}
+
+export default function HeaderDashboard({
+  periodoAtivo,
+  onPeriodoChange,
+  onPeriodoPersonalizadoChange,
+  canalAtivo,
+  onCanalChange,
+  statusAtivo,
+  onStatusChange,
+  tipoAnuncioAtivo,
+  onTipoAnuncioChange,
+  modalidadeEnvioAtiva,
+  onModalidadeEnvioChange,
+  agrupamentoSKUAtivo,
+  onAgrupamentoSKUChange,
+  onForceRefresh,
+}: HeaderDashboardProps) {
+  const router = useRouter();
+  const [showSyncDropdown, setShowSyncDropdown] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [checkMessage, setCheckMessage] = useState<string | null>(null);
+  const [selectedPlatform, setSelectedPlatform] = useState<'todos' | 'mercado_livre' | 'shopee'>('todos');
+  const syncDropdown = useSmartDropdown<HTMLButtonElement>({
+    isOpen: showSyncDropdown,
+    onClose: () => setShowSyncDropdown(false),
+    preferredPosition: 'bottom-right',
+    offset: 8,
+    minDistanceFromEdge: 16
+  });
+
+  const [showContasDropdown, setShowContasDropdown] = useState(false);
+  const contasDropdown = useSmartDropdown<HTMLButtonElement>({
+    isOpen: showContasDropdown,
+    onClose: () => setShowContasDropdown(false),
+    preferredPosition: 'bottom-right',
+    offset: 8,
+    minDistanceFromEdge: 16
+  });
+  const [contasML, setContasML] = useState<Array<{ id: string; nickname: string | null; ml_user_id: number; expires_at: string }>>([]);
+  const [contasShopee, setContasShopee] = useState<Array<{ id: string; shop_id: string; shop_name: string | null; expires_at: string }>>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
+
+  useEffect(() => {
+    if (!showContasDropdown) return;
+    let aborted = false;
+    const load = async () => {
+      try {
+        setIsLoadingAccounts(true);
+        
+        // Carregar contas do Mercado Livre
+        const resML = await fetch('/api/meli/accounts', { cache: 'no-store', credentials: 'include' });
+        if (resML.ok) {
+          const rowsML = await resML.json();
+          if (!aborted) setContasML(rowsML || []);
+        }
+        
+        // Carregar contas do Shopee
+        const resShopee = await fetch('/api/shopee/accounts', { cache: 'no-store', credentials: 'include' });
+        if (resShopee.ok) {
+          const rowsShopee = await resShopee.json();
+          if (!aborted) setContasShopee(rowsShopee || []);
+        }
+      } catch {
+        if (!aborted) {
+          setContasML([]);
+          setContasShopee([]);
+        }
+      } finally {
+        if (!aborted) setIsLoadingAccounts(false);
+      }
+    };
+    load();
+    return () => { aborted = true; };
+  }, [showContasDropdown]);
+
+  const handleCheckNew = async () => {
+    try {
+      setCheckMessage(null);
+      setIsSyncing(true);
+
+      let message = '';
+      let totalNew = 0;
+
+      // Verificar Mercado Livre
+      if (selectedPlatform === 'todos' || selectedPlatform === 'mercado_livre') {
+        const resMeli = await fetch('/api/meli/vendas/check', { cache: 'no-store', credentials: 'include' });
+        if (resMeli.ok) {
+          const dataMeli = await resMeli.json();
+          const countMeli = dataMeli?.totals?.new || 0;
+          totalNew += countMeli;
+          if (countMeli > 0) {
+            message += `Mercado Livre: ${countMeli} nova(s)\n`;
+          }
+        }
+      }
+
+      // Verificar Shopee
+      if (selectedPlatform === 'todos' || selectedPlatform === 'shopee') {
+        const resShopee = await fetch('/api/shopee/vendas/check', { cache: 'no-store', credentials: 'include' });
+        if (resShopee.ok) {
+          const dataShopee = await resShopee.json();
+          const countShopee = dataShopee?.totals?.new || 0;
+          totalNew += countShopee;
+          if (countShopee > 0) {
+            message += `Shopee: ${countShopee} nova(s)\n`;
+          }
+        }
+      }
+
+      setCheckMessage(totalNew === 0 ? 'Nenhuma venda nova encontrada' : message.trim());
+    } catch (e) {
+      setCheckMessage('Erro ao verificar novas vendas');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    try {
+      setIsSyncing(true);
+
+      // Sincronizar Mercado Livre
+      if (selectedPlatform === 'todos' || selectedPlatform === 'mercado_livre') {
+        const resMeli = await fetch('/api/meli/vendas/sync', { method: 'POST', cache: 'no-store', credentials: 'include' });
+        if (!resMeli.ok) throw new Error(`HTTP ${resMeli.status}`);
+        await resMeli.json();
+      }
+
+      // Sincronizar Shopee
+      if (selectedPlatform === 'todos' || selectedPlatform === 'shopee') {
+        const resShopee = await fetch('/api/shopee/vendas/sync', { method: 'POST', cache: 'no-store', credentials: 'include' });
+        if (!resShopee.ok) throw new Error(`HTTP ${resShopee.status}`);
+        await resShopee.json();
+      }
+
+      onForceRefresh();
+      setShowSyncDropdown(false);
+    } catch (e) {
+      // ignore
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center justify-between">
+        <div className="text-left">
+          <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Visão geral das estatísticas e métricas do negócio.
+          </p>
+        </div>
+        
+        {/* Filtros, Sync e Contas */}
+        <div className="flex items-center gap-4">
+          {/* Filtro de Agrupamento por SKU */}
+          <FiltroSKU
+            agrupamentoAtivo={agrupamentoSKUAtivo}
+            onAgrupamentoChange={onAgrupamentoSKUChange}
+          />
+          
+          <FiltrosDashboardExtra 
+            canalAtivo={canalAtivo}
+            onCanalChange={onCanalChange}
+            statusAtivo={statusAtivo}
+            onStatusChange={onStatusChange}
+            tipoAnuncioAtivo={tipoAnuncioAtivo}
+            onTipoAnuncioChange={onTipoAnuncioChange}
+            modalidadeEnvioAtiva={modalidadeEnvioAtiva}
+            onModalidadeEnvioChange={onModalidadeEnvioChange}
+          />
+          <FiltrosDashboard
+            periodoAtivo={periodoAtivo}
+            onPeriodoChange={onPeriodoChange}
+            onPeriodoPersonalizadoChange={onPeriodoPersonalizadoChange}
+          />
+
+          {/* Sync Dropdown */}
+          <div className="relative">
+            <button
+              ref={syncDropdown.triggerRef}
+              onClick={() => setShowSyncDropdown(!showSyncDropdown)}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-all duration-200 ${
+                showSyncDropdown 
+                  ? "border-gray-400 bg-gray-50 text-gray-900" 
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+              }`}
+              disabled={isSyncing}
+            >
+              {isSyncing ? (
+                <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-300 border-t-gray-700"></div>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 1 10 7 10" />
+                  <polyline points="23 20 23 14 17 14" />
+                  <path d="M20.49 9A9 9 0 0 0 6.86 5.64L1 10m22 4l-5.86 4.36A9 9 0 0 1 3.51 15" />
+                </svg>
+              )}
+              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar'}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showSyncDropdown ? 'rotate-180' : ''}`}>
+                <polyline points="6,9 12,15 18,9"/>
+              </svg>
+            </button>
+            {syncDropdown.isVisible && (
+              <div 
+                ref={syncDropdown.dropdownRef}
+                className={`smart-dropdown w-72 ${syncDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
+                style={syncDropdown.position}
+              >
+                <div className="p-3 space-y-3">
+                  {/* Seletor de Plataforma */}
+                  <div>
+                    <label className="text-[11px] font-medium text-gray-700 mb-1.5 block">Plataforma</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        onClick={() => setSelectedPlatform('todos')}
+                        className={`px-2 py-1.5 text-[10px] font-medium rounded transition-colors ${
+                          selectedPlatform === 'todos'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        onClick={() => setSelectedPlatform('mercado_livre')}
+                        className={`px-2 py-1.5 text-[10px] font-medium rounded transition-colors ${
+                          selectedPlatform === 'mercado_livre'
+                            ? 'bg-yellow-400 text-gray-900'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Meli
+                      </button>
+                      <button
+                        onClick={() => setSelectedPlatform('shopee')}
+                        className={`px-2 py-1.5 text-[10px] font-medium rounded transition-colors ${
+                          selectedPlatform === 'shopee'
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Shopee
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Botões de Ação */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleCheckNew}
+                      className="w-full inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                      </svg>
+                      <span>Verificar novas vendas</span>
+                    </button>
+                    <button
+                      onClick={handleSyncNow}
+                      className="w-full inline-flex items-center gap-2 rounded-md border border-orange-500 bg-orange-500 px-3 py-2 text-xs font-medium text-white hover:bg-orange-600 transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20,6 9,17 4,12"/>
+                      </svg>
+                      <span>Sincronizar novas vendas</span>
+                    </button>
+                  </div>
+
+                  {/* Mensagem de Resultado */}
+                  {checkMessage && (
+                    <div className="text-[11px] text-gray-600 bg-gray-50 p-2 rounded-md whitespace-pre-line">{checkMessage}</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Contas Dropdown */}
+          <div className="relative">
+            <button
+              ref={contasDropdown.triggerRef}
+              onClick={() => setShowContasDropdown(!showContasDropdown)}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-all duration-200 ${
+                showContasDropdown 
+                  ? "border-gray-400 bg-gray-50 text-gray-900" 
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>Contas</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showContasDropdown ? 'rotate-180' : ''}`}>
+                <polyline points="6,9 12,15 18,9"/>
+              </svg>
+            </button>
+            {contasDropdown.isVisible && (
+              <div 
+                ref={contasDropdown.dropdownRef}
+                className={`smart-dropdown w-80 ${contasDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
+                style={contasDropdown.position}
+              >
+                <div className="p-3 space-y-3">
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-900 mb-2">Mercado Livre</h3>
+                    {isLoadingAccounts ? (
+                      <div className="text-xs text-gray-600">Carregando...</div>
+                    ) : contasML.length === 0 ? (
+                      <div className="text-xs text-gray-600">Nenhuma conta conectada</div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {contasML.map((c) => (
+                          <li key={c.id} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-gray-50">
+                            <span className="text-gray-800">{c.nickname || `Usuário ${c.ml_user_id}`}</span>
+                            <span className={`px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                              {new Date(c.expires_at).getTime() > Date.now() ? 'Ativa' : 'Inativa'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-900 mb-2">Shopee</h3>
+                    {isLoadingAccounts ? (
+                      <div className="text-xs text-gray-600">Carregando...</div>
+                    ) : contasShopee.length === 0 ? (
+                      <div className="text-xs text-gray-600">Nenhuma conta conectada</div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {contasShopee.map((c) => (
+                          <li key={c.id} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-gray-50">
+                            <span className="text-gray-800">{c.shop_name || `Shop ${c.shop_id}`}</span>
+                            <span className={`px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                              {new Date(c.expires_at).getTime() > Date.now() ? 'Ativa' : 'Inativa'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

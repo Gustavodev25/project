@@ -1,0 +1,149 @@
+/**
+ * Estilos para exibição do frete
+ * Implementa as cores conforme a lógica do sistema Contazoom
+ */
+
+/* Frete Positivo - Custo para o vendedor (vermelho) */
+.frete-positivo {
+  color: #c0392b;
+  font-weight: 500;
+}
+
+/* Frete Negativo - Economia para o vendedor (verde) */
+.frete-negativo {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+/* Frete Neutro - Sem custo (cinza) */
+.frete-neutro {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+/* Animações para destacar valores importantes */
+.frete-positivo:hover {
+  color: #a93226;
+  transition: color 0.2s ease;
+}
+
+.frete-negativo:hover {
+  color: #1e8449;
+  transition: color 0.2s ease;
+}
+
+/* Estilos para tooltips de frete */
+.frete-tooltip {
+  position: relative;
+  cursor: help;
+}
+
+.frete-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+}
+
+.frete-tooltip:hover::after {
+  opacity: 1;
+}
+
+/* Estilos para badges de tipo de logística */
+.logistic-type-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.logistic-type-badge.flex {
+  background-color: #fef3cd;
+  color: #856404;
+}
+
+.logistic-type-badge.correios {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.logistic-type-badge.agencia {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.logistic-type-badge.full {
+  background-color: #e2e3e5;
+  color: #383d41;
+}
+
+.logistic-type-badge.coleta {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+/* Estilos para detalhes do frete em modais */
+.frete-details {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0;
+}
+
+.frete-details h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.frete-details .detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.frete-details .detail-row:last-child {
+  border-bottom: none;
+}
+
+.frete-details .detail-label {
+  font-size: 12px;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+.frete-details .detail-value {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+  .frete-tooltip::after {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+  
+  .logistic-type-badge {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
+}
