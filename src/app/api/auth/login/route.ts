@@ -116,5 +116,13 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 7, // 7 dias
   });
 
+  console.log("🍪 Cookie definido:", {
+    hasToken: !!token,
+    secure: !isLocalhost,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7
+  });
+
   return res;
 }

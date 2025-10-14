@@ -12,6 +12,13 @@ export async function middleware(request: NextRequest) {
   const session = tryVerifySessionToken(sessionCookie);
   const isAuthenticated = Boolean(session);
 
+  console.log("🔍 Middleware Debug:", {
+    pathname,
+    hasSessionCookie: !!sessionCookie,
+    isAuthenticated,
+    session: session ? { sub: session.sub, email: session.email } : null
+  });
+
   if (currentUrl.searchParams.get("connect") === "shopee") {
     if (!isAuthenticated) {
       const loginUrl = new URL("/login", request.url);
