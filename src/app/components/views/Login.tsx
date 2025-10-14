@@ -113,16 +113,32 @@ export default function Login() {
         headers: { "Content-Type": "application/json" },
         credentials: "include", // Importante para incluir cookies
         body: JSON.stringify({ email: normalizedEmail, senha }),
+        redirect: "manual", // Não seguir redirecionamentos automaticamente
       });
 
+      if (res.status === 302) {
+        // Login bem-sucedido - redirecionar para dashboard
+        toast({
+          variant: "success",
+          title: "Bem-vindo!",
+          description: "Login realizado com sucesso.",
+          duration: 2000,
+        });
+
+        // Pequeno delay para garantir que o cookie seja definido
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        router.replace("/dashboard");
+        return;
+      }
+
+      // Se não for redirecionamento, tentar parsear como JSON de erro
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const msg = data?.error || "Falha no login";
         toast({ variant: "error", title: "Erro no login", description: msg });
         return;
       }
-
-      // Login bem-sucedido - a API fará o redirecionamento automático
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Erro inesperado no login.";

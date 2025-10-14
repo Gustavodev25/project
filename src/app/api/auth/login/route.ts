@@ -106,12 +106,7 @@ export async function POST(req: Request) {
   const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
   const isNgrok = host.includes("ngrok");
 
-  // Determinar URL de redirecionamento
-  const redirectParam = req.nextUrl.searchParams.get("redirect");
-  const redirectUrl = (redirectParam && redirectParam !== "/") ? redirectParam : "/dashboard";
-  const fullRedirectUrl = `${req.nextUrl.protocol}//${host}${redirectUrl}`;
-
-  const res = NextResponse.redirect(fullRedirectUrl, { status: 302 });
+  const res = NextResponse.json({ ok: true }, { status: 200 });
 
   res.cookies.set("session", token, {
     httpOnly: true,
