@@ -8,7 +8,7 @@ Sistema de gestão de vendas e finanças para marketplaces (Mercado Livre, Shope
 - **TypeScript** - Tipagem estática
 - **Prisma** - ORM para PostgreSQL
 - **PostgreSQL** - Banco de dados principal
-- **NextAuth** - Autenticação
+- **JWT Custom** - Autenticação
 - **Tailwind CSS** - Estilização
 
 ## 📋 Funcionalidades
@@ -32,9 +32,8 @@ Sistema de gestão de vendas e finanças para marketplaces (Mercado Livre, Shope
 # Database
 DATABASE_URL="postgresql://username:password@hostname:port/database"
 
-# NextAuth
-NEXTAUTH_SECRET="your-secret-key"
-NEXTAUTH_URL="https://your-domain.com"
+# JWT Authentication
+JWT_SECRET="your-jwt-secret-key"
 
 # Mercado Livre API
 MELI_CLIENT_ID="your-client-id"

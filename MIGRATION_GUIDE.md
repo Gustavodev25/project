@@ -38,9 +38,8 @@ Crie um arquivo `.env.local` na raiz do projeto:
 # Database - Substitua pela URL do Render
 DATABASE_URL="postgresql://username:password@hostname:port/database"
 
-# NextAuth
-NEXTAUTH_SECRET="sua-chave-secreta-aqui"
-NEXTAUTH_URL="http://localhost:3000"
+# JWT Authentication
+JWT_SECRET="sua-chave-jwt-secreta-aqui"
 
 # APIs (configure conforme necessário)
 MELI_CLIENT_ID="seu-client-id"
@@ -100,7 +99,7 @@ Acesse `http://localhost:3000` e verifique se tudo funciona.
 No dashboard do seu Web Service:
 
 - `DATABASE_URL`: URL do PostgreSQL
-- `NEXTAUTH_SECRET`: Chave secreta forte
+- `JWT_SECRET`: Chave secreta forte para JWT
 - `NEXTAUTH_URL`: URL de produção
 - Outras variáveis conforme necessário
 
