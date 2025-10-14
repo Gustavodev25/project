@@ -128,16 +128,10 @@ export default function Login() {
         description: "Login realizado com sucesso.",
         duration: 2000,
       });
-      
+
       // Pequeno delay para garantir que o cookie seja definido
       await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Atualizar o contexto de autenticação
-      await checkAuth();
-      
-      // Aguardar um pouco mais para garantir que o estado foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       // Redirecionar para a página solicitada ou dashboard
       const redirect = searchParams.get("redirect") || "/dashboard";
       router.replace(redirect);
