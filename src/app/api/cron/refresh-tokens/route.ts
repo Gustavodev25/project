@@ -68,9 +68,9 @@ export async function POST(req: NextRequest) {
               userId: account.userId,
               platform: 'Mercado Livre',
               accountId: account.id,
-              accountName: account.ml_user_id || 'Conta ML',
+              accountName: String(account.ml_user_id) || 'Conta ML',
               action: 'reactivated',
-              message: createTokenRefreshMessage('Mercado Livre', account.ml_user_id || 'Conta ML', 'reactivated'),
+              message: createTokenRefreshMessage('Mercado Livre', String(account.ml_user_id) || 'Conta ML', 'reactivated'),
             });
           } else if (needsPreventiveRefresh) {
             results.meliPreventive++;
@@ -81,9 +81,9 @@ export async function POST(req: NextRequest) {
               userId: account.userId,
               platform: 'Mercado Livre',
               accountId: account.id,
-              accountName: account.ml_user_id || 'Conta ML',
+              accountName: String(account.ml_user_id) || 'Conta ML',
               action: 'preventive',
-              message: createTokenRefreshMessage('Mercado Livre', account.ml_user_id || 'Conta ML', 'preventive'),
+              message: createTokenRefreshMessage('Mercado Livre', String(account.ml_user_id) || 'Conta ML', 'preventive'),
             });
           }
         }
