@@ -247,20 +247,23 @@ export function useVendas(platform: string = "Mercado Livre") {
 
   const loadVendasFromDatabase = async () => {
     try {
-      const res = await fetch("/api/meli/vendas", { 
+      setIsTableLoading(true);
+      const res = await fetch("/api/meli/vendas", {
         cache: "no-store",
         credentials: "include"
       });
-      
+
       if (!res.ok) {
         throw new Error(`Erro ${res.status}`);
       }
-      
+
       const data = await res.json();
       setVendas(data.vendas || []);
     } catch (error) {
       console.error("Erro ao carregar vendas:", error);
       setVendas([]);
+    } finally {
+      setIsTableLoading(false);
     }
   };
 
