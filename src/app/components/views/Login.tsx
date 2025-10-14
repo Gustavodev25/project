@@ -118,8 +118,15 @@ export default function Login() {
       // Primeiro tentar parsear a resposta como JSON
       const data = await res.json().catch(() => ({}));
 
+      console.log("🔍 Resposta do login:", {
+        status: res.status,
+        ok: res.ok,
+        data: data
+      });
+
       if (res.ok && data.ok) {
         // Login bem-sucedido - redirecionar para dashboard
+        console.log("✅ Login bem-sucedido! Redirecionando...");
         toast({
           variant: "success",
           title: "Bem-vindo!",
@@ -135,6 +142,7 @@ export default function Login() {
       }
 
       // Se não foi sucesso, mostrar erro
+      console.log("❌ Login falhou:", data);
       const msg = data?.error || "Falha no login";
       toast({ variant: "error", title: "Erro no login", description: msg });
       return;
