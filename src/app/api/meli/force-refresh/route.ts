@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
-import { smartRefreshMeliAccountToken, clearAccountInvalidMark } from "@/lib/meli";
+import { smartRefreshMeliAccountToken } from "@/lib/meli";
+import { clearAccountInvalidMark } from "@/lib/account-status";
 
 export const runtime = "nodejs";
 
