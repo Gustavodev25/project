@@ -237,8 +237,24 @@ export function useVendas(platform: string = "Mercado Livre") {
   const loadContasConectadas = async () => {
     try {
       setIsLoadingAccounts(true);
-      console.log("Carregando contas conectadas...");
-      const res = await fetch("/api/meli/accounts", { 
+      console.log(`[useVendas] Carregando contas conectadas para plataforma: ${platform}`);
+      
+      // Determinar a URL da API baseada na plataforma
+      let apiUrl = "";
+      
+      if (platform === "Mercado Livre") {
+        apiUrl = "/api/meli/accounts";
+      } else if (platform === "Shopee") {
+        apiUrl = "/api/shopee/accounts";
+      } else if (platform === "Geral") {
+        // Para "Geral", pode retornar vazio ou combinar ambas (não implementado ainda)
+        setContasConectadas([]);
+        return;
+      }
+
+      console.log(`[useVendas] Chamando API de contas: ${apiUrl}`);
+      
+      const res = await fetch(apiUrl, { 
         cache: "no-store",
         credentials: "include"
       });
@@ -248,13 +264,13 @@ export function useVendas(platform: string = "Mercado Livre") {
       }
       
       const data = await res.json();
-      console.log("Dados recebidos da API:", data);
+      console.log(`[useVendas] Dados de contas recebidos de ${apiUrl}:`, data);
       // A API retorna diretamente o array de contas, não um objeto com propriedade accounts
       const contas = Array.isArray(data) ? data : [];
-      console.log("Contas processadas:", contas);
+      console.log(`[useVendas] Contas processadas (${platform}):`, contas);
       setContasConectadas(contas);
     } catch (error) {
-      console.error("Erro ao carregar contas:", error);
+      console.error(`[useVendas] Erro ao carregar contas (${platform}):`, error);
       setContasConectadas([]);
     } finally {
       setIsLoadingAccounts(false);
@@ -264,30 +280,41 @@ export function useVendas(platform: string = "Mercado Livre") {
   const loadVendasFromDatabase = async () => {
     try {
       setIsTableLoading(true);
-      console.log("Iniciando carregamento de vendas...");
+      console.log(`[useVendas] Iniciando carregamento de vendas para plataforma: ${platform}`);
 
-      const res = await fetch("/api/meli/vendas", {
+      // Determinar a URL da API baseada na plataforma
+      let apiUrl = "/api/vendas"; // Default para "Geral"
+      
+      if (platform === "Mercado Livre") {
+        apiUrl = "/api/meli/vendas";
+      } else if (platform === "Shopee") {
+        apiUrl = "/api/shopee/vendas";
+      }
+
+      console.log(`[useVendas] Chamando API: ${apiUrl}`);
+
+      const res = await fetch(apiUrl, {
         cache: "no-store",
         credentials: "include"
       });
 
-      console.log("Resposta da API:", res.status, res.statusText);
+      console.log(`[useVendas] Resposta da API ${apiUrl}:`, res.status, res.statusText);
 
       if (!res.ok) {
         const errorText = await res.text();
-        console.error("Erro na resposta:", errorText);
+        console.error(`[useVendas] Erro na resposta de ${apiUrl}:`, errorText);
         throw new Error(`Erro ${res.status}: ${errorText}`);
       }
 
       const data = await res.json();
-      console.log("Dados recebidos:", data);
+      console.log(`[useVendas] Dados recebidos de ${apiUrl}:`, data);
       setVendas(data.vendas || []);
-      console.log("Vendas carregadas:", data.vendas?.length || 0);
+      console.log(`[useVendas] Vendas carregadas (${platform}):`, data.vendas?.length || 0);
     } catch (error) {
-      console.error("Erro ao carregar vendas:", error);
+      console.error(`[useVendas] Erro ao carregar vendas (${platform}):`, error);
       // Não mostrar erro em dev mode com strict mode (double render)
       if (error instanceof TypeError && error.message === "Failed to fetch") {
-        console.warn("Fetch falhou - provavelmente servidor não está rodando ou rota incorreta");
+        console.warn("[useVendas] Fetch falhou - provavelmente servidor não está rodando ou rota incorreta");
       }
       setVendas([]);
     } finally {
