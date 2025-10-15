@@ -60,6 +60,7 @@ export default function Dashboard() {
   const [modalidadeEnvioAtiva, setModalidadeEnvioAtiva] = useState<FiltroModalidadeEnvio>("todos");
   const [agrupamentoSKUAtivo, setAgrupamentoSKUAtivo] = useState<FiltroAgrupamentoSKU>("mlb");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedAccount, setSelectedAccount] = useState<{ platform: 'meli' | 'shopee' | 'todos'; id?: string; label?: string }>({ platform: 'todos' });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -214,6 +215,15 @@ export default function Dashboard() {
             agrupamentoSKUAtivo={agrupamentoSKUAtivo}
             onAgrupamentoSKUChange={setAgrupamentoSKUAtivo}
             onForceRefresh={() => setRefreshKey((v) => v + 1)}
+            selectedAccount={selectedAccount}
+            onAccountChange={(acc) => {
+              setSelectedAccount(acc);
+              // Ajusta canal automaticamente ao escolher plataforma específica
+              if (acc.platform === 'meli') setCanalAtivo('mercado_livre');
+              else if (acc.platform === 'shopee') setCanalAtivo('shopee');
+              else setCanalAtivo('todos');
+              setRefreshKey((v) => v + 1);
+            }}
           />
           <DashboardStats
             periodoAtivo={periodoAtivo}
@@ -225,6 +235,7 @@ export default function Dashboard() {
             modalidadeEnvioAtiva={modalidadeEnvioAtiva}
             agrupamentoSKUAtivo={agrupamentoSKUAtivo}
             refreshKey={refreshKey}
+            selectedAccount={selectedAccount}
           />
           
           {/* Gráfico de Período */}
@@ -240,6 +251,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
           </div>
@@ -287,6 +299,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
             <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
@@ -300,6 +313,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
           </div>
@@ -317,6 +331,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
           </div>

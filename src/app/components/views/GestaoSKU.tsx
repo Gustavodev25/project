@@ -235,7 +235,8 @@ export default function GestaoSKU() {
 
   // Handlers da tabela
   const handleEditSKU = async (sku: SKU) => {
-    console.log('Editar SKU:', sku);
+    console.log('SKU editado, recarregando lista:', sku);
+    await loadSKUs(); // Recarregar a lista após edição
   };
 
   const handleCreateSKU = async (payload: CreateSKUInput) => {
@@ -267,14 +268,36 @@ export default function GestaoSKU() {
       if (!response.ok) {
         const error = await response.json().catch(() => null);
         console.error('Erro da API:', error);
-        throw new Error(error?.error ?? 'Não foi possível criar o SKU');
+        const errorMessage = error?.error ?? 'Não foi possível criar o SKU';
+        toast({
+          variant: "error",
+          title: "Erro ao criar SKU",
+          description: errorMessage,
+        });
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
       console.log('SKU criado com sucesso:', result);
+      
+      toast({
+        variant: "success",
+        title: "SKU criado com sucesso",
+        description: `SKU ${payload.sku} foi adicionado à sua lista`,
+      });
+      
       await loadSKUs();
     } catch (error) {
       console.error('Erro ao criar SKU:', error);
+      // Não lançar o erro novamente para evitar toast duplicado
+      // O toast já foi exibido acima
+      if (error instanceof Error && !error.message.includes('possível criar')) {
+        toast({
+          variant: "error",
+          title: "Erro ao criar SKU",
+          description: error.message,
+        });
+      }
       throw error;
     }
   };
@@ -358,8 +381,14 @@ export default function GestaoSKU() {
       );
       
       await Promise.all(promises);
-      await loadSKUs();
+      await loadSKUs(); // Recarregar lista após atualização
       setSelectedSKUs([]);
+      
+      toast({
+        variant: "success",
+        title: "Status atualizado",
+        description: `${skuIds.length} SKU(s) ${ativo ? 'ativado(s)' : 'inativado(s)'} com sucesso`,
+      });
     } catch (error) {
       console.error('Erro ao atualizar status:', error);
       toast({

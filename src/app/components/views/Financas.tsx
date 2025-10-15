@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import React, { useRef, useEffect, useLayoutEffect, useState } from "react";
 import gsap from "gsap";
 import Sidebar from "./ui/Sidebar";
 import Topbar from "./ui/Topbar";
@@ -219,6 +219,7 @@ export default function Financas() {
     categoriaId: "",
     formaPagamentoId: "",
     tipo: "",
+    categoriaPaiId: "",
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -625,6 +626,7 @@ export default function Financas() {
       categoriaId: "",
       formaPagamentoId: "",
       tipo: "",
+      categoriaPaiId: "",
     });
     setIsModalOpen(true);
   };
@@ -690,6 +692,7 @@ export default function Financas() {
           body = {
             descricao: formData.descricao,
             tipo: formData.tipo,
+            categoriaPaiId: formData.categoriaPaiId || undefined,
           };
           break;
         case "formas_pagamento":
@@ -795,6 +798,7 @@ export default function Financas() {
           body = {
             descricao: data.descricao,
             tipo: data.tipo,
+            categoriaPaiId: data.categoriaPaiId || undefined,
           };
           break;
         case "formas_pagamento":
@@ -973,6 +977,13 @@ export default function Financas() {
               { value: "RECEITA", label: "Receita" },
               { value: "DESPESA", label: "Despesa" }
             ]
+          },
+          { 
+            name: "categoriaPaiId", 
+            label: "Categoria Pai (opcional)", 
+            type: "select" as const, 
+            required: false,
+            options: categorias.filter(cat => !cat.categoriaPaiId).map(cat => ({ value: cat.id, label: cat.descricao || cat.nome }))
           },
         ];
       case "formas_pagamento":
@@ -1205,6 +1216,27 @@ export default function Financas() {
               </select>
             </div>
 
+            <div>
+              <label htmlFor="categoriaPaiId" className="block text-sm font-medium text-gray-700 mb-1">
+                Categoria Pai (Opcional)
+              </label>
+              <select
+                id="categoriaPaiId"
+                name="categoriaPaiId"
+                value={formData.categoriaPaiId}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-gray-900"
+              >
+                <option value="">Nenhuma (Categoria Principal)</option>
+                {categorias.filter(cat => !cat.categoriaPaiId).map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.descricao || cat.nome}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Deixe vazio para criar uma categoria principal. Selecione uma categoria para criar uma subcategoria.</p>
+            </div>
+
             <div className="flex gap-3 pt-4">
               <button
                 type="button"
@@ -1432,38 +1464,91 @@ export default function Financas() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {categorias.map((cat) => (
-                        <tr key={cat.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cat.descricao || cat.nome}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cat.tipo}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${cat.ativo ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                              {cat.ativo ? "Ativo" : "Inativo"}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex items-center space-x-2">
-                              <button
-                                onClick={() => handleEdit(cat)}
-                                className="text-orange-600 hover:text-orange-900 transition-colors"
-                                title="Editar"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => handleDelete(cat)}
-                                className="text-red-600 hover:text-red-900 transition-colors"
-                                title="Excluir"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                      {categorias.filter(cat => !cat.categoriaPaiId).map((cat) => (
+                        <React.Fragment key={cat.id}>
+                          <tr className={cat.categoriaPaiId ? "bg-gray-50" : ""}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {cat.categoriaPaiId ? (
+                                <span className="flex items-center">
+                                  <svg className="w-4 h-4 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                  {cat.descricao || cat.nome}
+                                </span>
+                              ) : (
+                                <span className="font-semibold">{cat.descricao || cat.nome}</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cat.tipo}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${cat.ativo ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                                {cat.ativo ? "Ativo" : "Inativo"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  onClick={() => handleEdit(cat)}
+                                  className="text-orange-600 hover:text-orange-900 transition-colors"
+                                  title="Editar"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(cat)}
+                                  className="text-red-600 hover:text-red-900 transition-colors"
+                                  title="Excluir"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {cat.subCategorias && cat.subCategorias.map((subCat: any) => (
+                            <tr key={subCat.id} className="bg-blue-50">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <span className="flex items-center pl-8">
+                                  <svg className="w-4 h-4 text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                  </svg>
+                                  {subCat.descricao || subCat.nome}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{subCat.tipo}</td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${subCat.ativo ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                                  {subCat.ativo ? "Ativo" : "Inativo"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => handleEdit(subCat)}
+                                    className="text-orange-600 hover:text-orange-900 transition-colors"
+                                    title="Editar"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(subCat)}
+                                    className="text-red-600 hover:text-red-900 transition-colors"
+                                    title="Excluir"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>

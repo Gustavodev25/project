@@ -24,6 +24,7 @@ const LABEL_MAP: Record<string, string> = {
   dashboardfinanceiro: "Dashboard Financeiro",
   financas: "Finanças",
   dre: "DRE",
+  aliquotas: "Alíquotas de Impostos",
 };
 
 function toLabel(slug: string) {

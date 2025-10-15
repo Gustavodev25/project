@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     const userId = session.sub;
     const body = await request.json();
-    const { descricao, tipo } = body;
+    const { descricao, tipo, categoriaPaiId } = body;
 
     if (!descricao || !tipo) {
       return NextResponse.json(
@@ -32,12 +32,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Se categoriaPaiId for fornecido, validar que existe
+    if (categoriaPaiId) {
+      const categoriaPai = await prisma.categoria.findFirst({
+        where: {
+          id: categoriaPaiId,
+          userId: userId,
+        },
+      });
+
+      if (!categoriaPai) {
+        return NextResponse.json(
+          { error: "Categoria pai não encontrada" },
+          { status: 404 }
+        );
+      }
+    }
+
     const categoria = await prisma.categoria.create({
       data: {
         userId: userId,
         nome: descricao,
         descricao: descricao,
         tipo: tipo,
+        categoriaPaiId: categoriaPaiId || null,
         ativo: true,
       },
     });
@@ -78,6 +96,17 @@ export async function GET(request: NextRequest) {
         userId: userId,
         ativo: true,
       },
+      include: {
+        subCategorias: {
+          where: {
+            ativo: true,
+          },
+          orderBy: {
+            nome: "asc",
+          },
+        },
+        categoriaPai: true,
+      },
       orderBy: {
         nome: "asc",
       },
@@ -116,7 +145,7 @@ export async function PUT(request: NextRequest) {
     const url = new URL(request.url);
     const id = url.pathname.split('/').pop();
     const body = await request.json();
-    const { descricao, tipo } = body;
+    const { descricao, tipo, categoriaPaiId } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -147,6 +176,30 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Se categoriaPaiId for fornecido, validar que existe e não é a própria categoria
+    if (categoriaPaiId) {
+      if (categoriaPaiId === id) {
+        return NextResponse.json(
+          { error: "Uma categoria não pode ser pai de si mesma" },
+          { status: 400 }
+        );
+      }
+
+      const categoriaPai = await prisma.categoria.findFirst({
+        where: {
+          id: categoriaPaiId,
+          userId: userId,
+        },
+      });
+
+      if (!categoriaPai) {
+        return NextResponse.json(
+          { error: "Categoria pai não encontrada" },
+          { status: 404 }
+        );
+      }
+    }
+
     // Atualizar o registro
     const categoriaAtualizada = await prisma.categoria.update({
       where: {
@@ -155,6 +208,7 @@ export async function PUT(request: NextRequest) {
       data: {
         descricao,
         tipo,
+        categoriaPaiId: categoriaPaiId || null,
       },
     });
 
@@ -210,6 +264,20 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         { error: "Registro não encontrado ou não pertence ao usuário" },
         { status: 404 }
+      );
+    }
+
+    // Verificar se a categoria tem subcategorias
+    const subCategorias = await prisma.categoria.count({
+      where: {
+        categoriaPaiId: id,
+      },
+    });
+
+    if (subCategorias > 0) {
+      return NextResponse.json(
+        { error: "Não é possível excluir categoria que possui subcategorias" },
+        { status: 400 }
       );
     }
 

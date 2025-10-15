@@ -17,6 +17,7 @@ interface FaturamentoPorTipoAnuncioProps {
   modalidadeEnvioAtiva?: FiltroModalidadeEnvio;
   agrupamentoSKUAtivo?: FiltroAgrupamentoSKU;
   refreshKey?: number;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string };
 }
 
 type DadosTipoAnuncio = {
@@ -43,6 +44,7 @@ export default function FaturamentoPorTipoAnuncio({
   modalidadeEnvioAtiva = "todos",
   agrupamentoSKUAtivo = "mlb",
   refreshKey = 0,
+  selectedAccount,
 }: FaturamentoPorTipoAnuncioProps) {
   const [dados, setDados] = useState<DadosTipoAnuncio[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -70,6 +72,10 @@ export default function FaturamentoPorTipoAnuncio({
         if (modalidadeEnvioAtiva && modalidadeEnvioAtiva !== 'todos') params.append('modalidade', modalidadeEnvioAtiva);
         if (agrupamentoSKUAtivo && agrupamentoSKUAtivo !== 'mlb') params.append('agrupamentoSKU', agrupamentoSKUAtivo);
         if (refreshKey) params.append('refresh', String(refreshKey));
+        if (selectedAccount && selectedAccount.platform !== 'todos' && selectedAccount.id) {
+          params.append('accountPlatform', selectedAccount.platform);
+          params.append('accountId', selectedAccount.id);
+        }
         
         // Chamar API para dados do faturamento por tipo de anúncio
         const url = `/api/dashboard/faturamento-por-tipo-anuncio${params.toString() ? `?${params.toString()}` : ''}`;
@@ -101,7 +107,7 @@ export default function FaturamentoPorTipoAnuncio({
     return () => {
       isMounted = false;
     };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey, selectedAccount]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { 

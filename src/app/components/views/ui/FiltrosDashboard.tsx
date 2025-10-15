@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSmartDropdown } from "../../../../hooks/useSmartDropdown";
 import DatePicker from "react-datepicker";
 
-export type FiltroPeriodo = "todos" | "mes_passado" | "este_mes" | "personalizado";
+export type FiltroPeriodo = "todos" | "hoje" | "ontem" | "ultimos_7d" | "ultimos_30d" | "ultimos_12m" | "mes_passado" | "este_mes" | "personalizado";
 
 // Novos filtros do Dashboard
 type FiltroCanal = "todos" | "mercado_livre" | "shopee";
@@ -116,6 +116,11 @@ export default function FiltrosDashboard({
   const getPeriodoLabel = (periodo: FiltroPeriodo) => {
     switch (periodo) {
       case "todos": return "Todos";
+      case "hoje": return "Hoje";
+      case "ontem": return "Ontem";
+      case "ultimos_7d": return "Últimos 7d";
+      case "ultimos_30d": return "Últimos 30d";
+      case "ultimos_12m": return "Últimos 12m";
       case "mes_passado": return "Mês passado";
       case "este_mes": return "Este mês";
       case "personalizado": {
@@ -235,6 +240,11 @@ export default function FiltrosDashboard({
                 <div className="space-y-1">
                   {[
                     { id: "todos" as FiltroPeriodo, label: "Todos" },
+                    { id: "hoje" as FiltroPeriodo, label: "Hoje" },
+                    { id: "ontem" as FiltroPeriodo, label: "Ontem" },
+                    { id: "ultimos_7d" as FiltroPeriodo, label: "Últimos 7d" },
+                    { id: "ultimos_30d" as FiltroPeriodo, label: "Últimos 30d" },
+                    { id: "ultimos_12m" as FiltroPeriodo, label: "Últimos 12m" },
                     { id: "mes_passado" as FiltroPeriodo, label: "Mês passado" },
                     { id: "este_mes" as FiltroPeriodo, label: "Este mês" },
                     { id: "personalizado" as FiltroPeriodo, label: "Personalizado" },

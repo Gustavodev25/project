@@ -22,6 +22,8 @@ interface HeaderDashboardProps {
   agrupamentoSKUAtivo: FiltroAgrupamentoSKU;
   onAgrupamentoSKUChange: (v: FiltroAgrupamentoSKU) => void;
   onForceRefresh: () => void;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string; label?: string };
+  onAccountChange?: (account: { platform: 'meli' | 'shopee' | 'todos'; id?: string; label?: string }) => void;
 }
 
 export default function HeaderDashboard({
@@ -39,6 +41,8 @@ export default function HeaderDashboard({
   agrupamentoSKUAtivo,
   onAgrupamentoSKUChange,
   onForceRefresh,
+  selectedAccount,
+  onAccountChange,
 }: HeaderDashboardProps) {
   const router = useRouter();
   const [showSyncDropdown, setShowSyncDropdown] = useState(false);
@@ -169,63 +173,48 @@ export default function HeaderDashboard({
 
   return (
     <div className="mb-6">
-      <div className="flex items-center justify-between">
-        <div className="text-left">
+      <div className="flex items-start justify-between gap-6">
+        <div className="text-left flex-1">
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="mt-1 text-sm text-gray-600">
             Visão geral das estatísticas e métricas do negócio.
           </p>
         </div>
         
-        {/* Filtros, Sync e Contas */}
-        <div className="flex items-center gap-4">
-          {/* Filtro de Agrupamento por SKU */}
-          <FiltroSKU
-            agrupamentoAtivo={agrupamentoSKUAtivo}
-            onAgrupamentoChange={onAgrupamentoSKUChange}
-          />
-          
-          <FiltrosDashboardExtra 
-            canalAtivo={canalAtivo}
-            onCanalChange={onCanalChange}
-            statusAtivo={statusAtivo}
-            onStatusChange={onStatusChange}
-            tipoAnuncioAtivo={tipoAnuncioAtivo}
-            onTipoAnuncioChange={onTipoAnuncioChange}
-            modalidadeEnvioAtiva={modalidadeEnvioAtiva}
-            onModalidadeEnvioChange={onModalidadeEnvioChange}
-          />
-          <FiltrosDashboard
-            periodoAtivo={periodoAtivo}
-            onPeriodoChange={onPeriodoChange}
-            onPeriodoPersonalizadoChange={onPeriodoPersonalizadoChange}
-          />
-
-          {/* Sync Dropdown */}
+        {/* Botão de Sincronizar em Destaque */}
+        <div className="flex-shrink-0">
           <div className="relative">
             <button
               ref={syncDropdown.triggerRef}
               onClick={() => setShowSyncDropdown(!showSyncDropdown)}
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-all duration-200 ${
+              className={`inline-flex items-center gap-3 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
                 showSyncDropdown 
-                  ? "border-gray-400 bg-gray-50 text-gray-900" 
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+                  ? "bg-orange-600 border-orange-600 text-white ring-2 ring-orange-200" 
+                  : "bg-orange-500 border-orange-500 text-white hover:bg-orange-600 hover:border-orange-600"
               }`}
               disabled={isSyncing}
             >
               {isSyncing ? (
-                <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-300 border-t-gray-700"></div>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="1 4 1 10 7 10" />
-                  <polyline points="23 20 23 14 17 14" />
-                  <path d="M20.49 9A9 9 0 0 0 6.86 5.64L1 10m22 4l-5.86 4.36A9 9 0 0 1 3.51 15" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
+                >
+                  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                  <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
+                  <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
                 </svg>
               )}
-              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar'}</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showSyncDropdown ? 'rotate-180' : ''}`}>
-                <polyline points="6,9 12,15 18,9"/>
-              </svg>
+              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar vendas'}</span>
             </button>
             {syncDropdown.isVisible && (
               <div 
@@ -301,8 +290,37 @@ export default function HeaderDashboard({
               </div>
             )}
           </div>
+        </div>
+      </div>
 
-          {/* Contas Dropdown */}
+      {/* Filtros e Contas */}
+      <div className="mt-6 flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Filtro de Agrupamento por SKU */}
+          <FiltroSKU
+            agrupamentoAtivo={agrupamentoSKUAtivo}
+            onAgrupamentoChange={onAgrupamentoSKUChange}
+          />
+          
+          <FiltrosDashboardExtra 
+            canalAtivo={canalAtivo}
+            onCanalChange={onCanalChange}
+            statusAtivo={statusAtivo}
+            onStatusChange={onStatusChange}
+            tipoAnuncioAtivo={tipoAnuncioAtivo}
+            onTipoAnuncioChange={onTipoAnuncioChange}
+            modalidadeEnvioAtiva={modalidadeEnvioAtiva}
+            onModalidadeEnvioChange={onModalidadeEnvioChange}
+          />
+          <FiltrosDashboard
+            periodoAtivo={periodoAtivo}
+            onPeriodoChange={onPeriodoChange}
+            onPeriodoPersonalizadoChange={onPeriodoPersonalizadoChange}
+          />
+        </div>
+
+        {/* Contas Dropdown */}
+        <div className="flex-shrink-0">
           <div className="relative">
             <button
               ref={contasDropdown.triggerRef}
@@ -319,7 +337,7 @@ export default function HeaderDashboard({
                 <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span>Contas</span>
+              <span>{selectedAccount?.label ? selectedAccount.label : 'Contas'}</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showContasDropdown ? 'rotate-180' : ''}`}>
                 <polyline points="6,9 12,15 18,9"/>
               </svg>
@@ -331,6 +349,18 @@ export default function HeaderDashboard({
                 style={contasDropdown.position}
               >
                 <div className="p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-gray-900">Selecionar conta</h3>
+                    <button
+                      className="text-[11px] text-gray-600 hover:text-gray-900 underline"
+                      onClick={() => {
+                        onAccountChange && onAccountChange({ platform: 'todos' });
+                        setShowContasDropdown(false);
+                      }}
+                    >
+                      Limpar filtro
+                    </button>
+                  </div>
                   <div>
                     <h3 className="text-xs font-semibold text-gray-900 mb-2">Mercado Livre</h3>
                     {isLoadingAccounts ? (
@@ -341,8 +371,16 @@ export default function HeaderDashboard({
                       <ul className="space-y-1">
                         {contasML.map((c) => (
                           <li key={c.id} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-gray-50">
-                            <span className="text-gray-800">{c.nickname || `Usuário ${c.ml_user_id}`}</span>
-                            <span className={`px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            <button
+                              className={`flex-1 text-left ${selectedAccount?.platform === 'meli' && selectedAccount?.id === c.id ? 'font-semibold text-gray-900' : 'text-gray-800'}`}
+                              onClick={() => {
+                                onAccountChange && onAccountChange({ platform: 'meli', id: c.id, label: c.nickname || `Usuário ${c.ml_user_id}` });
+                                setShowContasDropdown(false);
+                              }}
+                            >
+                              {c.nickname || `Usuário ${c.ml_user_id}`}
+                            </button>
+                            <span className={`ml-2 px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                               {new Date(c.expires_at).getTime() > Date.now() ? 'Ativa' : 'Inativa'}
                             </span>
                           </li>
@@ -360,8 +398,16 @@ export default function HeaderDashboard({
                       <ul className="space-y-1">
                         {contasShopee.map((c) => (
                           <li key={c.id} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-gray-50">
-                            <span className="text-gray-800">{c.shop_name || `Shop ${c.shop_id}`}</span>
-                            <span className={`px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            <button
+                              className={`flex-1 text-left ${selectedAccount?.platform === 'shopee' && selectedAccount?.id === c.id ? 'font-semibold text-gray-900' : 'text-gray-800'}`}
+                              onClick={() => {
+                                onAccountChange && onAccountChange({ platform: 'shopee', id: c.id, label: c.shop_name || `Shop ${c.shop_id}` });
+                                setShowContasDropdown(false);
+                              }}
+                            >
+                              {c.shop_name || `Shop ${c.shop_id}`}
+                            </button>
+                            <span className={`ml-2 px-2 py-0.5 rounded-full ${new Date(c.expires_at).getTime() > Date.now() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                               {new Date(c.expires_at).getTime() > Date.now() ? 'Ativa' : 'Inativa'}
                             </span>
                           </li>

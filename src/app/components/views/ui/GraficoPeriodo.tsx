@@ -17,6 +17,7 @@ interface GraficoPeriodoProps {
   modalidadeEnvioAtiva?: FiltroModalidadeEnvio;
   agrupamentoSKUAtivo?: FiltroAgrupamentoSKU;
   refreshKey?: number;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string };
 }
 
 type DadosGrafico = {
@@ -42,6 +43,7 @@ export default function GraficoPeriodo({
   modalidadeEnvioAtiva = "todos",
   agrupamentoSKUAtivo = "mlb",
   refreshKey = 0,
+  selectedAccount,
 }: GraficoPeriodoProps) {
   const [dados, setDados] = useState<DadosGrafico[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -67,6 +69,10 @@ export default function GraficoPeriodo({
         if (modalidadeEnvioAtiva && modalidadeEnvioAtiva !== 'todos') params.append('modalidade', modalidadeEnvioAtiva);
         if (agrupamentoSKUAtivo && agrupamentoSKUAtivo !== 'mlb') params.append('agrupamentoSKU', agrupamentoSKUAtivo);
         if (refreshKey) params.append('refresh', String(refreshKey));
+        if (selectedAccount && selectedAccount.platform !== 'todos' && selectedAccount.id) {
+          params.append('accountPlatform', selectedAccount.platform);
+          params.append('accountId', selectedAccount.id);
+        }
         
         // Chamar API para dados do gráfico
         const url = `/api/dashboard/series${params.toString() ? `?${params.toString()}` : ''}`;
@@ -97,7 +103,7 @@ export default function GraficoPeriodo({
     return () => {
       isMounted = false;
     };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey, selectedAccount]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { 

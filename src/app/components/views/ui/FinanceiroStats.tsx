@@ -130,7 +130,7 @@ export default function FinanceiroStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.taxasPlataformas.total, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.taxasPlataformas.total), formatCurrency, "w-24", "currency")}</div>
           <div className="text-xs text-gray-600">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />
@@ -156,7 +156,7 @@ export default function FinanceiroStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.custoFrete.total, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.custoFrete.total), formatCurrency, "w-24", "currency")}</div>
           <div className="text-xs text-gray-600">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />
@@ -208,7 +208,7 @@ export default function FinanceiroStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.cmv, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.cmv), formatCurrency, "w-24", "currency")}</div>
           <div className="text-xs text-gray-600">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />
@@ -260,7 +260,7 @@ export default function FinanceiroStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.despesasOperacionais, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.despesasOperacionais), formatCurrency, "w-24", "currency")}</div>
           <p className="text-xs text-gray-600">soma das despesas</p>
         </div>
       </div>

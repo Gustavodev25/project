@@ -53,7 +53,12 @@ export function getCanalWhere(canalParam?: string | null) {
  */
 export function getTipoAnuncioWhere(tipoParam?: string | null) {
   if (tipoParam === 'catalogo') {
-    return { tipoAnuncio: { contains: 'catalog', mode: 'insensitive' as const } };
+    return {
+      OR: [
+        { tipoAnuncio: { contains: 'catalog', mode: 'insensitive' as const } },
+        { tipoAnuncio: { contains: 'catálogo', mode: 'insensitive' as const } }
+      ]
+    };
   }
 
   if (tipoParam === 'proprio') {

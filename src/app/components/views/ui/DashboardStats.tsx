@@ -16,6 +16,7 @@ interface DashboardStatsProps {
   modalidadeEnvioAtiva?: FiltroModalidadeEnvio;
   agrupamentoSKUAtivo?: FiltroAgrupamentoSKU;
   refreshKey?: number;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string };
 }
 
 type Stats = {
@@ -54,6 +55,7 @@ const DashboardStats = memo(function DashboardStats({
   modalidadeEnvioAtiva = "todos",
   agrupamentoSKUAtivo = "mlb",
   refreshKey = 0,
+  selectedAccount,
 }: DashboardStatsProps) {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
   const [loading, setLoading] = useState<boolean>(true);
@@ -79,6 +81,10 @@ const DashboardStats = memo(function DashboardStats({
         if (modalidadeEnvioAtiva && modalidadeEnvioAtiva !== 'todos') params.append('modalidade', modalidadeEnvioAtiva);
         if (agrupamentoSKUAtivo && agrupamentoSKUAtivo !== 'mlb') params.append('agrupamentoSKU', agrupamentoSKUAtivo);
         if (refreshKey) params.append('refresh', String(refreshKey));
+        if (selectedAccount && selectedAccount.platform !== 'todos' && selectedAccount.id) {
+          params.append('accountPlatform', selectedAccount.platform);
+          params.append('accountId', selectedAccount.id);
+        }
         
         const url = `/api/dashboard/stats${params.toString() ? `?${params.toString()}` : ''}`;
         const res = await fetch(url, { credentials: "include" });
@@ -96,7 +102,7 @@ const DashboardStats = memo(function DashboardStats({
     return () => {
       isMounted = false;
     };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey, selectedAccount]);
 
   const safeDiv = (num: number, den: number) => (den ? num / den : 0);
 
@@ -160,7 +166,7 @@ const DashboardStats = memo(function DashboardStats({
       </div>
 
       {/* Impostos s/ Faturamento */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor de impostos sobre o faturamento">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor de impostos sobre o faturamento baseado nas alíquotas cadastradas">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -174,8 +180,16 @@ const DashboardStats = memo(function DashboardStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.impostos, formatCurrency, "w-24", "currency")}</div>
-          <p className="text-xs text-gray-500">Valor não calculado</p>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.impostos), formatCurrency, "w-24", "currency")}</div>
+          <div className="text-xs text-gray-600">
+            {loading ? (
+              <NumberLoader width="w-12" height="h-3" variant="percentage" />
+            ) : stats.impostos > 0 ? (
+              `${(safeDiv(stats.impostos, stats.faturamentoTotal) * 100).toFixed(1)}% do faturamento`
+            ) : (
+              <span className="text-gray-500">Configure alíquotas</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -194,7 +208,7 @@ const DashboardStats = memo(function DashboardStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.taxasPlataformas.total, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.taxasPlataformas.total), formatCurrency, "w-24", "currency")}</div>
           <div className="flex flex-col text-xs text-gray-600 gap-0.5">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />
@@ -232,7 +246,7 @@ const DashboardStats = memo(function DashboardStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.custoFrete.total, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.custoFrete.total), formatCurrency, "w-24", "currency")}</div>
           <div className="flex flex-col text-xs text-gray-600 gap-0.5">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />
@@ -296,7 +310,7 @@ const DashboardStats = memo(function DashboardStats({
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(stats.cmv, formatCurrency, "w-24", "currency")}</div>
+          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.cmv), formatCurrency, "w-24", "currency")}</div>
           <div className="text-xs text-gray-600">
             {loading ? (
               <NumberLoader width="w-12" height="h-3" variant="percentage" />

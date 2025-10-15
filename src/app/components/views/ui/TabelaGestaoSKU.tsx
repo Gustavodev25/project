@@ -4,6 +4,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import gsap from "gsap";
 import { useToast } from "./toaster";
 import { EmptyState } from "./CardsContas";
+import EditModal from "./EditModal";
+import DeleteModal from "./DeleteModal";
+import Modal from "./Modal";
 
 // Tipos atualizados para SKU
 export interface SKU {
@@ -131,6 +134,12 @@ export default function TabelaGestaoSKU({
   const [showEstoqueModal, setShowEstoqueModal] = useState(false);
   const [skusToDelete, setSkusToDelete] = useState<string[]>([]);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  
+  // Estados para modais de ação individual
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteSingleModal, setShowDeleteSingleModal] = useState(false);
+  const [showToggleStatusModal, setShowToggleStatusModal] = useState(false);
+  const [selectedSKU, setSelectedSKU] = useState<SKU | null>(null);
   const filhosDisponiveis = useMemo(
     () => skus.filter((sku) => sku.tipo === "filho"),
     [skus]
@@ -415,11 +424,21 @@ export default function TabelaGestaoSKU({
     
     if (!onCreateSKU) {
       console.log('onCreateSKU não está definido');
+      toast({
+        variant: "error",
+        title: "Erro de configuração",
+        description: "Função de criação não está disponível. Recarregue a página.",
+      });
       return;
     }
     
     if (!validateForm()) {
       console.log('Validação falhou', formErrors);
+      toast({
+        variant: "error",
+        title: "Verifique os campos",
+        description: "Preencha todos os campos obrigatórios corretamente.",
+      });
       return;
     }
 
@@ -583,13 +602,13 @@ export default function TabelaGestaoSKU({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table ref={tableRef} className="min-w-full divide-y divide-gray-200">
+      <div className="overflow-x-auto scrollbar-hidden">
+        <table ref={tableRef} className="min-w-full divide-y divide-gray-200 table-fixed">
           <thead className="bg-gray-50">
             <tr>
               {/* Checkbox para seleção múltipla */}
               {isMultiSelect && (
-                <th className="px-6 py-3 text-left">
+                <th className="w-12 px-4 py-3 text-left">
                   <input
                     type="checkbox"
                     checked={selectedSKUs.length === skus.length && skus.length > 0}
@@ -599,87 +618,89 @@ export default function TabelaGestaoSKU({
                 </th>
               )}
               
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-36 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 SKU
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-64 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Produto
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-32 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Tipo
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-28 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-32 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Custo Unitário
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <div className="flex items-center gap-1">
-                  <span>Quantidade</span>
-                  <span 
-                    className="text-blue-500 cursor-help" 
-                    title="Kits não têm quantidade. Itens individuais sempre têm quantidade 1."
-                  >
-                    
-                  </span>
-                </div>
+              <th className="w-24 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Quantidade
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-24 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Proporção
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-32 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Vendas
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-40 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Hierarquia
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="w-60 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Ações
               </th>
             </tr>
             {true && (
               <tr className="bg-white">
-                {isMultiSelect && <th className="px-6 py-2" />}
+                {isMultiSelect && <th className="px-4 py-3" />}
 
                 {/* SKU */}
-                <th className="px-6 py-2">
-                  <input
-                    type="text"
-                    value={novoSku.sku}
-                    onChange={(e) => handleFormChange("sku", e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                    className={`w-full px-2 py-1 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                      formErrors.sku ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                    placeholder="Ex: SKU-123"
-                    disabled={isSaving}
-                    ref={skuInputRef}
-                  />
+                <th className="px-4 py-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={novoSku.sku}
+                      onChange={(e) => handleFormChange("sku", e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
+                      className={`w-full px-3 py-2 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                        formErrors.sku ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="Ex: SKU-123"
+                      disabled={isSaving}
+                      ref={skuInputRef}
+                    />
+                    {formErrors.sku && (
+                      <p className="text-xs text-red-600 mt-1 font-medium">{formErrors.sku}</p>
+                    )}
+                  </div>
                 </th>
 
                 {/* Produto */}
-                <th className="px-6 py-2">
-                  <input
-                    type="text"
-                    value={novoSku.produto}
-                    onChange={(e) => handleFormChange("produto", e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                    className={`w-full px-2 py-1 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                      formErrors.produto ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                    placeholder="Nome do produto"
-                    disabled={isSaving}
-                    ref={produtoInputRef}
-                  />
+                <th className="px-4 py-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={novoSku.produto}
+                      onChange={(e) => handleFormChange("produto", e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
+                      className={`w-full px-3 py-2 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                        formErrors.produto ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="Nome do produto"
+                      disabled={isSaving}
+                      ref={produtoInputRef}
+                    />
+                    {formErrors.produto && (
+                      <p className="text-xs text-red-600 mt-1 font-medium">{formErrors.produto}</p>
+                    )}
+                  </div>
                 </th>
 
                 {/* Tipo */}
-                <th className="px-6 py-2">
+                <th className="px-4 py-3">
                   <select
                     value={novoSku.tipo}
                     onChange={(e) => handleFormChange("tipo", e.target.value as "pai" | "filho")}
-                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     disabled={isSaving}
                   >
                     <option value="filho">Individual</option>
@@ -687,79 +708,79 @@ export default function TabelaGestaoSKU({
                   </select>
                 </th>
 
-                {/* Status (Ativo / Estoque) */}
-                <th className="px-6 py-2">
-                  <div className="flex items-center gap-3">
-                    <label className="inline-flex items-center text-xs text-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={novoSku.ativo}
-                        onChange={(e) => handleFormChange("ativo", e.target.checked)}
-                        className="h-4 w-4 text-orange-600 accent-orange-600 focus:ring-orange-500 border-gray-300 rounded"
-                        disabled={isSaving}
-                      />
-                    </label>
-                  </div>
+                {/* Status - Removido checkbox, sempre criar ativo */}
+                <th className="px-4 py-3">
+                  <span className="text-xs text-gray-500 font-normal">Ativo</span>
                 </th>
 
                 {/* Custo unitário */}
-                <th className="px-6 py-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={novoSku.custoUnitario}
-                    onChange={(e) => handleFormChange("custoUnitario", parseFloat(e.target.value || '0'))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                    className={`w-full px-2 py-1 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                      formErrors.custoUnitario ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                    placeholder="0,00"
-                    disabled={isSaving}
-                  />
+                <th className="px-4 py-3">
+                  <div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={novoSku.custoUnitario}
+                      onChange={(e) => handleFormChange("custoUnitario", parseFloat(e.target.value || '0'))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
+                      className={`w-full px-3 py-2 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                        formErrors.custoUnitario ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="0,00"
+                      disabled={isSaving}
+                    />
+                    {formErrors.custoUnitario && (
+                      <p className="text-xs text-red-600 mt-1 font-medium">{formErrors.custoUnitario}</p>
+                    )}
+                  </div>
                 </th>
-                {/* Proporção (sempre 100% para SKUs filhos) */}
-                <th className="px-6 py-2 text-sm text-gray-400">100%</th>
 
                 {/* Quantidade */}
-                <th className="px-6 py-2">
+                <th className="px-4 py-3">
                   {novoSku.tipo === 'pai' ? (
                     <div className="text-sm text-gray-400 text-center">-</div>
                   ) : (
-                    <input
-                      type="number"
-                      min={1}
-                      max={1}
-                      value={novoSku.quantidade}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value || '1', 10);
-                        // Sempre força quantidade = 1 para individuais
-                        handleFormChange("quantidade", val === 0 ? 1 : 1);
-                      }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                      className={`w-full px-2 py-1 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                        formErrors.quantidade ? 'border-red-300' : 'border-gray-300'
-                      }`}
-                      placeholder="1"
-                      disabled={isSaving}
-                      readOnly
-                      title="Itens individuais sempre têm quantidade 1"
-                    />
+                    <div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1}
+                        value={novoSku.quantidade}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value || '1', 10);
+                          handleFormChange("quantidade", val === 0 ? 1 : 1);
+                        }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
+                        className={`w-full px-3 py-2 border rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                          formErrors.quantidade ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                        }`}
+                        placeholder="1"
+                        disabled={isSaving}
+                        readOnly
+                        title="Itens individuais sempre têm quantidade 1"
+                      />
+                      {formErrors.quantidade && (
+                        <p className="text-xs text-red-600 mt-1 font-medium">{formErrors.quantidade}</p>
+                      )}
+                    </div>
                   )}
                 </th>
+                
+                {/* Proporção */}
+                <th className="px-4 py-3 text-sm text-gray-400 font-normal">100%</th>
 
                 {/* Vendas - não editável ao criar */}
-                <th className="px-6 py-2 text-sm text-gray-400">-</th>
+                <th className="px-4 py-3 text-sm text-gray-400 font-normal">-</th>
 
                 {/* Hierarquia (categoria/subcategoria) */}
-                <th className="px-6 py-2">
+                <th className="px-4 py-3">
                   <div className="flex gap-1">
                     <input
                       type="text"
                       value={novoSku.hierarquia1}
                       onChange={(e) => handleFormChange("hierarquia1", e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                      className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-1/2 px-2 py-2 border border-gray-300 rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
                       placeholder="Hierarquia 1"
                       disabled={isSaving}
                     />
@@ -768,7 +789,7 @@ export default function TabelaGestaoSKU({
                       value={novoSku.hierarquia2}
                       onChange={(e) => handleFormChange("hierarquia2", e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSku(); }}
-                      className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-1/2 px-2 py-2 border border-gray-300 rounded text-sm bg-white text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
                       placeholder="Hierarquia 2"
                       disabled={isSaving}
                     />
@@ -776,31 +797,38 @@ export default function TabelaGestaoSKU({
                 </th>
 
                 {/* Ações: vínculo de kit/individual + salvar */}
-                <th className="px-6 py-2">
+                <th className="px-4 py-3">
                   <div className="flex items-start gap-2">
                     {novoSku.tipo === 'filho' ? (
-                      <select
-                        value={ novoSku.skuPai }
-                        onChange={(e) => handleFormChange('skuPai', e.target.value)}
-                        className={`min-w-[160px] px-2 py-1 border rounded text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                          formErrors.skuPai ? 'border-red-300' : 'border-gray-300'
-                        }`}
-                        disabled={isSaving}
-                      >
-                        <option value="">SKU Pai (opcional)</option>
-                        {skus
-                          .filter((s) => s.tipo === 'pai')
-                          .map((s) => (
-                            <option key={s.id} value={s.sku}>
-                              {s.sku} - {s.produto}
-                            </option>
-                          ))}
-                      </select>
+                      <div className="flex-1">
+                        <select
+                          value={ novoSku.skuPai }
+                          onChange={(e) => handleFormChange('skuPai', e.target.value)}
+                          className={`w-full px-3 py-2 border rounded text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                            formErrors.skuPai ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                          }`}
+                          disabled={isSaving}
+                        >
+                          <option value="">SKU Pai (opcional)</option>
+                          {skus
+                            .filter((s) => s.tipo === 'pai')
+                            .map((s) => (
+                              <option key={s.id} value={s.sku}>
+                                {s.sku} - {s.produto}
+                              </option>
+                            ))}
+                        </select>
+                        {formErrors.skuPai && (
+                          <p className="text-xs text-red-600 mt-1 font-medium">{formErrors.skuPai}</p>
+                        )}
+                      </div>
                     ) : (
-                      <div ref={filhosDropdownRef} className={`relative min-w-[180px] ${isSaving || filhosDisponiveis.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <div ref={filhosDropdownRef} className={`relative flex-1 ${isSaving || filhosDisponiveis.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
                         {/* Campo compacto com tags dentro */}
                         <div
-                          className="flex items-center flex-wrap gap-1 px-2 py-1 border rounded text-xs bg-white text-gray-900 min-h-[30px] max-h-[60px] overflow-y-auto cursor-pointer"
+                          className={`flex items-center flex-wrap gap-1 px-3 py-2 border rounded text-xs bg-white text-gray-900 min-h-[38px] max-h-[60px] overflow-y-auto cursor-pointer ${
+                            formErrors.skusFilhos ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'
+                          }`}
                           onClick={() => setIsOpenFilhos((v) => !v)}
                         >
                           {novoSku.skusFilhos.length === 0 ? (
@@ -888,6 +916,9 @@ export default function TabelaGestaoSKU({
                             </div>
                           </div>
                         )}
+                        {formErrors.skusFilhos && (
+                          <p className="text-xs text-red-600 mt-1 font-medium absolute z-10 bg-white px-1 rounded">{formErrors.skusFilhos}</p>
+                        )}
                       </div>
                     )}
 
@@ -895,10 +926,20 @@ export default function TabelaGestaoSKU({
                       type="button"
                       onClick={handleCreateSku}
                       disabled={isSaving}
-                      className="px-3 py-1.5 text-xs font-medium text-white bg-orange-600 rounded hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50"
+                      className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50 transition-all whitespace-nowrap"
                       title="Salvar SKU"
                     >
-                      {isSaving ? 'Salvando...' : 'Adicionar'}
+                      {isSaving ? (
+                        <div className="flex items-center gap-2">
+                          <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Salvando...
+                        </div>
+                      ) : (
+                        'Adicionar'
+                      )}
                     </button>
                   </div>
                 </th>
@@ -1003,10 +1044,10 @@ export default function TabelaGestaoSKU({
                   </td>
 
                   {/* Produto */}
-                  <td className={`px-6 py-4 text-sm ${sku.skuPai ? 'bg-blue-50/30' : ''}`}>
+                  <td className={`px-4 py-4 text-sm ${sku.skuPai ? 'bg-blue-50/30' : ''}`}>
                     <div className={`flex items-center ${sku.skuPai ? 'pl-14' : ''}`}>
-                      <div className="max-w-xs">
-                        <p className={`truncate ${sku.tipo === 'pai' ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                      <div className="max-w-[200px]">
+                        <p className={`truncate ${sku.tipo === 'pai' ? 'font-semibold text-gray-900' : 'text-gray-700'}`} title={sku.produto}>
                           {sku.produto}
                         </p>
                         {sku.skuPai && (
@@ -1102,10 +1143,13 @@ export default function TabelaGestaoSKU({
                   </td>
 
                   {/* Ações */}
-                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${sku.skuPai ? 'bg-blue-50/30' : ''}`}>
-                    <div className="flex space-x-2">
+                  <td className={`px-4 py-4 whitespace-nowrap text-sm font-medium ${sku.skuPai ? 'bg-blue-50/30' : ''}`}>
+                    <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => onEditSKU?.(sku)}
+                        onClick={() => {
+                          setSelectedSKU(sku);
+                          setShowEditModal(true);
+                        }}
                         className="text-orange-600 hover:text-orange-900 transition-colors"
                         title="Editar SKU"
                       >
@@ -1114,7 +1158,28 @@ export default function TabelaGestaoSKU({
                         </svg>
                       </button>
                       <button
-                        onClick={() => onDeleteSKU?.(sku)}
+                        onClick={() => {
+                          setSelectedSKU(sku);
+                          setShowToggleStatusModal(true);
+                        }}
+                        className={`${sku.ativo ? 'text-gray-600 hover:text-gray-900' : 'text-green-600 hover:text-green-900'} transition-colors`}
+                        title={sku.ativo ? 'Inativar SKU' : 'Ativar SKU'}
+                      >
+                        {sku.ativo ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedSKU(sku);
+                          setShowDeleteSingleModal(true);
+                        }}
                         className="text-red-600 hover:text-red-900 transition-colors"
                         title="Excluir SKU"
                       >
@@ -1147,7 +1212,7 @@ export default function TabelaGestaoSKU({
         </div>
       )}
 
-      {/* Modal de confirmação de exclusão */}
+      {/* Modal de confirmação de exclusão em lote */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
@@ -1173,6 +1238,235 @@ export default function TabelaGestaoSKU({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Edição */}
+      {selectedSKU && (
+        <EditModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedSKU(null);
+          }}
+          onSave={async (data) => {
+            try {
+              const response = await fetch(`/api/sku/${selectedSKU.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+              });
+
+              if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Erro ao atualizar SKU');
+              }
+
+              toast({
+                variant: "success",
+                title: "SKU atualizado",
+                description: `SKU ${data.sku} foi atualizado com sucesso`,
+              });
+
+              // Recarregar lista
+              if (onEditSKU) {
+                const updatedSKU = await response.json();
+                onEditSKU(updatedSKU);
+              }
+            } catch (error) {
+              console.error('Erro ao atualizar SKU:', error);
+              toast({
+                variant: "error",
+                title: "Erro ao atualizar",
+                description: error instanceof Error ? error.message : "Não foi possível atualizar o SKU",
+              });
+              throw error;
+            }
+          }}
+          title="Editar SKU"
+          data={{
+            sku: selectedSKU.sku,
+            produto: selectedSKU.produto,
+            tipo: selectedSKU.tipo,
+            custoUnitario: selectedSKU.custoUnitario,
+            quantidade: selectedSKU.quantidade,
+            hierarquia1: selectedSKU.hierarquia1 || '',
+            hierarquia2: selectedSKU.hierarquia2 || '',
+          }}
+          fields={[
+            { name: 'sku', label: 'SKU', type: 'text', required: true },
+            { name: 'produto', label: 'Produto', type: 'text', required: true },
+            { 
+              name: 'tipo', 
+              label: 'Tipo', 
+              type: 'select', 
+              required: true,
+              options: [
+                { value: 'filho', label: 'Individual' },
+                { value: 'pai', label: 'Kit' }
+              ]
+            },
+            { name: 'custoUnitario', label: 'Custo Unitário', type: 'number', required: true, step: '0.01', min: '0' },
+            { name: 'quantidade', label: 'Quantidade', type: 'number', required: true, min: '0' },
+            { name: 'hierarquia1', label: 'Hierarquia 1', type: 'text' },
+            { name: 'hierarquia2', label: 'Hierarquia 2', type: 'text' },
+          ]}
+        />
+      )}
+
+      {/* Modal de Exclusão Individual */}
+      {selectedSKU && (
+        <DeleteModal
+          isOpen={showDeleteSingleModal}
+          onClose={() => {
+            setShowDeleteSingleModal(false);
+            setSelectedSKU(null);
+          }}
+          onConfirm={async () => {
+            try {
+              const response = await fetch(`/api/sku/${selectedSKU.id}`, {
+                method: 'DELETE',
+              });
+
+              if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Erro ao excluir SKU');
+              }
+
+              toast({
+                variant: "success",
+                title: "SKU excluído",
+                description: `SKU ${selectedSKU.sku} foi excluído com sucesso`,
+              });
+
+              // Callback para recarregar lista
+              if (onDeleteSKU) {
+                onDeleteSKU(selectedSKU);
+              }
+            } catch (error) {
+              console.error('Erro ao excluir SKU:', error);
+              toast({
+                variant: "error",
+                title: "Erro ao excluir",
+                description: error instanceof Error ? error.message : "Não foi possível excluir o SKU",
+              });
+              throw error;
+            }
+          }}
+          title="Excluir SKU"
+          message="Tem certeza que deseja excluir este SKU?"
+          itemName={`${selectedSKU.sku} - ${selectedSKU.produto}`}
+        />
+      )}
+
+      {/* Modal de Toggle Status */}
+      {selectedSKU && (
+        <Modal
+          isOpen={showToggleStatusModal}
+          onClose={() => {
+            setShowToggleStatusModal(false);
+            setSelectedSKU(null);
+          }}
+          title={selectedSKU.ativo ? "Inativar SKU" : "Ativar SKU"}
+          size="md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <div className={`w-10 h-10 ${selectedSKU.ativo ? 'bg-yellow-100' : 'bg-green-100'} rounded-full flex items-center justify-center`}>
+                  <svg
+                    className={`w-6 h-6 ${selectedSKU.ativo ? 'text-yellow-600' : 'text-green-600'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    {selectedSKU.ativo ? (
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                      />
+                    ) : (
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    )}
+                  </svg>
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm text-gray-700">
+                  {selectedSKU.ativo
+                    ? "Deseja inativar este SKU? Ele não aparecerá mais em algumas listagens."
+                    : "Deseja ativar este SKU? Ele voltará a aparecer nas listagens."}
+                </p>
+                <p className="mt-2 text-sm font-medium text-gray-900">
+                  "{selectedSKU.sku} - {selectedSKU.produto}"
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowToggleStatusModal(false);
+                  setSelectedSKU(null);
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const response = await fetch(`/api/sku/${selectedSKU.id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ ativo: !selectedSKU.ativo }),
+                    });
+
+                    if (!response.ok) {
+                      const error = await response.json();
+                      throw new Error(error.error || 'Erro ao atualizar status');
+                    }
+
+                    toast({
+                      variant: "success",
+                      title: "Status atualizado",
+                      description: `SKU ${selectedSKU.sku} foi ${!selectedSKU.ativo ? 'ativado' : 'inativado'} com sucesso`,
+                    });
+
+                    // Callback para atualizar status
+                    if (onToggleStatus) {
+                      onToggleStatus([selectedSKU.id], !selectedSKU.ativo);
+                    }
+
+                    setShowToggleStatusModal(false);
+                    setSelectedSKU(null);
+                  } catch (error) {
+                    console.error('Erro ao atualizar status:', error);
+                    toast({
+                      variant: "error",
+                      title: "Erro ao atualizar status",
+                      description: error instanceof Error ? error.message : "Não foi possível atualizar o status",
+                    });
+                  }
+                }}
+                className={`flex-1 px-4 py-2 rounded-lg transition-colors text-white ${
+                  selectedSKU.ativo
+                    ? "bg-yellow-600 hover:bg-yellow-700"
+                    : "bg-green-600 hover:bg-green-700"
+                }`}
+              >
+                {selectedSKU.ativo ? "Inativar" : "Ativar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

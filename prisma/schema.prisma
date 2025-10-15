@@ -31,6 +31,7 @@ model User {
   skuCustoHistorico SKUCustoHistorico[]
   notifications     SyncNotification[]
   settings          UserSettings?
+  aliquotasImposto  AliquotaImposto[]
 
   @@index([createdAt])
   @@map("usuario")
@@ -331,22 +332,26 @@ model FormaPagamento {
 }
 
 model Categoria {
-  id             String         @id @default(cuid())
-  userId         String         @map("user_id")
-  blingId        String?        @map("bling_id")
-  nome           String
-  descricao      String?
-  tipo           String?
-  ativo          Boolean        @default(true)
-  sincronizadoEm DateTime       @default(now()) @map("sincronizado_em")
-  atualizadoEm   DateTime       @updatedAt @map("atualizado_em")
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contasPagar    ContaPagar[]
-  contasReceber  ContaReceber[]
+  id              String         @id @default(cuid())
+  userId          String         @map("user_id")
+  blingId         String?        @map("bling_id")
+  nome            String
+  descricao       String?
+  tipo            String?
+  ativo           Boolean        @default(true)
+  categoriaPaiId  String?        @map("categoria_pai_id")
+  sincronizadoEm  DateTime       @default(now()) @map("sincronizado_em")
+  atualizadoEm    DateTime       @updatedAt @map("atualizado_em")
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoriaPai    Categoria?     @relation("SubCategorias", fields: [categoriaPaiId], references: [id], onDelete: SetNull)
+  subCategorias   Categoria[]    @relation("SubCategorias")
+  contasPagar     ContaPagar[]
+  contasReceber   ContaReceber[]
 
   @@unique([userId, blingId], name: "userId_blingId")
   @@index([userId])
   @@index([blingId])
+  @@index([categoriaPaiId])
   @@map("categoria")
 }
 
@@ -396,4 +401,24 @@ model ContaReceber {
   @@index([blingId])
   @@index([dataVencimento])
   @@map("conta_receber")
+}
+
+model AliquotaImposto {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  conta          String   // Conta/CNPJ (ex: "Mercado Livre - Moscou", "Shopee Principal")
+  aliquota       Decimal  @db.Decimal(5, 2) // Percentual (ex: 5.00 para 5%)
+  dataInicio     DateTime @map("data_inicio")
+  dataFim        DateTime @map("data_fim")
+  descricao      String?  // Descrição adicional (ex: "Simples Nacional", "Lucro Presumido")
+  ativo          Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([conta])
+  @@index([dataInicio, dataFim])
+  @@index([ativo])
+  @@map("aliquota_imposto")
 }

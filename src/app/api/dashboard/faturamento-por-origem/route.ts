@@ -15,6 +15,39 @@ function getDateRange(periodo: string): { start: Date; end: Date } {
   const now = new Date();
   
   switch (periodo) {
+    case "hoje": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return { start, end };
+    }
+    case "ontem": {
+      const ontem = new Date(now);
+      ontem.setDate(ontem.getDate() - 1);
+      const start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
+      const end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+      return { start, end };
+    }
+    case "ultimos_7d": {
+      const seteAtras = new Date(now);
+      seteAtras.setDate(seteAtras.getDate() - 6);
+      const start = new Date(seteAtras.getFullYear(), seteAtras.getMonth(), seteAtras.getDate(), 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return { start, end };
+    }
+    case "ultimos_30d": {
+      const trintaAtras = new Date(now);
+      trintaAtras.setDate(trintaAtras.getDate() - 29);
+      const start = new Date(trintaAtras.getFullYear(), trintaAtras.getMonth(), trintaAtras.getDate(), 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return { start, end };
+    }
+    case "ultimos_12m": {
+      const dozeAtras = new Date(now);
+      dozeAtras.setMonth(dozeAtras.getMonth() - 12);
+      const start = new Date(dozeAtras.getFullYear(), dozeAtras.getMonth(), dozeAtras.getDate(), 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return { start, end };
+    }
     case "este_mes": {
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -60,6 +93,8 @@ export async function GET(req: NextRequest) {
     const statusParam = url.searchParams.get("status");
     const tipoAnuncioParam = url.searchParams.get("tipoAnuncio");
     const modalidadeParam = url.searchParams.get("modalidade");
+    const accountPlatformParam = url.searchParams.get("accountPlatform");
+    const accountIdParam = url.searchParams.get("accountId");
 
     let start: Date;
     let end: Date;
@@ -90,8 +125,8 @@ export async function GET(req: NextRequest) {
 
     // WhereClause para Mercado Livre (com tipoAnuncio e modalidade)
     const whereClauseMeli = usarTodasVendas
-      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere }
-      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere };
+      ? { userId: session.sub, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere }
+      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere };
 
     // WhereClause para Shopee (sem tipoAnuncio e modalidade)
     const whereClauseShopee = usarTodasVendas

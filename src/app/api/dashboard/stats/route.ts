@@ -40,6 +40,8 @@ export async function GET(req: NextRequest) {
     const tipoAnuncioParam = url.searchParams.get("tipoAnuncio"); // catalogo | proprio
     const modalidadeParam = url.searchParams.get("modalidade"); // me | full | flex
     const now = new Date();
+    const accountPlatformParam = url.searchParams.get("accountPlatform"); // 'meli' | 'shopee'
+    const accountIdParam = url.searchParams.get("accountId");
 
     // Determinar período baseado nos parâmetros
     let start: Date;
@@ -56,6 +58,44 @@ export async function GET(req: NextRequest) {
     } else if (periodoParam) {
       // Período pré-definido
       switch (periodoParam) {
+        case "hoje": {
+          start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          useRange = true;
+          break;
+        }
+        case "ontem": {
+          const ontem = new Date(now);
+          ontem.setDate(ontem.getDate() - 1);
+          start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
+          end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+          useRange = true;
+          break;
+        }
+        case "ultimos_7d": {
+          const seteAtras = new Date(now);
+          seteAtras.setDate(seteAtras.getDate() - 6); // Hoje + 6 dias atrás = 7 dias
+          start = new Date(seteAtras.getFullYear(), seteAtras.getMonth(), seteAtras.getDate(), 0, 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          useRange = true;
+          break;
+        }
+        case "ultimos_30d": {
+          const trintaAtras = new Date(now);
+          trintaAtras.setDate(trintaAtras.getDate() - 29); // Hoje + 29 dias atrás = 30 dias
+          start = new Date(trintaAtras.getFullYear(), trintaAtras.getMonth(), trintaAtras.getDate(), 0, 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          useRange = true;
+          break;
+        }
+        case "ultimos_12m": {
+          const dozeAtras = new Date(now);
+          dozeAtras.setMonth(dozeAtras.getMonth() - 12);
+          start = new Date(dozeAtras.getFullYear(), dozeAtras.getMonth(), dozeAtras.getDate(), 0, 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          useRange = true;
+          break;
+        }
         case "mes_passado": {
           const primeiroDiaMesPassado = new Date(now.getFullYear(), now.getMonth() - 1, 1);
           const ultimoDiaMesPassado = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
@@ -111,8 +151,8 @@ export async function GET(req: NextRequest) {
     // Buscar vendas do Mercado Livre
     const vendasMeli = await prisma.meliVenda.findMany({
       where: useRange
-        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...tipoWhere, ...modalidadeWhere }
-        : { userId: session.sub, ...statusWhere, ...tipoWhere, ...modalidadeWhere },
+        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere }
+        : { userId: session.sub, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere },
       select: {
         valorTotal: true,
         taxaPlataforma: true,
@@ -120,6 +160,7 @@ export async function GET(req: NextRequest) {
         quantidade: true,
         sku: true,
         plataforma: true,
+        dataVenda: true,
       },
       distinct: ['orderId'],
       orderBy: { dataVenda: "desc" },
@@ -128,8 +169,8 @@ export async function GET(req: NextRequest) {
     // Buscar vendas do Shopee
     const vendasShopee = await prisma.shopeeVenda.findMany({
       where: useRange
-        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere }
-        : { userId: session.sub, ...statusWhere },
+        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere }
+        : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere },
       select: {
         valorTotal: true,
         taxaPlataforma: true,
@@ -137,6 +178,7 @@ export async function GET(req: NextRequest) {
         quantidade: true,
         sku: true,
         plataforma: true,
+        dataVenda: true,
       },
       distinct: ['orderId'],
       orderBy: { dataVenda: "desc" },
@@ -212,6 +254,78 @@ export async function GET(req: NextRequest) {
 
     const lucroBruto = receitaLiquida - cmvTotal;
 
+    // Calcular impostos baseado nas alíquotas cadastradas
+    let impostosTotal = 0;
+    
+    // Buscar alíquotas ativas do usuário
+    // @ts-ignore - modelo será disponível após executar migration
+    const aliquotas = await prisma.aliquotaImposto.findMany({
+      where: {
+        userId: session.sub,
+        ativo: true,
+      },
+    });
+
+    // Se não houver alíquotas, pular o cálculo
+    if (aliquotas.length > 0 && useRange) {
+      // Agrupar vendas por mês/ano para aplicar alíquota específica de cada mês
+      const faturamentoPorMes = new Map<string, number>();
+      
+      for (const v of vendas) {
+        if (!v.dataVenda) continue; // Pular vendas sem data
+        
+        const dataVenda = new Date(v.dataVenda);
+        // Chave no formato YYYY-MM
+        const mesAno = `${dataVenda.getFullYear()}-${String(dataVenda.getMonth() + 1).padStart(2, '0')}`;
+        const valorTotal = toNumber(v.valorTotal);
+        
+        faturamentoPorMes.set(mesAno, (faturamentoPorMes.get(mesAno) || 0) + valorTotal);
+      }
+
+      console.log('Faturamento agrupado por mês:', Object.fromEntries(faturamentoPorMes));
+
+      // Para cada mês com faturamento, aplicar a alíquota correspondente
+      for (const [mesAno, faturamentoMes] of faturamentoPorMes.entries()) {
+        const [year, month] = mesAno.split('-').map(Number);
+        const primeiroDiaMes = new Date(year, month - 1, 1);
+        const ultimoDiaMes = new Date(year, month, 0, 23, 59, 59, 999);
+        
+        // Buscar alíquota para este mês específico
+        const aliquotaMes = aliquotas.find((aliq: any) => {
+          const aliqInicio = new Date(aliq.dataInicio);
+          const aliqFim = new Date(aliq.dataFim);
+          
+          // Verificar se a alíquota se aplica a este mês
+          return (primeiroDiaMes <= aliqFim && ultimoDiaMes >= aliqInicio);
+        });
+
+        if (aliquotaMes) {
+          const aliquotaDecimal = toNumber(aliquotaMes.aliquota) / 100;
+          const impostoMes = faturamentoMes * aliquotaDecimal;
+          impostosTotal += impostoMes;
+          
+          console.log(`Imposto de ${mesAno}:`, {
+            faturamento: faturamentoMes,
+            aliquota: aliquotaMes.aliquota,
+            imposto: impostoMes
+          });
+        } else {
+          console.log(`Sem alíquota cadastrada para ${mesAno}`);
+        }
+      }
+
+      if (impostosTotal > 0) {
+        const aliquotaMediaEfetiva = (impostosTotal / faturamentoTotal) * 100;
+        console.log('Imposto total calculado:', {
+          impostosTotal,
+          faturamentoTotal,
+          aliquotaMediaEfetiva: aliquotaMediaEfetiva.toFixed(2) + '%'
+        });
+      }
+    } else if (aliquotas.length > 0 && !useRange) {
+      console.log('Alíquotas encontradas mas período não filtrado (todos). Selecione um período específico no dashboard.');
+    }
+
     // Trend: faturamento do último mês vs penúltimo mês (considerando ambas plataformas)
     const vendasMeliUltimoMes = await prisma.meliVenda.findMany({
       where: { userId: session.sub, dataVenda: { gte: prevStart, lte: prevEnd }, ...paidOnly },
@@ -253,7 +367,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       faturamentoTotal,
       faturamentoTendencia,
-      impostos: 0, // ainda não calculado
+      impostos: impostosTotal,
       taxasPlataformas: {
         total: taxasTotalAbs,
         mercadoLivre: mercadoLivreTaxa,
