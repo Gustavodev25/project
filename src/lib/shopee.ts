@@ -121,10 +121,18 @@ export async function getShopeeOrderList(opts: {
   const url = buildShopeeSignedUrl(path, params, opts);
 
   const response = await fetch(url, { method: "GET" });
-  const payload: unknown = await response.json();
+  
+  // Verificar resposta HTTP primeiro
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => `Status ${response.status}`);
+    throw new Error(`Shopee get_order_list falhou: ${errorText}`);
+  }
+  
+  const payload: any = await response.json();
 
-  if (!response.ok || payload.error) {
-    const errorMsg = payload.message || payload.error || `Status ${response.status}`;
+  // Verificar erro na resposta do payload
+  if (payload.error) {
+    const errorMsg = payload.message || payload.error || "Erro desconhecido";
     throw new Error(`Shopee get_order_list falhou: ${errorMsg}`);
   }
 
@@ -153,10 +161,18 @@ export async function getShopeeOrderDetail(opts: {
     
     const url = buildShopeeSignedUrl(path, params, opts);
     const response = await fetch(url, { method: "GET" });
-    const payload: unknown = await response.json();
+    
+    // Verificar resposta HTTP primeiro
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => `Status ${response.status}`);
+        throw new Error(`Shopee get_order_detail falhou: ${errorText}`);
+    }
+    
+    const payload: any = await response.json();
 
-    if (!response.ok || payload.error) {
-        const errorMsg = payload.message || payload.error || `Status ${response.status}`;
+    // Verificar erro na resposta do payload
+    if (payload.error) {
+        const errorMsg = payload.message || payload.error || "Erro desconhecido";
         throw new Error(`Shopee get_order_detail falhou: ${errorMsg}`);
     }
 
@@ -182,17 +198,26 @@ export async function getShopeeEscrowDetail(opts: {
 
     const url = buildShopeeSignedUrl(path, params, opts);
     const response = await fetch(url, { method: "GET" });
-    const payload: unknown = await response.json();
+    
+    // Verificar resposta HTTP primeiro
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => `Status ${response.status}`);
+        console.warn(`Shopee get_escrow_detail falhou para ${opts.orderSn}: ${errorText}`);
+        return { escrow_detail: {} }; // Retorna objeto vazio em caso de erro para não parar a sincronização
+    }
+    
+    const payload: any = await response.json();
     
     // É comum não encontrar detalhes de escrow para pedidos muito recentes ou cancelados
     if (payload.error === "error_not_found") {
         return { escrow_detail: {} };
     }
 
-    if (!response.ok || payload.error) {
-        const errorMsg = payload.message || payload.error || `Status ${response.status}`;
+    // Verificar erro na resposta do payload
+    if (payload.error) {
+        const errorMsg = payload.message || payload.error || "Erro desconhecido";
         console.warn(`Shopee get_escrow_detail falhou para ${opts.orderSn}: ${errorMsg}`);
-        return { escrow_detail: {} }; // Retorna objeto vazio em caso de erro para não parar a sincronização
+        return { escrow_detail: {} };
     }
 
     const resp = payload?.response || {};
@@ -259,10 +284,18 @@ export async function getShopInfo(opts: {
   const url = buildShopeeSignedUrl(path, params, opts);
   
   const response = await fetch(url, { method: "GET" });
-  const payload: unknown = await response.json();
+  
+  // Verificar resposta HTTP primeiro
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => `Status ${response.status}`);
+    throw new Error(`Shopee get_shop_info falhou: ${errorText}`);
+  }
+  
+  const payload: any = await response.json();
 
-  if (!response.ok || payload.error) {
-    const errorMsg = payload.message || payload.error || `Status ${response.status}`;
+  // Verificar erro na resposta do payload
+  if (payload.error) {
+    const errorMsg = payload.message || payload.error || "Erro desconhecido";
     throw new Error(`Shopee get_shop_info falhou: ${errorMsg}`);
   }
 
