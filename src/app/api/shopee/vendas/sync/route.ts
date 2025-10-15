@@ -7,6 +7,8 @@ import {
   getShopeeOrderDetail,
   getShopeeEscrowDetail
 } from "@/lib/shopee";
+import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
+import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutos de tempo de execução máximo (limite do plano hobby)
@@ -154,12 +156,39 @@ export async function POST(req: NextRequest) {
   const session = await assertSessionToken(req.cookies.get("session")?.value);
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
+  const userId = session.sub;
+
   try {
+    console.log(`[Shopee Sync] Iniciando sincronização para usuário ${userId}`);
+
+    // Dar um delay para garantir que o SSE está conectado
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Enviar evento de início da sincronização
+    sendProgressToUser(userId, {
+      type: "sync_start",
+      message: "Iniciando sincronização de vendas do Shopee...",
+      current: 0,
+      total: 0,
+      fetched: 0,
+      expected: 0
+    });
+
     const contasAtivas = await prisma.shopeeAccount.findMany({
       where: { userId: session.sub, expires_at: { gt: new Date() } },
     });
 
+    console.log(`[Shopee Sync] Encontradas ${contasAtivas.length} conta(s) do Shopee`);
+
     if (contasAtivas.length === 0) {
+      sendProgressToUser(userId, {
+        type: "sync_complete",
+        message: "Nenhuma conta do Shopee encontrada",
+        current: 0,
+        total: 0,
+        fetched: 0,
+        expected: 0
+      });
       return NextResponse.json({ message: "Nenhuma conta Shopee ativa encontrada." }, { status: 404 });
     }
 
@@ -168,7 +197,21 @@ export async function POST(req: NextRequest) {
     const errors: SyncError[] = [];
     let totalSaved = 0;
 
-    for (const conta of contasAtivas) {
+    for (let accountIndex = 0; accountIndex < contasAtivas.length; accountIndex++) {
+      const conta = contasAtivas[accountIndex];
+      
+      // Enviar progresso: processando conta
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Processando conta ${accountIndex + 1}/${contasAtivas.length}: Loja ${conta.shop_id}`,
+        current: accountIndex,
+        total: contasAtivas.length,
+        fetched: totalSaved,
+        expected: allOrdersPayload.length,
+        accountId: conta.id,
+        accountNickname: `Loja ${conta.shop_id}`
+      });
+
       try {
         const ultimaVenda = await prisma.shopeeVenda.findFirst({
           where: { shopeeAccountId: conta.id },
@@ -187,6 +230,16 @@ export async function POST(req: NextRequest) {
         );
 
         console.log(`[Shopee Sync] Conta ${conta.shop_id}: ${ordersFromAccount.length} vendas encontradas. Salvando...`);
+
+        // Enviar progresso de vendas encontradas
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Conta ${conta.shop_id}: ${ordersFromAccount.length} vendas encontradas`,
+          current: accountIndex,
+          total: contasAtivas.length,
+          fetched: totalSaved,
+          expected: allOrdersPayload.length + ordersFromAccount.length
+        });
 
         for (const order of ordersFromAccount) {
           allOrdersPayload.push({ accountId: conta.id, shopId: conta.shop_id, order });
@@ -323,8 +376,34 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         console.error(`[shopee][sync] Erro na conta ${conta.id}:`, error);
         errors.push({ accountId: conta.id, shopId: conta.shop_id, message: error instanceof Error ? error.message : "Erro desconhecido" });
+        
+        // Enviar erro via SSE
+        sendProgressToUser(userId, {
+          type: "sync_error",
+          message: `Erro ao processar conta ${conta.shop_id}: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+          errorCode: "SHOPEE_SYNC_ERROR"
+        });
       }
     }
+
+    // Enviar evento de conclusão da sincronização
+    sendProgressToUser(userId, {
+      type: "sync_complete",
+      message: `Sincronização concluída! ${totalSaved} vendas processadas`,
+      current: totalSaved,
+      total: allOrdersPayload.length,
+      fetched: totalSaved,
+      expected: allOrdersPayload.length
+    });
+
+    // Invalidar cache de vendas após sincronização
+    invalidateVendasCache(userId);
+    console.log(`[Cache] Cache de vendas invalidado para usuário ${userId}`);
+
+    // Fechar conexões SSE após um pequeno delay
+    setTimeout(() => {
+      closeUserConnections(userId);
+    }, 2000);
 
     return NextResponse.json({
       syncedAt: new Date().toISOString(),
@@ -332,6 +411,11 @@ export async function POST(req: NextRequest) {
       orders: allOrdersPayload.length,
       saved: totalSaved,
       errors,
+      totals: {
+        expected: allOrdersPayload.length,
+        fetched: allOrdersPayload.length,
+        saved: totalSaved
+      }
     });
 
   } catch (error) {

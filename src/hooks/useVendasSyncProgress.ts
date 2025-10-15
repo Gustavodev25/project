@@ -80,10 +80,13 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
       const readyState = eventSource.readyState;
       const stateNames = ['CONNECTING', 'OPEN', 'CLOSED'];
 
-      console.error('[SSE] Erro na conexão:', {
-        readyState: stateNames[readyState] || readyState,
-        error: error
-      });
+      // Só loga erro se não for uma desconexão normal (quando shouldReconnect é false)
+      if (shouldReconnectRef.current) {
+        console.warn('[SSE] Erro na conexão:', {
+          readyState: stateNames[readyState] || readyState,
+          tentativa: reconnectAttemptsRef.current + 1
+        });
+      }
 
       // Only disconnect if the connection is closed
       if (readyState === EventSource.CLOSED) {
@@ -92,7 +95,7 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
         // Try to reconnect if enabled and within retry limit
         if (shouldReconnectRef.current && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectAttemptsRef.current += 1;
-          const retryDelay = Math.min(3000 * reconnectAttemptsRef.current, 10000); // Exponential backoff, max 10s
+          const retryDelay = Math.min(2000 * reconnectAttemptsRef.current, 6000); // Exponential backoff, max 6s
 
           console.log(`[SSE] Tentando reconectar... (tentativa ${reconnectAttemptsRef.current}/${maxReconnectAttempts}) em ${retryDelay}ms`);
 
@@ -102,7 +105,7 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
             }
           }, retryDelay);
         } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-          console.error('[SSE] Número máximo de tentativas de reconexão atingido');
+          console.warn('[SSE] Número máximo de tentativas de reconexão atingido. A sincronização continuará sem atualizações em tempo real.');
           shouldReconnectRef.current = false;
         }
       }

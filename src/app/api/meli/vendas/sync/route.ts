@@ -6,6 +6,7 @@ import { calcularFreteAdjust } from "@/lib/frete";
 import type { MeliAccount } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
+import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -868,12 +869,19 @@ export async function POST(req: NextRequest) {
 
   const userId = session.sub;
 
+  console.log(`[Sync] Iniciando sincronização para usuário ${userId}`);
+
+  // Dar um delay para garantir que o SSE está conectado
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   // Enviar evento de início da sincronização
   sendProgressToUser(userId, {
     type: "sync_start",
     message: "Iniciando sincronização de vendas do MercadoLivre...",
     current: 0,
-    total: 0
+    total: 0,
+    fetched: 0,
+    expected: 0
   });
 
   const accounts = await prisma.meliAccount.findMany({
@@ -881,12 +889,16 @@ export async function POST(req: NextRequest) {
     orderBy: { created_at: "desc" },
   });
 
+  console.log(`[Sync] Encontradas ${accounts.length} conta(s) do Mercado Livre`);
+
   if (accounts.length === 0) {
     sendProgressToUser(userId, {
       type: "sync_complete",
       message: "Nenhuma conta do MercadoLivre encontrada",
       current: 0,
-      total: 0
+      total: 0,
+      fetched: 0,
+      expected: 0
     });
     
     return NextResponse.json({
@@ -905,7 +917,8 @@ export async function POST(req: NextRequest) {
   let totalFetchedOrders = 0;
   let totalSavedOrders = 0;
 
-  for (const account of accounts) {
+  for (let accountIndex = 0; accountIndex < accounts.length; accountIndex++) {
+    const account = accounts[accountIndex];
     const summary: AccountSummary = {
       id: account.id,
       nickname: account.nickname,
@@ -913,6 +926,18 @@ export async function POST(req: NextRequest) {
       expires_at: account.expires_at.toISOString(),
     };
     summaries.push(summary);
+
+    // Enviar progresso: processando conta
+    sendProgressToUser(userId, {
+      type: "sync_progress",
+      message: `Processando conta ${accountIndex + 1}/${accounts.length}: ${account.nickname || account.ml_user_id}`,
+      current: accountIndex,
+      total: accounts.length,
+      fetched: totalFetchedOrders,
+      expected: totalExpectedOrders,
+      accountId: account.id,
+      accountNickname: account.nickname || `Conta ${account.ml_user_id}`
+    });
 
     let current = account;
     try {
@@ -922,6 +947,13 @@ export async function POST(req: NextRequest) {
       const message = error instanceof Error ? error.message : "Erro desconhecido ao renovar token.";
       errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message });
       console.error(`[meli][vendas] Erro ao renovar token da conta ${account.id}:`, error);
+      
+      // Enviar erro via SSE
+      sendProgressToUser(userId, {
+        type: "sync_error",
+        message: `Erro ao renovar token da conta ${account.nickname || account.ml_user_id}`,
+        errorCode: "TOKEN_REFRESH_FAILED"
+      });
       continue;
     }
 
@@ -932,10 +964,14 @@ export async function POST(req: NextRequest) {
       totalFetchedOrders += accountOrders.length;
       orders.push(...accountOrders);
 
+      console.log(`[Sync] Conta ${account.nickname}: ${accountOrders.length} vendas encontradas`);
+
       // Salvar vendas no banco de dados em lotes
       if (accountOrders.length > 0) {
         const batchResult = await saveVendasBatch(accountOrders, session.sub, 10);
         totalSavedOrders += batchResult.saved;
+        
+        console.log(`[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas`);
         
         if (batchResult.errors > 0) {
           console.warn(`[meli][vendas] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
@@ -945,6 +981,13 @@ export async function POST(req: NextRequest) {
       const message = error instanceof Error ? error.message : "Erro desconhecido ao buscar pedidos.";
       errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
       console.error(`[meli][vendas] Erro ao buscar pedidos da conta ${current.id}:`, error);
+      
+      // Enviar erro via SSE
+      sendProgressToUser(userId, {
+        type: "sync_error",
+        message: `Erro ao buscar vendas da conta ${current.nickname || current.ml_user_id}: ${message}`,
+        errorCode: "FETCH_ORDERS_FAILED"
+      });
     }
   }
 
@@ -953,8 +996,14 @@ export async function POST(req: NextRequest) {
     type: "sync_complete",
     message: `Sincronização concluída! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
     current: totalSavedOrders,
-    total: totalExpectedOrders
+    total: totalExpectedOrders,
+    fetched: totalSavedOrders,
+    expected: totalExpectedOrders
   });
+
+  // Invalidar cache de vendas após sincronização
+  invalidateVendasCache(userId);
+  console.log(`[Cache] Cache de vendas invalidado para usuário ${userId}`);
 
   // Fechar conexões SSE após um pequeno delay
   setTimeout(() => {

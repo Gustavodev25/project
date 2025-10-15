@@ -82,22 +82,34 @@ export function useVendas(platform: string = "Mercado Livre") {
   // Hook para progresso em tempo real
   const { isConnected, progress, connect, disconnect } = useVendasSyncProgress();
 
-  // Atualizar progresso quando receber eventos SSE
+  // Atualizar progresso quando receber eventos SSE (Mercado Livre e Shopee)
   useEffect(() => {
-    if (progress && platform === "Mercado Livre") {
-      if (progress.type === "sync_progress" && progress.current && progress.total) {
+    if (progress && (platform === "Mercado Livre" || platform === "Shopee")) {
+      console.log(`[useVendas] Progresso SSE recebido (${platform}):`, progress);
+      
+      if (progress.type === "sync_progress") {
+        // Atualizar progresso usando fetched/expected ou current/total
+        const fetched = progress.fetched || progress.current || 0;
+        const expected = progress.expected || progress.total || 0;
+        
         setSyncProgress({
-          fetched: progress.current,
-          expected: progress.total
+          fetched,
+          expected
         });
+        console.log(`[useVendas] Progresso atualizado: ${fetched}/${expected}`);
       } else if (progress.type === "sync_complete") {
+        console.log('[useVendas] Sincronização completa - limpando estados e recarregando vendas');
+        
+        // Resetar estados de loading
         setIsSyncing(false);
         setIsTableLoading(false);
-        // Desconectar após conclusão
+        
+        // Desconectar SSE após um delay
         setTimeout(() => {
           disconnect();
-        }, 3000);
+        }, 2000);
       } else if (progress.type === "sync_error") {
+        console.error('[useVendas] Erro na sincronização:', progress);
         setIsSyncing(false);
         setIsTableLoading(false);
         disconnect();
@@ -130,12 +142,16 @@ export function useVendas(platform: string = "Mercado Livre") {
     try {
       setIsSyncing(true);
       setIsTableLoading(true);
-      // Mostrar que a sincronização iniciou
-      setSyncProgress({ fetched: 0, expected: 1 });
+      setSyncProgress({ fetched: 0, expected: 0 });
+      setSyncErrors([]);
 
-      // Conectar ao SSE para receber progresso em tempo real
-      if (platform === "Mercado Livre") {
-        connect();
+      // Conectar ao SSE para progresso em tempo real (Mercado Livre e Shopee)
+      if (platform === "Mercado Livre" || platform === "Shopee") {
+        try {
+          connect();
+        } catch (error) {
+          console.warn('[Sync] SSE não disponível, continuando sem progresso em tempo real:', error);
+        }
       }
 
       let res: Response;
@@ -164,7 +180,7 @@ export function useVendas(platform: string = "Mercado Livre") {
         }
 
         const payload: MeliOrdersResponse & { totals?: { expected?: number; fetched?: number; saved?: number } } = await res.json();
-        const realTotals = payload.totals || {};
+        const realTotals = payload.totals || { fetched: 0, expected: 0 };
         setSyncProgress({
           fetched: realTotals.fetched || 0,
           expected: realTotals.expected || realTotals.fetched || 0
@@ -197,7 +213,7 @@ export function useVendas(platform: string = "Mercado Livre") {
       }
 
       const payload: MeliOrdersResponse & { totals?: { expected?: number; fetched?: number; saved?: number } } = await res.json();
-      const realTotals = payload.totals || {};
+      const realTotals = payload.totals || { fetched: 0, expected: 0 };
       
       setSyncProgress({
         fetched: realTotals.fetched || 0,

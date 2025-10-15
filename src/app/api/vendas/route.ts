@@ -33,22 +33,96 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Buscar vendas do Mercado Livre
-    const vendasMeli = await prisma.meliVenda.findMany({
-      where: { userId: session.sub },
-      orderBy: { dataVenda: "desc" },
-      include: {
-        meliAccount: {
-          select: { nickname: true, ml_user_id: true },
-        },
-      },
-    });
+    // Calcular data de início: 1 mês atrás a partir do primeiro dia do mês atual
+    const hoje = new Date();
+    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const dataInicio = new Date(primeiroDiaMesAtual);
+    dataInicio.setMonth(dataInicio.getMonth() - 1); // Voltar 1 mês
+    
+    console.log(`[Vendas Gerais] Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
 
-    // Buscar vendas do Shopee
-    const vendasShopee = await prisma.shopeeVenda.findMany({
-      where: { userId: session.sub },
-      orderBy: { dataVenda: "desc" },
-    });
+    // Buscar vendas do Mercado Livre e Shopee em PARALELO para melhor performance
+    const [vendasMeli, vendasShopee] = await Promise.all([
+      prisma.meliVenda.findMany({
+        where: { 
+          userId: session.sub,
+          dataVenda: {
+            gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+          }
+        },
+        select: {
+          orderId: true,
+          dataVenda: true,
+          status: true,
+          conta: true,
+          meliAccountId: true,
+          valorTotal: true,
+          quantidade: true,
+          unitario: true,
+          taxaPlataforma: true,
+          frete: true,
+          freteAjuste: true,
+          titulo: true,
+          sku: true,
+          comprador: true,
+          logisticType: true,
+          envioMode: true,
+          shippingStatus: true,
+          shippingId: true,
+          exposicao: true,
+          tipoAnuncio: true,
+          ads: true,
+          plataforma: true,
+          canal: true,
+          tags: true,
+          internalTags: true,
+          latitude: true,
+          longitude: true,
+          rawData: true,
+          sincronizadoEm: true,
+          meliAccount: {
+            select: { nickname: true, ml_user_id: true },
+          },
+        },
+        orderBy: { dataVenda: "desc" },
+      }),
+      prisma.shopeeVenda.findMany({
+        where: { 
+          userId: session.sub,
+          dataVenda: {
+            gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+          }
+        },
+        select: {
+          orderId: true,
+          dataVenda: true,
+          status: true,
+          conta: true,
+          shopeeAccountId: true,
+          valorTotal: true,
+          quantidade: true,
+          unitario: true,
+          taxaPlataforma: true,
+          frete: true,
+          freteAjuste: true,
+          titulo: true,
+          sku: true,
+          comprador: true,
+          logisticType: true,
+          envioMode: true,
+          shippingStatus: true,
+          shippingId: true,
+          plataforma: true,
+          canal: true,
+          tags: true,
+          internalTags: true,
+          sincronizadoEm: true,
+          latitude: true,
+          longitude: true,
+        },
+        orderBy: { dataVenda: "desc" },
+      })
+    ]);
 
     // Buscar SKUs únicos para cálculo de CMV
     const skusUnicos = Array.from(
@@ -244,15 +318,19 @@ export async function GET(req: NextRequest) {
         envioMode: venda.envioMode,
         shippingStatus: venda.shippingStatus,
         shippingId: venda.shippingId,
-        exposicao: venda.exposicao,
-        tipoAnuncio: venda.tipoAnuncio,
-        ads: venda.ads,
+        exposicao: null, // Shopee não tem exposição
+        tipoAnuncio: null, // Shopee não tem tipo de anúncio
+        ads: null, // Shopee não tem ADS
         plataforma: venda.plataforma,
         canal: venda.canal,
         tags: venda.tags,
         internalTags: venda.internalTags,
-        latitude: null,
-        longitude: null,
+        latitude: venda.latitude !== null && venda.latitude !== undefined
+          ? Number(venda.latitude)
+          : null,
+        longitude: venda.longitude !== null && venda.longitude !== undefined
+          ? Number(venda.longitude)
+          : null,
         raw: {
           listing_type_id: null,
           tags: venda.tags,

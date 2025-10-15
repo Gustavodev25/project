@@ -512,7 +512,51 @@ export default function TabelaVendas({
   ];
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden w-full">
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden w-full relative">
+      {/* Overlay de sincronização - aparece SEMPRE que está sincronizando */}
+      {isSyncing && (
+        <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="w-full max-w-md mx-auto p-6">
+            <div className="flex items-center justify-between text-xs font-semibold text-gray-600 mb-2">
+              <span>Sincronização {platform || "Mercado Livre"}</span>
+              <span>
+                {syncProgress.fetched > 0 && syncProgress.expected > 0
+                  ? `${Math.min(100, Math.round((syncProgress.fetched / syncProgress.expected) * 100))}%`
+                  : "..."}
+              </span>
+            </div>
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${syncProgress.fetched === 0 ? "bg-orange-400 animate-pulse" : "bg-orange-500"}`}
+                style={{ width: `${syncProgress.fetched > 0 && syncProgress.expected > 0 ? Math.min(100, Math.round((syncProgress.fetched / syncProgress.expected) * 100)) : 30}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-gray-500 text-center">
+              {syncProgress.fetched > 0 && syncProgress.expected > 0
+                ? `${syncProgress.fetched} de ${syncProgress.expected} pedidos sincronizados`
+                : "Carregando dados da sincronização..."}
+            </div>
+            
+            {/* Progresso detalhado */}
+            {progress && progress.type === "sync_progress" && (
+              <div className="mt-3 text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                <div className="font-medium">{progress.message}</div>
+                {progress.accountNickname && (
+                  <div className="text-gray-500 mt-1">
+                    Conta: {progress.accountNickname}
+                  </div>
+                )}
+                {progress.page !== undefined && (
+                  <div className="text-gray-500">
+                    Página {progress.page} • Offset: {progress.offset}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {syncErrors.length > 0 && (
           <div className="px-6 py-3 bg-orange-50 border-b border-orange-100 text-sm text-orange-700">
             <p className="font-medium">Ocorreram alguns avisos durante a sincronização:</p>
@@ -526,101 +570,16 @@ export default function TabelaVendas({
             </ul>
           </div>
       )}
-      {vendasFiltradas.length === 0 && vendas.length === 0 ? (
+      {isTableLoading && vendas.length === 0 && !isSyncing ? (
+        <div className="flex items-center justify-center min-h-[320px] bg-white">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-orange-500 mx-auto mb-4"></div>
+            <p className="text-sm font-medium text-gray-600">Carregando vendas...</p>
+            <p className="text-xs text-gray-500 mt-1">Buscando dados dos últimos 2 meses</p>
+          </div>
+        </div>
+      ) : vendasFiltradas.length === 0 && vendas.length === 0 ? (
         <div className="relative">
-          {(isSyncing) && (
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
-              <div className="w-full max-w-md mx-auto p-6">
-                <div className="flex items-center justify-between text-xs font-semibold text-gray-600 mb-2">
-                  <span>Sincronização {platform || "Mercado Livre"}</span>
-                  <span>
-                    {syncProgress.fetched > 0 && syncProgress.expected > 0
-                      ? `${Math.min(100, Math.round((syncProgress.fetched / syncProgress.expected) * 100))}%`
-                      : isSyncing ? "..." : "-"}
-                  </span>
-                </div>
-                <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-500 ${isSyncing && syncProgress.fetched === 0 ? "bg-orange-400 animate-pulse" : "bg-orange-500"}`}
-                    style={{ width: `${syncProgress.fetched > 0 && syncProgress.expected > 0 ? Math.min(100, Math.round((syncProgress.fetched / syncProgress.expected) * 100)) : isSyncing ? 30 : 0}%` }}
-                  />
-                </div>
-                <div className="mt-2 text-xs text-gray-500 text-center">
-                  {syncProgress.fetched > 0 && syncProgress.expected > 0
-                    ? isSyncing
-                      ? `${syncProgress.fetched} de ${syncProgress.expected} pedidos sincronizados`
-                      : `Sincronização concluída: ${syncProgress.fetched} pedidos encontrados`
-                    : isSyncing
-                    ? "Carregando dados da sincronização..."
-                    : "Pronto para sincronizar"}
-                </div>
-                
-                {/* Avisos e logs de debug */}
-                {progress && (
-                  <div className="mt-3 space-y-2">
-                    {/* Progresso detalhado */}
-                    {progress.type === "sync_progress" && (
-                      <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                        <div className="font-medium">{progress.message}</div>
-                        {progress.accountNickname && (
-                          <div className="text-gray-500 mt-1">
-                            Conta: {progress.accountNickname}
-                          </div>
-                        )}
-                        {progress.page && (
-                          <div className="text-gray-500">
-                            Página {progress.page} • Offset: {progress.offset} • Total: {progress.expected}
-                          </div>
-                        )}
-                        {progress.fetched && progress.expected && (
-                          <div className="text-gray-500 mt-1">
-                            Progresso: {progress.fetched} de {progress.expected} vendas processadas
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Avisos */}
-                    {progress.type === "sync_warning" && (
-                      <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
-                        <div className="font-medium flex items-center gap-1">
-                          ⚠️ Aviso: {progress.message}
-                        </div>
-                        {progress.errorCode && (
-                          <div className="text-yellow-700 mt-1">
-                            Código: {progress.errorCode}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Erros */}
-                    {progress.type === "sync_error" && (
-                      <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
-                        <div className="font-medium flex items-center gap-1">
-                          ✗ Erro: {progress.message}
-                        </div>
-                        {progress.errorCode && (
-                          <div className="text-red-700 mt-1">
-                            Código: {progress.errorCode}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Sucesso */}
-                    {progress.type === "sync_complete" && (
-                      <div className="text-xs text-green-600 bg-green-50 p-2 rounded border border-green-200">
-                        <div className="font-medium flex items-center gap-1">
-                          ✓ {progress.message}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
           <EmptyState
             title={vendas.length === 0 ? "Nenhuma venda encontrada" : "Nenhuma venda encontrada para este filtro"}
             description={vendas.length === 0 

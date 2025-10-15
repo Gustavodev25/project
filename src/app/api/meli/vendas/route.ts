@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
+import { cache, createCacheKey } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -33,14 +34,65 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Verificar cache primeiro (TTL de 30 segundos)
+    const cacheKey = createCacheKey("vendas-meli", session.sub);
+    const cachedData = cache.get<any>(cacheKey, 30000);
+    
+    if (cachedData) {
+      console.log(`[Cache Hit] Retornando vendas do Mercado Livre do cache`);
+      return NextResponse.json(cachedData);
+    }
+
+    // Calcular data de início: 1 mês atrás a partir do primeiro dia do mês atual
+    const hoje = new Date();
+    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const dataInicio = new Date(primeiroDiaMesAtual);
+    dataInicio.setMonth(dataInicio.getMonth() - 1); // Voltar 1 mês
+    
+    console.log(`Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
+
     const vendas = await prisma.meliVenda.findMany({
-      where: { userId: session.sub },
-      orderBy: { dataVenda: "desc" },
-      include: {
+      where: { 
+        userId: session.sub,
+        dataVenda: {
+          gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+        }
+      },
+      select: {
+        orderId: true,
+        dataVenda: true,
+        status: true,
+        conta: true,
+        meliAccountId: true,
+        valorTotal: true,
+        quantidade: true,
+        unitario: true,
+        taxaPlataforma: true,
+        frete: true,
+        freteAjuste: true,
+        titulo: true,
+        sku: true,
+        comprador: true,
+        logisticType: true,
+        envioMode: true,
+        shippingStatus: true,
+        shippingId: true,
+        exposicao: true,
+        tipoAnuncio: true,
+        ads: true,
+        plataforma: true,
+        canal: true,
+        tags: true,
+        internalTags: true,
+        latitude: true,
+        longitude: true,
+        rawData: true,
+        sincronizadoEm: true,
         meliAccount: {
           select: { nickname: true, ml_user_id: true },
         },
       },
+      orderBy: { dataVenda: "desc" },
     });
 
     const skusUnicos = Array.from(
@@ -183,12 +235,18 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({
+    const response = {
       vendas: vendasFormatted,
       total: vendas.length,
       lastSync:
         vendas.length > 0 ? vendas[0].sincronizadoEm.toISOString() : null,
-    });
+    };
+
+    // Armazenar no cache
+    cache.set(cacheKey, response);
+    console.log(`[Cache Miss] Vendas do Mercado Livre salvas no cache`);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error("Erro ao buscar vendas:", error);
     return new NextResponse("Erro interno do servidor", { status: 500 });

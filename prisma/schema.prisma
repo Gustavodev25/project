@@ -175,6 +175,9 @@ model MeliVenda {
   @@index([meliAccountId])
   @@index([dataVenda])
   @@index([orderId])
+  @@index([userId, dataVenda(sort: Desc)]) // Índice composto para queries principais
+  @@index([sku]) // Índice para busca por SKU
+  @@index([status]) // Índice para filtros de status
   @@map("meli_venda")
 }
 
@@ -227,6 +230,9 @@ model ShopeeVenda {
   @@index([shopeeAccountId])
   @@index([dataVenda])
   @@index([orderId])
+  @@index([userId, dataVenda(sort: Desc)]) // Índice composto para queries principais
+  @@index([sku]) // Índice para busca por SKU
+  @@index([status]) // Índice para filtros de status
   @@map("shopee_venda")
 }
 
