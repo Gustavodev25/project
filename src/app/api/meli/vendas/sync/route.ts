@@ -14,6 +14,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
+const MAX_OFFSET = 10000; // Limite máximo da API do Mercado Livre
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -347,7 +348,7 @@ async function fetchOrdersForAccount(
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
-  while (offset < total) {
+  while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
     // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
     const url = new URL(`${MELI_API_BASE}/orders/search`);
@@ -469,6 +470,18 @@ async function fetchOrdersForAccount(
     
     // Parar apenas se não há mais vendas ou atingiu o total
     if (fetched === 0 || offset >= total) break;
+  }
+
+  // Avisar se atingiu o limite máximo de offset
+  if (offset >= MAX_OFFSET && total > MAX_OFFSET) {
+    const vendasRestantes = total - MAX_OFFSET;
+    console.log(`[meli][vendas] AVISO: Limite de ${MAX_OFFSET} vendas atingido. ${vendasRestantes} vendas não foram sincronizadas.`);
+    
+    sendProgressToUser(userId, {
+      type: "sync_warning",
+      message: `Limite da API atingido: sincronizadas ${MAX_OFFSET} das ${total} vendas. Para sincronizar todas, use filtros de data mais específicos.`,
+      errorCode: "MAX_OFFSET_REACHED"
+    });
   }
 
   return { orders: results, expectedTotal };
