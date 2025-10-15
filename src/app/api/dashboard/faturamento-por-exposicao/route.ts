@@ -80,11 +80,13 @@ export async function GET(req: NextRequest) {
   let session;
   try {
     session = await assertSessionToken(sessionCookie);
-  } catch {
+  } catch (error) {
+    console.error('[FaturamentoPorExposicao] Erro de autenticação:', error);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
+    console.log('[FaturamentoPorExposicao] Iniciando requisição');
     const url = new URL(req.url);
     const periodoParam = url.searchParams.get("periodo") || "todos";
     const dataInicioParam = url.searchParams.get("dataInicio");
@@ -134,25 +136,37 @@ export async function GET(req: NextRequest) {
       : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere };
 
     // Buscar vendas do Mercado Livre
+    console.log('[FaturamentoPorExposicao] Buscando vendas com filtros:', {
+      usarTodasVendas,
+      periodo: periodoParam,
+      accountPlatform: accountPlatformParam,
+      accountId: accountIdParam
+    });
+    
     const vendas = await prisma.meliVenda.findMany({
       where: whereClauseMeli,
       select: {
+        orderId: true,
         valorTotal: true,
         exposicao: true,
         dataVenda: true,
       },
-      distinct: ['orderId'],
       orderBy: { dataVenda: "desc" },
     });
+    
+    // Remover duplicatas manualmente para evitar problemas com distinct
+    const vendasUnicas = Array.from(
+      new Map(vendas.map(v => [v.orderId, v])).values()
+    );
 
-    console.log(`[FaturamentoPorExposicao] Encontradas ${vendas.length} vendas Meli no período`);
+    console.log(`[FaturamentoPorExposicao] Encontradas ${vendas.length} vendas totais, ${vendasUnicas.length} únicas no período`);
     console.log(`[FaturamentoPorExposicao] Período: ${usarTodasVendas ? 'todos' : `${start.toISOString()} - ${end.toISOString()}`}`);
 
-    if (vendas.length > 0) {
-      const premium = vendas.filter(v => v.exposicao && v.exposicao.toLowerCase().includes('premium'));
-      const classico = vendas.filter(v => !v.exposicao || v.exposicao.toLowerCase().includes('clássico') || v.exposicao.toLowerCase().includes('classico'));
+    if (vendasUnicas.length > 0) {
+      const premium = vendasUnicas.filter(v => v.exposicao && v.exposicao.toLowerCase().includes('premium'));
+      const classico = vendasUnicas.filter(v => !v.exposicao || v.exposicao.toLowerCase().includes('clássico') || v.exposicao.toLowerCase().includes('classico'));
       console.log(`[FaturamentoPorExposicao] Premium: ${premium.length}, Clássico: ${classico.length}`);
-      console.log(`[FaturamentoPorExposicao] Exemplos exposição:`, vendas.slice(0, 5).map(v => ({ exposicao: v.exposicao, valor: v.valorTotal })));
+      console.log(`[FaturamentoPorExposicao] Exemplos exposição:`, vendasUnicas.slice(0, 5).map(v => ({ exposicao: v.exposicao, valor: v.valorTotal })));
     }
 
     // Agrupar por tipo de exposição (Premium vs Clássico) - apenas Mercado Livre
@@ -162,7 +176,7 @@ export async function GET(req: NextRequest) {
     let quantidadeClassico = 0;
 
     // Processar vendas do Mercado Livre (com exposição)
-    for (const venda of vendas) {
+    for (const venda of vendasUnicas) {
       const valor = toNumber(venda.valorTotal);
       const isPremium = venda.exposicao &&
                        venda.exposicao.toString().toLowerCase().includes('premium');
@@ -216,7 +230,19 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(resultado);
   } catch (err) {
-    console.error("Erro ao calcular faturamento por exposição:", err);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    console.error("[FaturamentoPorExposicao] Erro ao calcular faturamento por exposição:", err);
+    const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+    const errorStack = err instanceof Error ? err.stack : undefined;
+    
+    console.error("[FaturamentoPorExposicao] Detalhes do erro:", {
+      message: errorMessage,
+      stack: errorStack,
+      name: err instanceof Error ? err.name : 'Unknown'
+    });
+    
+    return NextResponse.json({ 
+      error: "Erro interno",
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined 
+    }, { status: 500 });
   }
 }
