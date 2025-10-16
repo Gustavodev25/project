@@ -22,11 +22,15 @@ function toNumber(v: unknown): number {
 }
 
 export async function GET(req: NextRequest) {
+  console.log('[Dashboard Stats] 📊 Requisição recebida');
+  
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
     session = await assertSessionToken(sessionCookie);
-  } catch {
+    console.log('[Dashboard Stats] ✅ Sessão validada:', session.sub);
+  } catch (error) {
+    console.error('[Dashboard Stats] ❌ Erro de autenticação:', error);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -150,6 +154,8 @@ export async function GET(req: NextRequest) {
     // Helper for trend calculations (apenas vendas pagas/completas)
     const paidOnly = getStatusWhere('pagos');
 
+    console.log('[Dashboard Stats] 🔍 Buscando vendas do banco de dados...');
+    
     // Buscar vendas do Mercado Livre e Shopee em PARALELO para melhor performance
     const [vendasMeli, vendasShopee] = await Promise.all([
       prisma.meliVenda.findMany({
@@ -186,6 +192,11 @@ export async function GET(req: NextRequest) {
       })
     ]);
 
+    console.log('[Dashboard Stats] ✅ Vendas carregadas:', {
+      mercadoLivre: vendasMeli.length,
+      shopee: vendasShopee.length,
+    });
+
     // Consolidar vendas baseado no filtro de canal
     let vendas;
     if (canalParam === 'mercado_livre') {
@@ -196,6 +207,8 @@ export async function GET(req: NextRequest) {
       // Se 'todos' ou não especificado, combinar ambas
       vendas = [...vendasMeli, ...vendasShopee];
     }
+
+    console.log('[Dashboard Stats] 📊 Processando', vendas.length, 'vendas');
 
     // Unique SKUs for CMV calculation
     const skusUnicos = Array.from(
@@ -259,14 +272,23 @@ export async function GET(req: NextRequest) {
     // Calcular impostos baseado nas alíquotas cadastradas
     let impostosTotal = 0;
     
-    // Buscar alíquotas ativas do usuário
-    // @ts-ignore - modelo será disponível após executar migration
-    const aliquotas = await prisma.aliquotaImposto.findMany({
-      where: {
-        userId: session.sub,
-        ativo: true,
-      },
-    });
+    // Buscar alíquotas ativas do usuário (com fallback se modelo não existir)
+    let aliquotas: any[] = [];
+    try {
+      // @ts-ignore - modelo será disponível após executar migration
+      if (prisma.aliquotaImposto) {
+        aliquotas = await prisma.aliquotaImposto.findMany({
+          where: {
+            userId: session.sub,
+            ativo: true,
+          },
+        });
+      }
+    } catch (error) {
+      // Modelo AliquotaImposto não existe no schema - ignorar silenciosamente
+      console.log('[Dashboard Stats] Modelo AliquotaImposto não disponível, impostos não serão calculados');
+      aliquotas = [];
+    }
 
     // Se não houver alíquotas, pular o cálculo
     if (aliquotas.length > 0 && useRange) {
@@ -373,29 +395,49 @@ export async function GET(req: NextRequest) {
     const mercadoLivreFrete = fretePorPlataforma.get("Mercado Livre") || 0;
     const shopeeFrete = fretePorPlataforma.get("Shopee") || 0;
 
-    return NextResponse.json({
-      faturamentoTotal,
-      faturamentoTendencia,
-      impostos: impostosTotal,
+    // Garantir que todos os valores são números válidos (não NaN, Infinity, etc)
+    const safeNumber = (val: number) => {
+      if (typeof val !== 'number' || !Number.isFinite(val)) return 0;
+      return val;
+    };
+
+    const response = {
+      faturamentoTotal: safeNumber(faturamentoTotal),
+      faturamentoTendencia: safeNumber(faturamentoTendencia),
+      impostos: safeNumber(impostosTotal),
       taxasPlataformas: {
-        total: taxasTotalAbs,
-        mercadoLivre: mercadoLivreTaxa,
-        shopee: shopeeTaxa,
+        total: safeNumber(taxasTotalAbs),
+        mercadoLivre: safeNumber(mercadoLivreTaxa),
+        shopee: safeNumber(shopeeTaxa),
       },
       custoFrete: {
-        total: freteTotalAbs,
-        mercadoLivre: mercadoLivreFrete,
-        shopee: shopeeFrete,
+        total: safeNumber(freteTotalAbs),
+        mercadoLivre: safeNumber(mercadoLivreFrete),
+        shopee: safeNumber(shopeeFrete),
       },
-      margemContribuicao: receitaLiquida, // Receita líquida após taxas e frete
-      cmv: cmvTotal,
-      lucroBruto,
-      vendasRealizadas,
-      unidadesVendidas,
+      margemContribuicao: safeNumber(receitaLiquida), // Receita líquida após taxas e frete
+      cmv: safeNumber(cmvTotal),
+      lucroBruto: safeNumber(lucroBruto),
+      vendasRealizadas: safeNumber(vendasRealizadas),
+      unidadesVendidas: safeNumber(unidadesVendidas),
       periodo: useRange ? { start: start.toISOString(), end: end.toISOString() } : null,
+    };
+
+    console.log('[Dashboard Stats] ✅ Resposta calculada com sucesso:', {
+      vendas: response.vendasRealizadas,
+      faturamento: response.faturamentoTotal,
     });
+
+    return NextResponse.json(response);
   } catch (err) {
-    console.error("Erro ao calcular stats do dashboard:", err);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    console.error("❌ [Dashboard Stats] Erro ao calcular stats:", err);
+    console.error("❌ [Dashboard Stats] Stack trace:", err instanceof Error ? err.stack : 'N/A');
+    console.error("❌ [Dashboard Stats] Mensagem:", err instanceof Error ? err.message : String(err));
+    
+    return NextResponse.json({ 
+      error: "Erro ao calcular estatísticas",
+      message: err instanceof Error ? err.message : "Erro desconhecido",
+      // Não enviar stack trace em produção por segurança
+    }, { status: 500 });
   }
 }
