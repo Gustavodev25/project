@@ -5,7 +5,8 @@ import { Decimal } from "@prisma/client/runtime/library";
 import {
   getShopeeOrderList,
   getShopeeOrderDetail,
-  getShopeeEscrowDetail
+  getShopeeEscrowDetail,
+  refreshShopeeAccountToken
 } from "@/lib/shopee";
 import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
 import { invalidateVendasCache } from "@/lib/cache";
@@ -41,8 +42,54 @@ function epochSeconds(d: Date): number {
   return Math.floor(d.getTime() / 1000);
 }
 
+// Função auxiliar para executar operações com retry automático de token
+async function executeWithTokenRetry<T>(
+  accountRef: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date },
+  operation: (accessToken: string) => Promise<T>,
+  maxRetries: number = 1
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation(accountRef.access_token);
+    } catch (error) {
+      lastError = error as Error;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Verificar se o erro é de token inválido
+      if (errorMessage.includes('invalid_access_token') || errorMessage.includes('invalid_acceess_token')) {
+        if (attempt < maxRetries) {
+          console.log(`[Shopee Sync] Token inválido detectado. Tentando renovar (tentativa ${attempt + 1}/${maxRetries})...`);
+          
+          try {
+            // Forçar renovação do token
+            const refreshed = await refreshShopeeAccountToken(accountRef, true);
+            accountRef.access_token = refreshed.access_token;
+            accountRef.refresh_token = refreshed.refresh_token;
+            accountRef.expires_at = refreshed.expires_at;
+            
+            console.log(`[Shopee Sync] Token renovado com sucesso. Tentando operação novamente...`);
+            // Continuar para próxima tentativa com o novo token
+          } catch (refreshError) {
+            console.error(`[Shopee Sync] Falha ao renovar token:`, refreshError);
+            throw new Error(`Falha ao renovar token: ${refreshError instanceof Error ? refreshError.message : 'Erro desconhecido'}`);
+          }
+        } else {
+          throw new Error(`Token inválido após ${maxRetries} tentativas de renovação`);
+        }
+      } else {
+        // Outros erros não relacionados a token, lançar imediatamente
+        throw error;
+      }
+    }
+  }
+  
+  throw lastError || new Error('Operação falhou após tentativas');
+}
+
 async function fetchAndEnrichShopeeOrders(
-  account: { id: string; shop_id: string; access_token: string },
+  account: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date },
   from: Date,
   to: Date,
 ) {
@@ -52,15 +99,17 @@ async function fetchAndEnrichShopeeOrders(
   const orderSnList: string[] = [];
   let cursor: string | undefined = undefined;
   do {
-    const listResult = await getShopeeOrderList({
-      partnerId,
-      partnerKey,
-      accessToken: account.access_token,
-      shopId: account.shop_id,
-      createTimeFrom: epochSeconds(from),
-      createTimeTo: epochSeconds(to),
-      pageSize: 100,
-      cursor,
+    const listResult = await executeWithTokenRetry(account, async (accessToken) => {
+      return await getShopeeOrderList({
+        partnerId,
+        partnerKey,
+        accessToken,
+        shopId: account.shop_id,
+        createTimeFrom: epochSeconds(from),
+        createTimeTo: epochSeconds(to),
+        pageSize: 100,
+        cursor,
+      });
     });
     listResult.order_list.forEach(order => orderSnList.push(order.order_sn));
     cursor = listResult.more ? listResult.next_cursor : undefined;
@@ -73,30 +122,34 @@ async function fetchAndEnrichShopeeOrders(
   const detailedOrders: any[] = [];
   for (let i = 0; i < orderSnList.length; i += 50) {
     const batchSnList = orderSnList.slice(i, i + 50);
-    const detailsResult = await getShopeeOrderDetail({
-      partnerId,
-      partnerKey,
-      accessToken: account.access_token,
-      shopId: account.shop_id,
-      orderSnList: batchSnList.join(','),
+    const detailsResult = await executeWithTokenRetry(account, async (accessToken) => {
+      return await getShopeeOrderDetail({
+        partnerId,
+        partnerKey,
+        accessToken,
+        shopId: account.shop_id,
+        orderSnList: batchSnList.join(','),
+      });
     });
     detailedOrders.push(...detailsResult.order_list);
   }
 
   const enrichedOrders: any[] = [];
-  const BATCH_SIZE = 25;
+  const BATCH_SIZE = 50; // Aumentado de 25 para 50 para melhor performance
 
   for (let i = 0; i < detailedOrders.length; i += BATCH_SIZE) {
     const batch = detailedOrders.slice(i, i + BATCH_SIZE);
 
     const promises = batch.map(async (order) => {
       try {
-        const escrowResult = await getShopeeEscrowDetail({
-          partnerId,
-          partnerKey,
-          accessToken: account.access_token,
-          shopId: account.shop_id,
-          orderSn: order.order_sn,
+        const escrowResult = await executeWithTokenRetry(account, async (accessToken) => {
+          return await getShopeeEscrowDetail({
+            partnerId,
+            partnerKey,
+            accessToken,
+            shopId: account.shop_id,
+            orderSn: order.order_sn,
+          });
         });
         order.escrow_details = escrowResult.escrow_detail;
         return order;
@@ -113,16 +166,13 @@ async function fetchAndEnrichShopeeOrders(
         enrichedOrders.push(res.value);
       }
     });
-
-    if (i + BATCH_SIZE < detailedOrders.length) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    // Delay removido para aumentar velocidade
   }
 
   return enrichedOrders;
 }
 
-async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string; access_token: string }, since: Date) {
+async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date }, since: Date) {
   const allOrders: any[] = [];
   const now = new Date();
   const MAX_WINDOW_DAYS = 15;
@@ -158,8 +208,20 @@ export async function POST(req: NextRequest) {
 
   const userId = session.sub;
 
+  // Ler body para verificar se há contas específicas para sincronizar
+  let accountIds: string[] | undefined;
+  try {
+    const body = await req.json().catch(() => ({}));
+    accountIds = body.accountIds;
+  } catch {
+    // Se falhar ao parsear o body, continuar sem filtro de contas
+  }
+
   try {
     console.log(`[Shopee Sync] Iniciando sincronização para usuário ${userId}`);
+    if (accountIds && accountIds.length > 0) {
+      console.log(`[Shopee Sync] Sincronizando apenas contas específicas: ${accountIds.join(", ")}`);
+    }
 
     // Dar um delay para garantir que o SSE está conectado
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -167,15 +229,23 @@ export async function POST(req: NextRequest) {
     // Enviar evento de início da sincronização
     sendProgressToUser(userId, {
       type: "sync_start",
-      message: "Iniciando sincronização de vendas do Shopee...",
+      message: accountIds && accountIds.length > 0 
+        ? `Iniciando sincronização de ${accountIds.length} conta(s) do Shopee...`
+        : "Iniciando sincronização de vendas do Shopee...",
       current: 0,
       total: 0,
       fetched: 0,
       expected: 0
     });
 
+    // Filtrar por contas específicas se fornecido
+    const whereClause: any = { userId: session.sub, expires_at: { gt: new Date() } };
+    if (accountIds && accountIds.length > 0) {
+      whereClause.id = { in: accountIds };
+    }
+
     const contasAtivas = await prisma.shopeeAccount.findMany({
-      where: { userId: session.sub, expires_at: { gt: new Date() } },
+      where: whereClause,
     });
 
     console.log(`[Shopee Sync] Encontradas ${contasAtivas.length} conta(s) do Shopee`);
@@ -192,20 +262,66 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "Nenhuma conta Shopee ativa encontrada." }, { status: 404 });
     }
 
-    const summaries: AccountSummary[] = contasAtivas.map((c) => ({ id: c.id, shop_id: c.shop_id }));
+    // Verificar e renovar tokens preventivamente antes de iniciar a sincronização
+    console.log(`[Shopee Sync] Verificando validade dos tokens...`);
+    sendProgressToUser(userId, {
+      type: "sync_progress",
+      message: "Verificando tokens de acesso...",
+      current: 0,
+      total: 0,
+      fetched: 0,
+      expected: 0
+    });
+
+    const contasAtualizadas = [];
+    for (let i = 0; i < contasAtivas.length; i++) {
+      const conta = contasAtivas[i];
+      try {
+        // Tentar renovar o token (só renovará se estiver expirado ou próximo da expiração)
+        const refreshedAccount = await refreshShopeeAccountToken(conta, false);
+        contasAtualizadas.push({
+          ...conta,
+          access_token: refreshedAccount.access_token,
+          refresh_token: refreshedAccount.refresh_token,
+          expires_at: refreshedAccount.expires_at,
+        });
+        console.log(`[Shopee Sync] Token da conta ${conta.shop_id} verificado/renovado com sucesso`);
+      } catch (error) {
+        console.error(`[Shopee Sync] Falha ao renovar token da conta ${conta.shop_id}:`, error);
+        sendProgressToUser(userId, {
+          type: "sync_error",
+          message: `Falha ao renovar token da conta ${conta.shop_id}. Reconecte a conta.`,
+          errorCode: "TOKEN_REFRESH_FAILED"
+        });
+        // Não incluir essa conta na sincronização
+      }
+    }
+
+    if (contasAtualizadas.length === 0) {
+      sendProgressToUser(userId, {
+        type: "sync_error",
+        message: "Nenhuma conta com token válido. Reconecte suas contas.",
+        errorCode: "NO_VALID_ACCOUNTS"
+      });
+      return NextResponse.json({ 
+        message: "Nenhuma conta Shopee com token válido encontrada. Reconecte suas contas." 
+      }, { status: 400 });
+    }
+
+    const summaries: AccountSummary[] = contasAtualizadas.map((c) => ({ id: c.id, shop_id: c.shop_id }));
     const allOrdersPayload: ShopeeOrderPayload[] = [];
     const errors: SyncError[] = [];
     let totalSaved = 0;
 
-    for (let accountIndex = 0; accountIndex < contasAtivas.length; accountIndex++) {
-      const conta = contasAtivas[accountIndex];
+    for (let accountIndex = 0; accountIndex < contasAtualizadas.length; accountIndex++) {
+      const conta = contasAtualizadas[accountIndex];
       
       // Enviar progresso: processando conta
       sendProgressToUser(userId, {
         type: "sync_progress",
-        message: `Processando conta ${accountIndex + 1}/${contasAtivas.length}: Loja ${conta.shop_id}`,
+        message: `Processando conta ${accountIndex + 1}/${contasAtualizadas.length}: Loja ${conta.shop_id}`,
         current: accountIndex,
-        total: contasAtivas.length,
+        total: contasAtualizadas.length,
         fetched: totalSaved,
         expected: allOrdersPayload.length,
         accountId: conta.id,
@@ -213,6 +329,14 @@ export async function POST(req: NextRequest) {
       });
 
       try {
+        // Buscar vendas existentes para filtrar duplicatas
+        const existingOrderIds = await prisma.shopeeVenda.findMany({
+          where: { shopeeAccountId: conta.id },
+          select: { orderId: true }
+        });
+        const existingIds = new Set(existingOrderIds.map(v => v.orderId));
+        console.log(`[Shopee Sync] Conta ${conta.shop_id}: ${existingIds.size} vendas já existem no banco`);
+
         const ultimaVenda = await prisma.shopeeVenda.findFirst({
           where: { shopeeAccountId: conta.id },
           orderBy: { dataVenda: "desc" },
@@ -225,26 +349,48 @@ export async function POST(req: NextRequest) {
         console.log(`[Shopee Sync] Conta ${conta.shop_id}: buscando desde ${since.toISOString()}`);
 
         const ordersFromAccount = await fetchAllShopeeOrdersSince(
-          { id: conta.id, shop_id: conta.shop_id, access_token: conta.access_token },
+          { 
+            id: conta.id, 
+            shop_id: conta.shop_id, 
+            access_token: conta.access_token,
+            refresh_token: conta.refresh_token,
+            expires_at: conta.expires_at
+          },
           since
         );
 
-        console.log(`[Shopee Sync] Conta ${conta.shop_id}: ${ordersFromAccount.length} vendas encontradas. Salvando...`);
+        // Filtrar vendas que já existem no banco
+        const newOrders = ordersFromAccount.filter((order: any) => {
+          const orderId = String(order.order_sn || "");
+          return !existingIds.has(orderId);
+        });
+        
+        const skippedCount = ordersFromAccount.length - newOrders.length;
+        console.log(`[Shopee Sync] Conta ${conta.shop_id}: ${ordersFromAccount.length} vendas encontradas, ${newOrders.length} novas, ${skippedCount} puladas`);
 
         // Enviar progresso de vendas encontradas
         sendProgressToUser(userId, {
           type: "sync_progress",
-          message: `Conta ${conta.shop_id}: ${ordersFromAccount.length} vendas encontradas`,
+          message: `Conta ${conta.shop_id}: ${newOrders.length} novas de ${ordersFromAccount.length} vendas (${skippedCount} já sincronizadas)`,
           current: accountIndex,
           total: contasAtivas.length,
           fetched: totalSaved,
-          expected: allOrdersPayload.length + ordersFromAccount.length
+          expected: allOrdersPayload.length + newOrders.length
         });
 
-        for (const order of ordersFromAccount) {
+        // Se não há vendas novas, pular processamento
+        if (newOrders.length === 0) {
+          console.log(`[Shopee Sync] Conta ${conta.shop_id}: Todas as vendas já existem, pulando...`);
+          continue;
+        }
+
+        // Preparar dados em lote para inserção mais rápida
+        const vendaRecords = [];
+        
+        for (const order of newOrders) {
           allOrdersPayload.push({ accountId: conta.id, shopId: conta.shop_id, order });
 
-          // Mapeamento e persistência no banco de dados
+          // Mapeamento dos dados
           const orderSn: string = String(order.order_sn);
           const dataVenda = new Date((toFiniteNumber(order.create_time) ?? 0) * 1000);
           const status: string = String(order.order_status ?? "DESCONHECIDO");
@@ -281,8 +427,9 @@ export async function POST(req: NextRequest) {
           }
           
           // Cálculo do Frete Líquido
-          // custoLiquidoFrete = (actual_shipping_fee + reverse_shipping_fee) - (shopee_shipping_rebate + buyer_paid_shipping_fee)
-          const custoLiquidoFrete = (actualShippingFee + reverseShippingFee) - (shopeeShippingRebate + buyerPaidShippingFee);
+          // Convenção: POSITIVO = receita de frete, NEGATIVO = custo de frete
+          // Fórmula invertida: Pago pelo Comprador + Subsídio - Custo Real
+          const custoLiquidoFrete = (buyerPaidShippingFee + shopeeShippingRebate) - (actualShippingFee + reverseShippingFee);
           
           // Usar o custo líquido do frete como valor principal
           const frete = roundCurrency(custoLiquidoFrete);
@@ -290,19 +437,32 @@ export async function POST(req: NextRequest) {
           const margem = roundCurrency(totalAmount - taxaPlataforma - frete);
 
           const titulo = truncateString(itemList?.[0]?.item_name, 500) || "Pedido";
-          const skuRaw = truncateString(itemList?.[0]?.item_sku ?? itemList?.[0]?.model_sku, 255);
           
-          // Verificar se o SKU existe no banco de dados para este usuário
-          let sku = null;
-          if (skuRaw) {
-            const skuExists = await prisma.sKU.findFirst({
-              where: { 
-                sku: skuRaw,
-                userId: session.sub
-              }
-            });
-            sku = skuExists ? skuRaw : null;
+          // Extrair SKU: tentar todos os campos possíveis em ordem de prioridade
+          let skuRaw = null;
+          if (itemList && itemList.length > 0) {
+            const firstItem = itemList[0];
+            // Ordem de prioridade: item_sku > model_sku > variation_sku
+            skuRaw = firstItem.item_sku || 
+                     firstItem.model_sku || 
+                     firstItem.variation_sku || 
+                     null;
+            
+            // Log para debug (será removido depois)
+            if (!skuRaw) {
+              console.log(`[Shopee Sync] Pedido ${orderSn} sem SKU. Item:`, {
+                item_sku: firstItem.item_sku,
+                model_sku: firstItem.model_sku,
+                variation_sku: firstItem.variation_sku,
+                item_id: firstItem.item_id,
+                model_id: firstItem.model_id
+              });
+            }
           }
+          
+          // Salvar o SKU diretamente na venda (igual ao Mercado Livre)
+          // A tabela SKU é usada apenas para buscar o CMV, mas não impede o SKU de ser exibido
+          const sku = skuRaw ? truncateString(String(skuRaw), 255) : null;
           
           const comprador = truncateString(order.buyer_username, 255) || "Comprador";
           const trackingNumber = truncateString(order.package_list?.[0]?.tracking_number, 255) || null;
@@ -357,20 +517,62 @@ export async function POST(req: NextRequest) {
             atualizadoEm: new Date(),
           };
 
-          const existing = await prisma.shopeeVenda.findUnique({ where: { orderId: orderSn } });
-          if (existing) {
-            await prisma.shopeeVenda.update({ where: { orderId: orderSn }, data: dataToSave });
-          } else {
-            await prisma.shopeeVenda.create({
-              data: {
-                ...dataToSave,
-                orderId: orderSn,
-                userId: session.sub,
-                shopeeAccountId: conta.id,
-              }
-            });
-          }
-          totalSaved++;
+          // Adicionar ao batch ao invés de salvar individualmente
+          vendaRecords.push({
+            ...dataToSave,
+            orderId: orderSn,
+            userId: session.sub,
+            shopeeAccountId: conta.id,
+          });
+        }
+
+        // Batch upsert - muito mais rápido que queries individuais
+        console.log(`[Shopee Sync] Salvando ${vendaRecords.length} vendas em lote...`);
+        const SAVE_BATCH_SIZE = 100;
+        for (let i = 0; i < vendaRecords.length; i += SAVE_BATCH_SIZE) {
+          const batch = vendaRecords.slice(i, i + SAVE_BATCH_SIZE);
+          await Promise.all(
+            batch.map(async (record) => {
+              await prisma.shopeeVenda.upsert({
+                where: { orderId: record.orderId },
+                update: {
+                  dataVenda: record.dataVenda,
+                  status: record.status,
+                  conta: record.conta,
+                  valorTotal: record.valorTotal,
+                  quantidade: record.quantidade,
+                  unitario: record.unitario,
+                  taxaPlataforma: record.taxaPlataforma,
+                  frete: record.frete,
+                  margemContribuicao: record.margemContribuicao,
+                  isMargemReal: record.isMargemReal,
+                  titulo: record.titulo,
+                  sku: record.sku,
+                  comprador: record.comprador,
+                  shippingId: record.shippingId,
+                  shippingStatus: record.shippingStatus,
+                  plataforma: record.plataforma,
+                  canal: record.canal,
+                  rawData: record.rawData,
+                  paymentDetails: record.paymentDetails,
+                  shipmentDetails: record.shipmentDetails,
+                  atualizadoEm: record.atualizadoEm,
+                },
+                create: record,
+              });
+            })
+          );
+          totalSaved += batch.length;
+          
+          // Enviar progresso durante salvamento em lote
+          sendProgressToUser(userId, {
+            type: "sync_progress",
+            message: `Salvando vendas: ${totalSaved}/${vendaRecords.length}`,
+            current: accountIndex,
+            total: contasAtualizadas.length,
+            fetched: totalSaved,
+            expected: allOrdersPayload.length
+          });
         }
 
       } catch (error) {

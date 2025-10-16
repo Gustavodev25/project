@@ -10,6 +10,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
+const MAX_OFFSET = 10000; // Limite máximo da API do Mercado Livre
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -254,7 +255,7 @@ async function fetchOrdersForAccount(
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
-  while (offset < total) {
+  while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
     // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
     const url = new URL(`${MELI_API_BASE}/orders/search`);

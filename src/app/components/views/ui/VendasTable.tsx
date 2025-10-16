@@ -559,8 +559,8 @@ export default function VendasTable({
                             {venda.plataforma === "Shopee" ? (
                               (() => {
                                 // Usar lógica inteligente para Shopee
-                                const shipmentDetails = venda.raw?.shipment_details || {};
-                                const paymentDetails = venda.raw?.payment_details || {};
+                                const shipmentDetails = (venda as any).shipmentDetails || venda.raw?.shipmentDetails || {};
+                                const paymentDetails = (venda as any).paymentDetails || venda.raw?.paymentDetails || {};
                                 const freteData = {
                                   actual_shipping_fee: shipmentDetails.actual_shipping_fee || 0,
                                   shopee_shipping_rebate: shipmentDetails.shopee_shipping_rebate || 0,
@@ -573,6 +573,7 @@ export default function VendasTable({
                                 };
                                 
                                 const freteFormatado = formatarFreteShopee(freteData);
+                                const shippingCarrier = shipmentDetails.shipping_carrier || venda.shippingStatus;
                                 
                                 return (
                                   <>
@@ -584,9 +585,11 @@ export default function VendasTable({
                                         🎉 Frete subsidiado!
                                       </div>
                                     )}
-                                    <div className="text-xs text-blue-500 mt-1">
-                                      Clique para detalhes
-                                    </div>
+                                    {shippingCarrier && (
+                                      <div className="text-xs text-gray-500 mt-1 capitalize">
+                                        {shippingCarrier}
+                                      </div>
+                                    )}
                                   </>
                                 );
                               })()

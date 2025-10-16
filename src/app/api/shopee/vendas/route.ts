@@ -10,9 +10,9 @@ export async function GET(req: NextRequest) {
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {
-    // Verificar cache primeiro (TTL de 30 segundos)
+    // Verificar cache primeiro (TTL de 5 minutos)
     const cacheKey = createCacheKey("vendas-shopee", session.sub);
-    const cachedData = cache.get<any>(cacheKey, 30000);
+    const cachedData = cache.get<any>(cacheKey, 300000);
     
     if (cachedData) {
       console.log(`[Cache Hit] Retornando vendas do Shopee do cache`);
@@ -24,11 +24,10 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(url.searchParams.get("limit") || "10000"); // Aumentado para 10000
     const offset = (page - 1) * limit;
 
-    // Calcular data de início: 1 mês atrás a partir do primeiro dia do mês atual
+    // Calcular data de início: 6 meses atrás para visualização na tabela
     const hoje = new Date();
-    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-    const dataInicio = new Date(primeiroDiaMesAtual);
-    dataInicio.setMonth(dataInicio.getMonth() - 1); // Voltar 1 mês
+    const dataInicio = new Date(hoje);
+    dataInicio.setMonth(dataInicio.getMonth() - 6); // Voltar 6 meses
     
     console.log(`[Shopee] Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
 
@@ -37,10 +36,11 @@ export async function GET(req: NextRequest) {
       where: { 
         userId: session.sub,
         dataVenda: {
-          gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+          gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
         }
       },
       select: {
+        id: true, // Campo essencial para React keys
         orderId: true,
         dataVenda: true,
         status: true,
@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
         taxaPlataforma: true,
         frete: true,
         freteAjuste: true,
+        margemContribuicao: true, // Campo essencial
+        isMargemReal: true, // Campo essencial
         titulo: true,
         sku: true,
         comprador: true,
@@ -68,6 +70,8 @@ export async function GET(req: NextRequest) {
         tags: true,
         internalTags: true,
         sincronizadoEm: true,
+        paymentDetails: true, // Dados do escrow para cálculos de frete
+        shipmentDetails: true, // Dados de envio incluindo shipping_carrier
       },
       orderBy: { dataVenda: "desc" },
       skip: offset,
@@ -79,7 +83,7 @@ export async function GET(req: NextRequest) {
       where: { 
         userId: session.sub,
         dataVenda: {
-          gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+          gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
         }
       },
     });
@@ -91,8 +95,16 @@ export async function GET(req: NextRequest) {
       select: { sincronizadoEm: true },
     });
 
+    console.log(`[Shopee API] ✅ Retornando ${vendas.length} vendas (total no banco: ${total})`);
+
+    // Mapear vendas para usar orderId como id (assim como Mercado Livre)
+    const vendasMapeadas = vendas.map((venda) => ({
+      ...venda,
+      id: venda.orderId, // Usar orderId como id para exibição
+    }));
+
     const response = {
-      vendas,
+      vendas: vendasMapeadas,
       total,
       lastSync: lastSync?.sincronizadoEm?.toISOString() || null,
     };

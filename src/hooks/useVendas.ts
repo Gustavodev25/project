@@ -100,9 +100,13 @@ export function useVendas(platform: string = "Mercado Livre") {
       } else if (progress.type === "sync_complete") {
         console.log('[useVendas] Sincronização completa - limpando estados e recarregando vendas');
         
+        // Recarregar vendas do banco após sincronização completa
+        loadVendasFromDatabase().catch(err => {
+          console.error('[useVendas] Erro ao recarregar vendas após sync_complete:', err);
+        });
+        
         // Resetar estados de loading
         setIsSyncing(false);
-        setIsTableLoading(false);
         
         // Desconectar SSE após um delay
         setTimeout(() => {
@@ -138,7 +142,7 @@ export function useVendas(platform: string = "Mercado Livre") {
     }
   };
 
-  const handleSyncOrders = async () => {
+  const handleSyncOrders = async (accountIds?: string[]) => {
     try {
       setIsSyncing(true);
       setIsTableLoading(true);
@@ -159,7 +163,11 @@ export function useVendas(platform: string = "Mercado Livre") {
         res = await fetch("/api/meli/vendas/sync", { 
           method: "POST",
           cache: "no-store",
-          credentials: "include"
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: accountIds && accountIds.length > 0 ? JSON.stringify({ accountIds }) : undefined,
         });
       } else if (platform === "Shopee") {
         // Sincronização completa em uma única chamada (com paginação automática interna)
@@ -167,6 +175,10 @@ export function useVendas(platform: string = "Mercado Livre") {
           method: "POST",
           cache: "no-store",
           credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: accountIds && accountIds.length > 0 ? JSON.stringify({ accountIds }) : undefined,
         });
 
         if (!res.ok) {
@@ -187,6 +199,20 @@ export function useVendas(platform: string = "Mercado Livre") {
         });
         setLastSyncedAt(payload.syncedAt ?? null);
         setSyncErrors(payload.errors ?? []);
+        
+        // Aguardar um pouco para garantir que o cache foi invalidado
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Carregar vendas atualizadas do banco
+        console.log(`[useVendas] Shopee: Recarregando vendas do banco após sincronização...`);
+        await loadVendasFromDatabase();
+        
+        // Resetar estados
+        setIsSyncing(false);
+        setIsTableLoading(false);
+        
+        // Finalizar sincronização do Shopee
+        return;
       } else if (platform === "Geral") {
         // Para vendas gerais, não há sincronização - apenas carrega dados existentes
         setVendas([]);
@@ -247,8 +273,10 @@ export function useVendas(platform: string = "Mercado Livre") {
       } else if (platform === "Shopee") {
         apiUrl = "/api/shopee/accounts";
       } else if (platform === "Geral") {
-        // Para "Geral", pode retornar vazio ou combinar ambas (não implementado ainda)
+        // Para "Geral", combinar contas de ambas plataformas
+        console.log(`[useVendas] Plataforma Geral: não há contas específicas`);
         setContasConectadas([]);
+        setIsLoadingAccounts(false);
         return;
       }
 
@@ -307,9 +335,13 @@ export function useVendas(platform: string = "Mercado Livre") {
       }
 
       const data = await res.json();
-      console.log(`[useVendas] Dados recebidos de ${apiUrl}:`, data);
+      console.log(`[useVendas] Dados recebidos de ${apiUrl}:`, { 
+        total: data.total, 
+        vendasLength: data.vendas?.length || 0,
+        lastSync: data.lastSync 
+      });
       setVendas(data.vendas || []);
-      console.log(`[useVendas] Vendas carregadas (${platform}):`, data.vendas?.length || 0);
+      console.log(`[useVendas] ✅ ${data.vendas?.length || 0} vendas carregadas para ${platform}`);
     } catch (error) {
       console.error(`[useVendas] Erro ao carregar vendas (${platform}):`, error);
       // Não mostrar erro em dev mode com strict mode (double render)
@@ -329,11 +361,20 @@ export function useVendas(platform: string = "Mercado Livre") {
       setContasConectadas([]);
       setSyncErrors([]);
       setLastSyncedAt(null);
+      setIsTableLoading(false);
       return;
     }
 
     loadContasConectadas();
     loadVendasFromDatabase(); // Carrega vendas existentes do banco
+    
+    // Timeout de segurança: garantir que loading não fique travado
+    const safetyTimeout = setTimeout(() => {
+      setIsTableLoading(false);
+      console.warn('[useVendas] Timeout de segurança: forçando isTableLoading = false');
+    }, 10000); // 10 segundos
+    
+    return () => clearTimeout(safetyTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform]);
 

@@ -51,9 +51,17 @@ export async function GET(req: NextRequest) {
       }
     }));
 
+    // Contar vendas por conta
+    const newOrdersByAccount: Record<string, number> = {};
+    contasAtivas.forEach(conta => {
+      const ordersForAccount = mockNewOrders.filter(order => order.accountId === conta.id);
+      newOrdersByAccount[conta.id] = ordersForAccount.length;
+    });
+
     return NextResponse.json({
       newOrders: mockNewOrders,
       totals: { new: mockNewOrders.length },
+      newOrdersByAccount,
       errors: []
     });
 

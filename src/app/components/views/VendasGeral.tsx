@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import gsap from "gsap";
 import Sidebar from "../views/ui/Sidebar";
@@ -187,7 +187,6 @@ export default function VendasGeral() {
     return localStorage.getItem(LS_KEY) === "1";
   });
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [filtroAtivo, setFiltroAtivo] = useState<FiltroStatus>("pagos");
   const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("todos");
@@ -224,6 +223,7 @@ export default function VendasGeral() {
     vendas, 
     lastSyncedAt, 
     contasConectadas,
+    isTableLoading,
     isConnected,
     progress,
     connect,
@@ -288,10 +288,13 @@ export default function VendasGeral() {
     }
   };
 
-  const vendasFiltradasPorPeriodo = vendas.filter((venda) =>
-    filtrarPorPeriodo(venda, periodoAtivo),
+  // Memoizar cálculos de filtro para evitar re-renders desnecessários
+  const vendasFiltradasPorPeriodo = useMemo(() => 
+    vendas.filter((venda) => filtrarPorPeriodo(venda, periodoAtivo)),
+    [vendas, periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada]
   );
-  const contagensVendas = {
+
+  const contagensVendas = useMemo(() => ({
     total: vendasFiltradasPorPeriodo.length,
     pagas: vendasFiltradasPorPeriodo.filter((venda) => {
       const status = venda.status?.toLowerCase();
@@ -303,7 +306,7 @@ export default function VendasGeral() {
       const status = venda.status?.toLowerCase();
       return status === "cancelled" || status === "cancelado";
     }).length,
-  };
+  }), [vendasFiltradasPorPeriodo]);
 
   const hasInitialSet = useRef(false);
   useIsoLayout(() => {
@@ -331,13 +334,6 @@ export default function VendasGeral() {
       localStorage.setItem(LS_KEY, isSidebarCollapsed ? "1" : "0");
     } catch {}
   }, [isSidebarCollapsed]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
 
   // Verificar contas e vendas para orientação do usuário
   useEffect(() => {
@@ -452,7 +448,7 @@ export default function VendasGeral() {
 
           <TabelaVendas
             platform="Geral"
-            isLoading={isLoading}
+            isLoading={isTableLoading}
             filtroAtivo={filtroAtivo}
             periodoAtivo={periodoAtivo}
             filtroConta={filtroConta}

@@ -14,6 +14,7 @@ import FiltrosVendas, {
 } from "../views/ui/FiltrosVendas";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
 import { useToast } from "./ui/toaster";
+import { isStatusCancelado, isStatusPago } from "@/lib/vendasStatus";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -27,7 +28,7 @@ interface HeaderVendasShopeeProps {
   vendas?: any[];
   lastSyncedAt?: string | null;
   isSyncing?: boolean;
-  onSyncOrders: () => void;
+  onSyncOrders: (accountIds?: string[]) => void;
   contasConectadas?: any[];
 }
 
@@ -51,6 +52,10 @@ const HeaderVendasShopee = ({
   const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Estados para seleção de contas
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [newOrdersByAccount, setNewOrdersByAccount] = useState<Record<string, number>>({});
 
   // Dropdowns
   const infoDropdown = useSmartDropdown<HTMLButtonElement>({
@@ -85,6 +90,12 @@ const HeaderVendasShopee = ({
       const result = await res.json();
       const newCount = result.totals?.new || 0;
       setNewOrdersCount(newCount);
+      
+      // Armazenar contagem por conta
+      if (result.newOrdersByAccount) {
+        setNewOrdersByAccount(result.newOrdersByAccount);
+      }
+      
       if (silent && newCount > 0) {
         setCheckResult(result);
       } else if (!silent) {
@@ -193,12 +204,33 @@ const HeaderVendasShopee = ({
     } catch (error) {
       console.error("Erro ao marcar notificações:", error);
     }
-    onSyncOrders();
+    // Passar contas selecionadas para sincronização (se houver)
+    const accountsToSync = selectedAccountIds.length > 0 ? selectedAccountIds : undefined;
+    onSyncOrders(accountsToSync);
   };
 
   const handleCancelSync = () => {
     setShowSyncDropdown(false);
     setCheckResult(null);
+    setSelectedAccountIds([]);
+  };
+  
+  // Função para alternar seleção de conta
+  const toggleAccountSelection = (accountId: string) => {
+    setSelectedAccountIds(prev => 
+      prev.includes(accountId)
+        ? prev.filter(id => id !== accountId)
+        : [...prev, accountId]
+    );
+  };
+  
+  // Função para selecionar/desselecionar todas
+  const toggleSelectAll = () => {
+    if (selectedAccountIds.length === contasConectadas.length) {
+      setSelectedAccountIds([]);
+    } else {
+      setSelectedAccountIds(contasConectadas.map(c => c.id));
+    }
   };
 
   useEffect(() => {
@@ -427,9 +459,58 @@ const HeaderVendasShopee = ({
                       Sincronizar Vendas
                     </h3>
                     <p className="text-xs text-gray-600">
-                      Primeiro vamos verificar se há novas vendas para sincronizar
+                      {contasConectadas.length > 1 
+                        ? "Selecione as contas que deseja sincronizar ou deixe em branco para sincronizar todas"
+                        : "Primeiro vamos verificar se há novas vendas para sincronizar"}
                     </p>
                   </div>
+                  
+                  {/* Seleção de contas (apenas se houver mais de 1 conta) */}
+                  {contasConectadas.length > 1 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-700">Contas:</span>
+                        <button
+                          onClick={toggleSelectAll}
+                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                        >
+                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
+                        </button>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
+                        {contasConectadas.map((conta) => {
+                          const label = conta.nickname || conta.shop_id || conta.merchant_id || conta.id;
+                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
+                          return (
+                            <label
+                              key={conta.id || label}
+                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAccountIds.includes(conta.id)}
+                                onChange={() => toggleAccountSelection(conta.id)}
+                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
+                              />
+                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
+                                {label}
+                              </span>
+                              {newOrdersCount > 0 && (
+                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                                  {newOrdersCount}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {selectedAccountIds.length > 0 && (
+                        <p className="text-xs text-gray-500 italic">
+                          {selectedAccountIds.length} conta(s) selecionada(s)
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     onClick={() => handleCheckNewOrders(false)}
@@ -491,18 +572,71 @@ const HeaderVendasShopee = ({
                             <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
                             <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
                           </svg>
-                          <span className="text-sm font-medium text-blue-900">
-                            Novas vendas encontradas
+                          <span className="text-lg font-semibold text-blue-900">
+                            {checkResult.totals?.new || 0}
                           </span>
                         </div>
-                        <div className="text-xs text-blue-800">
-                          <p>
-                            Novas vendas: <span className="font-semibold">{checkResult.totals?.new || 0}</span>
-                          </p>
-                        </div>
+                        <p className="text-xs text-blue-700">
+                          {checkResult.totals?.new === 0
+                            ? "Nenhuma venda nova encontrada"
+                            : checkResult.totals?.new === 1
+                            ? "Nova venda encontrada"
+                            : "Novas vendas encontradas"}
+                        </p>
                       </div>
                     )}
                   </div>
+                  
+                  {/* Seleção de contas (após verificação - apenas se houver mais de 1 conta) */}
+                  {contasConectadas.length > 1 && checkResult.totals?.new > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-700">Sincronizar apenas:</span>
+                        <button
+                          onClick={toggleSelectAll}
+                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                        >
+                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
+                        </button>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
+                        {contasConectadas.map((conta) => {
+                          const label = conta.nickname || conta.shop_id || conta.merchant_id || conta.id;
+                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
+                          return (
+                            <label
+                              key={conta.id || label}
+                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAccountIds.includes(conta.id)}
+                                onChange={() => toggleAccountSelection(conta.id)}
+                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
+                              />
+                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
+                                {label}
+                              </span>
+                              {newOrdersCount > 0 && (
+                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                                  {newOrdersCount}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {selectedAccountIds.length > 0 ? (
+                        <p className="text-xs text-gray-500 italic">
+                          {selectedAccountIds.length} conta(s) selecionada(s)
+                        </p>
+                      ) : (
+                        <p className="text-xs text-orange-600 italic">
+                          ⚠️ Nenhuma conta selecionada - todas serão sincronizadas
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <button
@@ -658,16 +792,12 @@ export default function VendasShopee() {
   );
   const contagensVendas = {
     total: vendasFiltradasPorPeriodo.length,
-    pagas: vendasFiltradasPorPeriodo.filter((venda) => {
-      const status = venda.status?.toLowerCase();
-      return (
-        status === "paid" || status === "pago" || status === "payment_approved"
-      );
-    }).length,
-    canceladas: vendasFiltradasPorPeriodo.filter((venda) => {
-      const status = venda.status?.toLowerCase();
-      return status === "cancelled" || status === "cancelado";
-    }).length,
+    pagas: vendasFiltradasPorPeriodo.filter((venda) =>
+      isStatusPago(venda.status, "Shopee"),
+    ).length,
+    canceladas: vendasFiltradasPorPeriodo.filter((venda) =>
+      isStatusCancelado(venda.status, "Shopee"),
+    ).length,
   };
 
   const hasInitialSet = useRef(false);
@@ -760,6 +890,8 @@ export default function VendasShopee() {
           <TabelaVendas
             platform="Shopee"
             isLoading={isLoading}
+            isSyncing={isSyncing}
+            syncProgress={progress}
             filtroAtivo={filtroAtivo}
             periodoAtivo={periodoAtivo}
             filtroConta={filtroConta}
@@ -772,4 +904,3 @@ export default function VendasShopee() {
     </div>
   );
 }
-

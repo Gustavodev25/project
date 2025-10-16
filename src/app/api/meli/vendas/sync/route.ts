@@ -337,6 +337,11 @@ type AccountSummary = {
   expires_at: string;
 };
 
+type SkuCacheEntry = {
+  custoUnitario: number | null;
+  tipo: string | null;
+};
+
 async function fetchOrdersForAccount(
   account: MeliAccount,
   userId: string,
@@ -487,6 +492,62 @@ async function fetchOrdersForAccount(
   return { orders: results, expectedTotal };
 }
 
+async function buildSkuCache(
+  orders: MeliOrderPayload[],
+  userId: string
+): Promise<Map<string, SkuCacheEntry>> {
+  const skuSet = new Set<string>();
+
+  for (const payload of orders) {
+    const rawOrder: any = payload.order ?? {};
+    const orderItems: any[] = Array.isArray(rawOrder.order_items) ? rawOrder.order_items : [];
+
+    for (const item of orderItems) {
+      const itemData = typeof item?.item === "object" && item?.item !== null ? item.item : {};
+      const candidate =
+        itemData?.seller_sku ||
+        itemData?.sku ||
+        item?.seller_sku ||
+        item?.sku ||
+        null;
+
+      if (candidate) {
+        const normalized = truncateString(String(candidate), 255);
+        if (normalized) {
+          skuSet.add(normalized);
+        }
+      }
+    }
+  }
+
+  if (skuSet.size === 0) {
+    return new Map();
+  }
+
+  const skuList = Array.from(skuSet);
+  const skuRecords = await prisma.sKU.findMany({
+    where: {
+      userId,
+      sku: { in: skuList }
+    },
+    select: {
+      sku: true,
+      custoUnitario: true,
+      tipo: true
+    }
+  });
+
+  const cache = new Map<string, SkuCacheEntry>();
+  for (const record of skuRecords) {
+    cache.set(record.sku, {
+      custoUnitario: record.custoUnitario !== null ? Number(record.custoUnitario) : null,
+      tipo: record.tipo ?? null
+    });
+  }
+
+  return cache;
+}
+
 // Função para salvar vendas em lotes
 async function saveVendasBatch(
   orders: MeliOrderPayload[],
@@ -495,7 +556,8 @@ async function saveVendasBatch(
 ): Promise<{ saved: number; errors: number }> {
   let saved = 0;
   let errors = 0;
-  
+  const skuCache = await buildSkuCache(orders, userId);
+
   // Processar em lotes
   for (let i = 0; i < orders.length; i += batchSize) {
     const batch = orders.slice(i, i + batchSize);
@@ -513,7 +575,7 @@ async function saveVendasBatch(
     // Processar lote
     const batchPromises = batch.map(async (order) => {
       try {
-        await saveVendaToDatabase(order, userId);
+        await saveVendaToDatabase(order, userId, skuCache);
         saved++;
         return { success: true, orderId: order.order.id };
       } catch (error) {
@@ -536,7 +598,8 @@ async function saveVendasBatch(
 
 async function saveVendaToDatabase(
   order: MeliOrderPayload,
-  userId: string
+  userId: string,
+  skuCache: Map<string, SkuCacheEntry>
 ): Promise<boolean> {
   // Log simples sem debug detalhado
   console.log(`[DEBUG] Salvando venda ${order.order.id} para userId: ${userId}`);
@@ -607,28 +670,46 @@ async function saveVendaToDatabase(
     const frete = freight.adjustedCost ?? freight.finalCost ?? freight.orderCostFallback ?? 0;
 
     // Buscar o SKU para obter o custo unitário e calcular o CMV
-    const skuVenda = itemData?.seller_sku || itemData?.sku || null;
+    const skuVendaRaw = itemData?.seller_sku || itemData?.sku || null;
+    const skuVenda = skuVendaRaw ? truncateString(String(skuVendaRaw), 255) || null : null;
     let cmv: number | null = null;
     
     if (skuVenda) {
-      try {
-        const skuData = await prisma.sKU.findFirst({
-          where: {
-            userId,
-            sku: skuVenda
-          },
-          select: {
-            custoUnitario: true,
-            tipo: true
-          }
-        });
-        
-        if (skuData) {
-          // CMV = custo unitário * quantidade
-          cmv = roundCurrency(Number(skuData.custoUnitario) * quantity);
+      const cachedSku = skuCache.get(skuVenda);
+
+      if (cachedSku) {
+        if (cachedSku.custoUnitario !== null) {
+          cmv = roundCurrency(cachedSku.custoUnitario * quantity);
         }
-      } catch (error) {
-        console.error(`[DEBUG] Erro ao buscar SKU ${skuVenda}:`, error);
+      } else {
+        try {
+          const skuData = await prisma.sKU.findFirst({
+            where: {
+              userId,
+              sku: skuVenda
+            },
+            select: {
+              custoUnitario: true,
+              tipo: true
+            }
+          });
+
+          const custoUnitarioValue = skuData?.custoUnitario !== null && skuData?.custoUnitario !== undefined
+            ? Number(skuData.custoUnitario)
+            : null;
+
+          if (custoUnitarioValue !== null) {
+            cmv = roundCurrency(custoUnitarioValue * quantity);
+          }
+
+          skuCache.set(skuVenda, {
+            custoUnitario: custoUnitarioValue,
+            tipo: skuData?.tipo ?? null
+          });
+        } catch (error) {
+          console.error(`[DEBUG] Erro ao buscar SKU ${skuVenda}:`, error);
+          skuCache.set(skuVenda, { custoUnitario: null, tipo: null });
+        }
       }
     }
 
@@ -647,50 +728,47 @@ async function saveVendaToDatabase(
     if (existingVenda) {
       // Atualizar venda existente
       try {
-      await prisma.meliVenda.update({
-        where: { orderId: String(o.id) },
-        data: {
-          dataVenda: dateString ? new Date(dateString) : new Date(),
-          status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
-          conta: truncateString(order.accountNickname ?? String(order.mlUserId), 255),
-          valorTotal: new Decimal(totalAmount),
-          quantidade: quantity > 0 ? quantity : 1,
-          unitario: new Decimal(unitario),
-          taxaPlataforma: taxaPlataforma ? new Decimal(taxaPlataforma) : null,
-          frete: new Decimal(frete),
-          // freteBaseCost: freight.baseCost ? new Decimal(freight.baseCost) : null,
-          // freteListCost: freight.listCost ? new Decimal(freight.listCost) : null,
-          // freteFinalCost: freight.finalCost ? new Decimal(freight.finalCost) : null,
-          // freteAdjustment: freight.adjustedCost ? new Decimal(freight.adjustedCost) : null,
-          // freteCalculation: freight,
-          cmv: cmv !== null ? new Decimal(cmv) : null,
-          margemContribuicao: new Decimal(margemContribuicao),
-          isMargemReal,
-          titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
-          sku: truncateString(itemData?.seller_sku || itemData?.sku, 255) || null,
-          comprador: truncateString(buyerName, 255) || "Comprador",
-          logisticType: truncateString(freight.logisticType, 100) || null,
-          envioMode: truncateString(freight.shippingMode, 100) || null,
-          shippingStatus: truncateString(shippingStatus, 100) || null,
-          shippingId: truncateString(shippingId, 255) || null,
-          latitude: latitude !== null ? new Decimal(latitude) : null,
-          longitude: longitude !== null ? new Decimal(longitude) : null,
-          exposicao: (() => {
-            const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-            return mapListingTypeToExposure(listingTypeId);
-          })(),
-          tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
-          ads: internalTags.includes("ads") ? "ADS" : null,
-          tags: truncateJsonData(tags),
-          internalTags: truncateJsonData(internalTags),
-          rawData: truncateJsonData({
-            order: o,
-            shipment: order.shipment as any,
-            freight: freight
-          }),
-          atualizadoEm: new Date(),
-        }
-      });
+        await prisma.meliVenda.update({
+          where: { orderId: String(o.id) },
+          data: {
+            dataVenda: dateString ? new Date(dateString) : new Date(),
+            status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
+            conta: truncateString(order.accountNickname ?? String(order.mlUserId), 255),
+            valorTotal: new Decimal(totalAmount),
+            quantidade: quantity > 0 ? quantity : 1,
+            unitario: new Decimal(unitario),
+            taxaPlataforma: taxaPlataforma ? new Decimal(taxaPlataforma) : null,
+            frete: new Decimal(frete),
+            cmv: cmv !== null ? new Decimal(cmv) : null,
+            margemContribuicao: new Decimal(margemContribuicao),
+            isMargemReal,
+            titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
+            sku: skuVenda,
+            comprador: truncateString(buyerName, 255) || "Comprador",
+            logisticType: truncateString(freight.logisticType, 100) || null,
+            envioMode: truncateString(freight.shippingMode, 100) || null,
+            shippingStatus: truncateString(shippingStatus, 100) || null,
+            shippingId: truncateString(shippingId, 255) || null,
+            latitude: latitude !== null ? new Decimal(latitude) : null,
+            longitude: longitude !== null ? new Decimal(longitude) : null,
+            exposicao: (() => {
+              const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
+              return mapListingTypeToExposure(listingTypeId);
+            })(),
+            tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
+            ads: internalTags.includes("ads") ? "ADS" : null,
+            plataforma: "Mercado Livre",
+            canal: "ML",
+            tags: truncateJsonData(tags),
+            internalTags: truncateJsonData(internalTags),
+            rawData: truncateJsonData({
+              order: o,
+              shipment: order.shipment as any,
+              freight: freight
+            }),
+            atualizadoEm: new Date(),
+          }
+        });
       } catch (err) {
         const msg = (err as any)?.message ? String((err as any).message) : String(err);
         if (msg.includes("Unknown argument `latitude`") || msg.includes("Unknown argument `longitude`")) {
@@ -708,8 +786,8 @@ async function saveVendaToDatabase(
               cmv: cmv !== null ? new Decimal(cmv) : null,
               margemContribuicao: new Decimal(margemContribuicao),
               isMargemReal,
-              titulo: truncateString(firstItemTitle, 500) || "Produto sem t��tulo",
-              sku: truncateString(itemData?.seller_sku || itemData?.sku, 255) || null,
+              titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
+              sku: skuVenda,
               comprador: truncateString(buyerName, 255) || "Comprador",
               logisticType: truncateString(freight.logisticType, 100) || null,
               envioMode: truncateString(freight.shippingMode, 100) || null,
@@ -721,6 +799,8 @@ async function saveVendaToDatabase(
               })(),
               tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
               ads: internalTags.includes("ads") ? "ADS" : null,
+              plataforma: "Mercado Livre",
+              canal: "ML",
               tags: truncateJsonData(tags),
               internalTags: truncateJsonData(internalTags),
               rawData: truncateJsonData({
@@ -753,9 +833,7 @@ async function saveVendaToDatabase(
         shippingId,
         exposicao: (() => {
           const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-          if (listingTypeId === "gold_pro") return "Premium";
-          if (listingTypeId === "gold_special") return "Clássico";
-          return null;
+          return mapListingTypeToExposure(listingTypeId);
         })(),
         tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
         ads: internalTags.includes("ads") ? "ADS" : null,
@@ -767,53 +845,46 @@ async function saveVendaToDatabase(
       
       // Criar nova venda
       try {
-      await prisma.meliVenda.create({
-        data: {
-          orderId: truncateString(String(o.id), 255),
-          userId: truncateString(userId, 50),
-          meliAccountId: truncateString(order.accountId, 25),
-          dataVenda: dateString ? new Date(dateString) : new Date(),
-          status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
-          conta: truncateString(order.accountNickname ?? String(order.mlUserId), 255),
-          valorTotal: new Decimal(totalAmount),
-          quantidade: quantity > 0 ? quantity : 1,
-          unitario: new Decimal(unitario),
-          taxaPlataforma: taxaPlataforma ? new Decimal(taxaPlataforma) : null,
-          frete: new Decimal(frete),
-          // freteBaseCost: freight.baseCost ? new Decimal(freight.baseCost) : null,
-          // freteListCost: freight.listCost ? new Decimal(freight.listCost) : null,
-          // freteFinalCost: freight.finalCost ? new Decimal(freight.finalCost) : null,
-          // freteAdjustment: freight.adjustedCost ? new Decimal(freight.adjustedCost) : null,
-          // freteCalculation: freight,
-          cmv: cmv !== null ? new Decimal(cmv) : null,
-          margemContribuicao: new Decimal(margemContribuicao),
-          isMargemReal,
-          titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
-          sku: truncateString(itemData?.seller_sku || itemData?.sku, 255) || null,
-          comprador: truncateString(buyerName, 255) || "Comprador",
-          logisticType: truncateString(freight.logisticType, 100) || null,
-          envioMode: truncateString(freight.shippingMode, 100) || null,
-          shippingStatus: truncateString(shippingStatus, 100) || null,
-          shippingId: truncateString(shippingId, 255) || null,
-          latitude: latitude !== null ? new Decimal(latitude) : null,
-          longitude: longitude !== null ? new Decimal(longitude) : null,
-          exposicao: (() => {
-            const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-            return mapListingTypeToExposure(listingTypeId);
-          })(),
-          tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
-          ads: internalTags.includes("ads") ? "ADS" : null,
-          plataforma: "Mercado Livre",
-          canal: "ML",
-          tags: truncateJsonData(tags),
-          internalTags: truncateJsonData(internalTags),
-          rawData: truncateJsonData({
-            order: o,
-            shipment: order.shipment as any,
-            freight: freight
-          }),
-        }
-      });
+        await prisma.meliVenda.create({
+          data: {
+            orderId: truncateString(String(o.id), 255),
+            userId: truncateString(userId, 50),
+            meliAccountId: truncateString(order.accountId, 25),
+            dataVenda: dateString ? new Date(dateString) : new Date(),
+            status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
+            conta: truncateString(order.accountNickname ?? String(order.mlUserId), 255),
+            valorTotal: new Decimal(totalAmount),
+            quantidade: quantity > 0 ? quantity : 1,
+            unitario: new Decimal(unitario),
+            taxaPlataforma: taxaPlataforma ? new Decimal(taxaPlataforma) : null,
+            frete: new Decimal(frete),
+            cmv: cmv !== null ? new Decimal(cmv) : null,
+            margemContribuicao: new Decimal(margemContribuicao),
+            isMargemReal,
+            titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
+            sku: skuVenda,
+            comprador: truncateString(buyerName, 255) || "Comprador",
+            logisticType: truncateString(freight.logisticType, 100) || null,
+            envioMode: truncateString(freight.shippingMode, 100) || null,
+            shippingStatus: truncateString(shippingStatus, 100) || null,
+            shippingId: truncateString(shippingId, 255) || null,
+            exposicao: (() => {
+              const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
+              return mapListingTypeToExposure(listingTypeId);
+            })(),
+            tipoAnuncio: tags.includes("catalog") ? "Catálogo" : "Próprio",
+            ads: internalTags.includes("ads") ? "ADS" : null,
+            plataforma: "Mercado Livre",
+            canal: "ML",
+            tags: truncateJsonData(tags),
+            internalTags: truncateJsonData(internalTags),
+            rawData: truncateJsonData({
+              order: o,
+              shipment: order.shipment as any,
+              freight: freight
+            }),
+          }
+        });
       } catch (err) {
         const msg = (err as any)?.message ? String((err as any).message) : String(err);
         if (msg.includes("Unknown argument `latitude`") || msg.includes("Unknown argument `longitude`")) {
@@ -833,8 +904,8 @@ async function saveVendaToDatabase(
               cmv: cmv !== null ? new Decimal(cmv) : null,
               margemContribuicao: new Decimal(margemContribuicao),
               isMargemReal,
-              titulo: truncateString(firstItemTitle, 500) || "Produto sem t��tulo",
-              sku: truncateString(itemData?.seller_sku || itemData?.sku, 255) || null,
+              titulo: truncateString(firstItemTitle, 500) || "Produto sem título",
+              sku: skuVenda,
               comprador: truncateString(buyerName, 255) || "Comprador",
               logisticType: truncateString(freight.logisticType, 100) || null,
               envioMode: truncateString(freight.shippingMode, 100) || null,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
+import { cache, createCacheKey } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -33,13 +34,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Calcular data de início: 1 mês atrás a partir do primeiro dia do mês atual
+    // Verificar cache primeiro (TTL de 5 minutos)
+    const cacheKey = createCacheKey("vendas-geral", session.sub);
+    const cachedData = cache.get<any>(cacheKey, 300000);
+    
+    if (cachedData) {
+      console.log(`[Cache Hit] Retornando vendas gerais do cache`);
+      return NextResponse.json(cachedData);
+    }
+
+    // Calcular data de início: 6 meses atrás (alinhado com ML e Shopee)
     const hoje = new Date();
-    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-    const dataInicio = new Date(primeiroDiaMesAtual);
-    dataInicio.setMonth(dataInicio.getMonth() - 1); // Voltar 1 mês
+    const dataInicio = new Date(hoje);
+    dataInicio.setMonth(dataInicio.getMonth() - 6); // Voltar 6 meses
     
     console.log(`[Vendas Gerais] Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
+    console.log(`[Vendas Gerais] Buscando vendas para userId: ${session.sub}`);
 
     // Buscar vendas do Mercado Livre e Shopee em PARALELO para melhor performance
     const [vendasMeli, vendasShopee] = await Promise.all([
@@ -47,7 +57,7 @@ export async function GET(req: NextRequest) {
         where: { 
           userId: session.sub,
           dataVenda: {
-            gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+            gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
           }
         },
         select: {
@@ -90,7 +100,7 @@ export async function GET(req: NextRequest) {
         where: { 
           userId: session.sub,
           dataVenda: {
-            gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+            gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
           }
         },
         select: {
@@ -119,10 +129,15 @@ export async function GET(req: NextRequest) {
           sincronizadoEm: true,
           latitude: true,
           longitude: true,
+          paymentDetails: true,
+          shipmentDetails: true,
         },
         orderBy: { dataVenda: "desc" },
       })
     ]);
+
+    console.log(`[Vendas Gerais] ✅ Mercado Livre: ${vendasMeli.length} vendas encontradas`);
+    console.log(`[Vendas Gerais] ✅ Shopee: ${vendasShopee.length} vendas encontradas`);
 
     // Buscar SKUs únicos para cálculo de CMV
     const skusUnicos = Array.from(
@@ -335,7 +350,11 @@ export async function GET(req: NextRequest) {
           listing_type_id: null,
           tags: venda.tags,
           internal_tags: venda.internalTags,
+          paymentDetails: (venda as any).paymentDetails || {},
+          shipmentDetails: (venda as any).shipmentDetails || {},
         },
+        paymentDetails: (venda as any).paymentDetails || {},
+        shipmentDetails: (venda as any).shipmentDetails || {},
         preco: valorTotal,
         shipping: {},
         shipment: null,
@@ -362,11 +381,18 @@ export async function GET(req: NextRequest) {
       ultimaSyncGeral = ultimaSyncShopee;
     }
 
-    return NextResponse.json({
+    const response = {
       vendas: todasVendas,
       total: todasVendas.length,
       lastSync: ultimaSyncGeral?.toISOString() || null,
-    });
+    };
+
+    // Armazenar no cache
+    cache.set(cacheKey, response);
+    console.log(`[Cache Miss] Vendas gerais (${todasVendas.length} vendas) salvas no cache`);
+    console.log(`[Vendas Gerais] ✅ Retornando ${todasVendas.length} vendas combinadas (ML: ${vendasMeliFormatted.length}, Shopee: ${vendasShopeeFormatted.length})`);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error("Erro ao buscar vendas gerais:", error);
     return new NextResponse("Erro interno do servidor", { status: 500 });

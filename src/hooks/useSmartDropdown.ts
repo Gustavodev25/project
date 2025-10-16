@@ -40,7 +40,7 @@ export function useSmartDropdown<T extends HTMLElement = HTMLElement>({
 
     let newPosition: DropdownPosition = {};
 
-    // Determinar posição vertical (relativa ao trigger)
+    // Determinar posição vertical (absoluta na tela com position:fixed)
     const spaceBelow = viewport.height - trigger.bottom - offset;
     const spaceAbove = trigger.top - offset;
     
@@ -48,22 +48,36 @@ export function useSmartDropdown<T extends HTMLElement = HTMLElement>({
                           && spaceAbove >= dropdown.height;
 
     if (shouldShowAbove) {
-      // Posicionar acima do trigger
-      newPosition.bottom = trigger.height + offset;
+      // Posicionar acima do trigger (coordenada absoluta)
+      newPosition.top = trigger.top - dropdown.height - offset;
     } else {
-      // Posicionar abaixo do trigger
-      newPosition.top = trigger.height + offset;
+      // Posicionar abaixo do trigger (coordenada absoluta)
+      newPosition.top = trigger.bottom + offset;
     }
 
-    // Determinar posição horizontal (relativa ao trigger)
+    // Determinar posição horizontal (absoluta na tela com position:fixed)
     const shouldAlignRight = preferredPosition.includes('right');
     
     if (shouldAlignRight) {
       // Alinhar pela direita do trigger
-      newPosition.right = 0;
+      const rightPosition = trigger.right;
+      // Verificar se cabe na tela
+      if (rightPosition - dropdown.width < minDistanceFromEdge) {
+        // Não cabe pela direita, alinhar pela esquerda
+        newPosition.left = trigger.left;
+      } else {
+        newPosition.left = rightPosition - dropdown.width;
+      }
     } else {
       // Alinhar pela esquerda do trigger
-      newPosition.left = 0;
+      const leftPosition = trigger.left;
+      // Verificar se cabe na tela
+      if (leftPosition + dropdown.width > viewport.width - minDistanceFromEdge) {
+        // Não cabe pela esquerda, alinhar pela direita
+        newPosition.left = trigger.right - dropdown.width;
+      } else {
+        newPosition.left = leftPosition;
+      }
     }
 
     setPosition(newPosition);
@@ -78,13 +92,20 @@ export function useSmartDropdown<T extends HTMLElement = HTMLElement>({
     }
   }, [isOpen, calculatePosition]);
 
-  // Recalcular posição no resize da janela
+  // Recalcular posição no resize da janela e scroll
   useEffect(() => {
     if (!isOpen) return;
     
     const handleResize = () => calculatePosition();
+    const handleScroll = () => calculatePosition();
+    
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, true); // true = capture phase para pegar todos os scrolls
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
   }, [isOpen, calculatePosition]);
 
   // Controlar visibilidade com animação

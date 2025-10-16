@@ -11,6 +11,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
+const MAX_OFFSET = 10000; // Limite máximo da API do Mercado Livre
 
 type SyncError = {
   accountId: string;
@@ -50,7 +51,7 @@ async function checkNewOrdersForAccount(
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
-  while (offset < total) {
+  while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
     // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
     const url = new URL(`${MELI_API_BASE}/orders/search`);
@@ -156,6 +157,7 @@ export async function GET(req: NextRequest) {
   const errors: SyncError[] = [];
   const summaries: AccountSummary[] = [];
   let totalExpectedOrders = 0;
+  const newOrdersByAccount: Record<string, number> = {};
 
   for (const account of accounts) {
     const summary: AccountSummary = {
@@ -206,6 +208,8 @@ export async function GET(req: NextRequest) {
       const { newOrders: accountNewOrders, expectedTotal } = await checkNewOrdersForAccount(current);
       totalExpectedOrders += expectedTotal;
       newOrders.push(...accountNewOrders);
+      // Contar vendas novas por conta
+      newOrdersByAccount[current.id] = accountNewOrders.length;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erro desconhecido ao verificar pedidos.";
       errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
@@ -222,6 +226,7 @@ export async function GET(req: NextRequest) {
       expected: totalExpectedOrders, 
       new: newOrders.length
     },
+    newOrdersByAccount,
     tokenCheck: tokenCheckResult,
   });
 }

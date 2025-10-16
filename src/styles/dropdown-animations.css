@@ -46,7 +46,7 @@
 
 /* Estilos base para dropdowns */
 .smart-dropdown {
-  position: absolute;
+  position: fixed;
   z-index: 99999;
   background: white;
   border-radius: 8px;

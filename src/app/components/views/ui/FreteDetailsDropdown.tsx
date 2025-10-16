@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   formatCurrency,
   formatarFreteShopee,
@@ -69,7 +70,7 @@ export default function FreteDetailsDropdown({
         {children}
       </div>
 
-      {dropdown.isVisible && (
+      {dropdown.isVisible && typeof document !== 'undefined' && createPortal(
         <div
           ref={dropdown.dropdownRef}
           className={`smart-dropdown w-80 ${
@@ -170,7 +171,8 @@ export default function FreteDetailsDropdown({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -140,15 +140,23 @@ export function detectarSubsidioFrete(freteData: ShopeeFreteData): {
   // Calcular custo implícito do frete
   const impliedCustoFrete = productSubtotal - totalTaxas - rendaLiquida;
   
-  // Detecção automática de subsídio (linha 196-198 do ShopeeDashboard.vue)
+  // Detecção automática de subsídio
+  // Se não há shopee_shipping_rebate explícito mas o custo implícito é ~0,
+  // significa que a Shopee subsidiou a diferença entre o custo real e o que o comprador pagou
   let subsidioDetectado = shopee_shipping_rebate;
   if (actual_shipping_fee && !shopee_shipping_rebate && Math.abs(impliedCustoFrete) < 0.01) {
-    subsidioDetectado = actual_shipping_fee;
+    // Subsídio = custo real - o que o comprador pagou
+    subsidioDetectado = actual_shipping_fee - buyer_paid_shipping_fee;
   }
 
   // Calcular custo líquido do frete
-  const custoLiquidoFrete = (actual_shipping_fee + reverse_shipping_fee) - 
-    (subsidioDetectado + buyer_paid_shipping_fee + shipping_fee_discount_from_3pl);
+  // Convenção: POSITIVO = receita de frete, NEGATIVO = custo de frete
+  // - actual_shipping_fee: custo real que o vendedor paga (positivo = custo, então invertemos)
+  // - buyer_paid_shipping_fee: valor que o comprador pagou (positivo = receita, mantemos positivo)
+  // - subsidioDetectado: subsídio da Shopee (reduz o custo, então somamos)
+  // Fórmula invertida: Pago pelo Comprador + Subsídio + Desconto 3PL - Custo Real
+  const custoLiquidoFrete = (buyer_paid_shipping_fee + subsidioDetectado + shipping_fee_discount_from_3pl) - 
+    (actual_shipping_fee + reverse_shipping_fee);
 
   // Determinar tipo de subsídio
   let tipoSubsidio = "Nenhum";

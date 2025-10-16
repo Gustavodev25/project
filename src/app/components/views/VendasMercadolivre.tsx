@@ -32,7 +32,7 @@ interface HeaderVendasMercadolivreProps {
   vendas?: any[];
   lastSyncedAt?: string | null;
   isSyncing?: boolean;
-  onSyncOrders: () => void;
+  onSyncOrders: (accountIds?: string[]) => void;
   contasConectadas?: any[];
 }
 
@@ -44,6 +44,7 @@ const HeaderVendasMercadolivre = ({
   contasConectadas = []
 }: HeaderVendasMercadolivreProps) => {
   const router = useRouter();
+  const toast = useToast();
   // Verifica se já houve alguma sincronização
   const hasBeenSynced = lastSyncedAt !== null;
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
@@ -56,6 +57,10 @@ const HeaderVendasMercadolivre = ({
   const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Estados para seleção de contas
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [newOrdersByAccount, setNewOrdersByAccount] = useState<Record<string, number>>({});
 
   // Hook para dropdown de informações
   const infoDropdown = useSmartDropdown<HTMLButtonElement>({
@@ -97,6 +102,11 @@ const HeaderVendasMercadolivre = ({
       // Sempre atualiza o contador de vendas novas
       const newCount = result.totals?.new || 0;
       setNewOrdersCount(newCount);
+      
+      // Armazenar contagem por conta
+      if (result.newOrdersByAccount) {
+        setNewOrdersByAccount(result.newOrdersByAccount);
+      }
       
       // Se é uma verificação silenciosa (automática) e encontrou vendas novas, salva o resultado
       if (silent && newCount > 0) {
@@ -200,7 +210,7 @@ const HeaderVendasMercadolivre = ({
       }
     } catch (error) {
       console.error("Erro ao alternar auto-sync:", error);
-      toast({
+      toast.toast({
         variant: "error",
         title: "Erro ao atualizar configurações",
         description: `Erro ao atualizar configurações: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.`,
@@ -224,13 +234,34 @@ const HeaderVendasMercadolivre = ({
       console.error("Erro ao marcar notificações:", error);
     }
     
-    onSyncOrders();
+    // Passar contas selecionadas para sincronização (se houver)
+    const accountsToSync = selectedAccountIds.length > 0 ? selectedAccountIds : undefined;
+    onSyncOrders(accountsToSync);
   };
 
   // Função para cancelar
   const handleCancelSync = () => {
     setShowSyncDropdown(false);
     setCheckResult(null);
+    setSelectedAccountIds([]);
+  };
+
+  // Função para alternar seleção de conta
+  const toggleAccountSelection = (accountId: string) => {
+    setSelectedAccountIds(prev => 
+      prev.includes(accountId)
+        ? prev.filter(id => id !== accountId)
+        : [...prev, accountId]
+    );
+  };
+
+  // Função para selecionar/desselecionar todas
+  const toggleSelectAll = () => {
+    if (selectedAccountIds.length === contasConectadas.length) {
+      setSelectedAccountIds([]);
+    } else {
+      setSelectedAccountIds(contasConectadas.map(c => c.id));
+    }
   };
 
   // Effect para sincronização automática
@@ -363,7 +394,7 @@ const HeaderVendasMercadolivre = ({
               ? "text-gray-900 bg-gray-50 border-gray-400 ring-2 ring-gray-200" 
               : "text-gray-700 hover:bg-gray-50 hover:border-gray-400"
           }`}
-          disabled={isSyncing}
+          disabled={isSyncing || (!hasBeenSynced && (vendas?.length || 0) === 0)}
         >
           {/* Ícone */}
           <div className="flex items-center relative">
@@ -481,9 +512,57 @@ const HeaderVendasMercadolivre = ({
                       Sincronizar Vendas
                     </h3>
                     <p className="text-xs text-gray-600">
-                      Primeiro vamos verificar se há novas vendas para sincronizar
+                      {contasConectadas.length > 1 
+                        ? "Selecione as contas que deseja sincronizar ou deixe em branco para sincronizar todas"
+                        : "Primeiro vamos verificar se há novas vendas para sincronizar"}
                     </p>
                   </div>
+                  
+                  {/* Seleção de contas (apenas se houver mais de 1 conta) */}
+                  {contasConectadas.length > 1 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-700">Contas:</span>
+                        <button
+                          onClick={toggleSelectAll}
+                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                        >
+                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
+                        </button>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
+                        {contasConectadas.map((conta) => {
+                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
+                          return (
+                            <label
+                              key={conta.id}
+                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAccountIds.includes(conta.id)}
+                                onChange={() => toggleAccountSelection(conta.id)}
+                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
+                              />
+                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
+                                {conta.nickname || `Conta ${conta.ml_user_id}`}
+                              </span>
+                              {newOrdersCount > 0 && (
+                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                                  {newOrdersCount}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {selectedAccountIds.length > 0 && (
+                        <p className="text-xs text-gray-500 italic">
+                          {selectedAccountIds.length} conta(s) selecionada(s)
+                        </p>
+                      )}
+                    </div>
+                  )}
                   
                   <button
                     onClick={() => handleCheckNewOrders(false)}
@@ -561,6 +640,56 @@ const HeaderVendasMercadolivre = ({
                       </div>
                     )}
                   </div>
+                  
+                  {/* Seleção de contas (após verificação - apenas se houver mais de 1 conta) */}
+                  {contasConectadas.length > 1 && checkResult.totals?.new > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-700">Sincronizar apenas:</span>
+                        <button
+                          onClick={toggleSelectAll}
+                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                        >
+                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
+                        </button>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
+                        {contasConectadas.map((conta) => {
+                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
+                          return (
+                            <label
+                              key={conta.id}
+                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAccountIds.includes(conta.id)}
+                                onChange={() => toggleAccountSelection(conta.id)}
+                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
+                              />
+                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
+                                {conta.nickname || `Conta ${conta.ml_user_id}`}
+                              </span>
+                              {newOrdersCount > 0 && (
+                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                                  {newOrdersCount}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {selectedAccountIds.length > 0 ? (
+                        <p className="text-xs text-gray-500 italic">
+                          {selectedAccountIds.length} conta(s) selecionada(s)
+                        </p>
+                      ) : (
+                        <p className="text-xs text-orange-600 italic">
+                          ⚠️ Nenhuma conta selecionada - todas serão sincronizadas
+                        </p>
+                      )}
+                    </div>
+                  )}
                   
                   {/* Botões de ação */}
                   <div className="flex gap-2">
@@ -826,23 +955,25 @@ export default function VendasMercadolivre() {
             colunasVisiveis={colunasVisiveis}
             onColunasChange={setColunasVisiveis}
           />
-          
-          <TabelaVendas 
-            platform="Mercado Livre" 
-            isLoading={isLoading}
-            filtroAtivo={filtroAtivo}
-            periodoAtivo={periodoAtivo}
-            filtroADS={filtroADS}
-            filtroExposicao={filtroExposicao}
-            filtroTipoAnuncio={filtroTipoAnuncio}
-            filtroModalidadeEnvio={filtroModalidadeEnvio}
-            filtroConta={filtroConta}
-            colunasVisiveis={colunasVisiveis}
-            dataInicioPersonalizada={dataInicioPersonalizada}
-            dataFimPersonalizada={dataFimPersonalizada}
-          />
-        </section>
-      </main>
-    </div>
+        
+        <TabelaVendas 
+          platform="Mercado Livre" 
+          isLoading={isLoading}
+          isSyncing={isSyncing}
+          syncProgress={progress}
+          filtroAtivo={filtroAtivo}
+          periodoAtivo={periodoAtivo}
+          filtroADS={filtroADS}
+          filtroExposicao={filtroExposicao}
+          filtroTipoAnuncio={filtroTipoAnuncio}
+          filtroModalidadeEnvio={filtroModalidadeEnvio}
+          filtroConta={filtroConta}
+          colunasVisiveis={colunasVisiveis}
+          dataInicioPersonalizada={dataInicioPersonalizada}
+          dataFimPersonalizada={dataFimPersonalizada}
+        />
+      </section>
+    </main>
+  </div>
   );
 }

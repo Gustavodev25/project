@@ -15,6 +15,7 @@ import {
   ColunasVisiveis 
 } from "./FiltrosVendas";
 import { calcularFreteAdjust } from "@/lib/frete";
+import { isStatusCancelado, isStatusPago } from "@/lib/vendasStatus";
 import { useToast } from "./toaster";
 import { useVendas } from "@/hooks/useVendas";
 
@@ -49,6 +50,7 @@ interface TabelaVendasProps {
   isLoading?: boolean;
   onSyncOrders?: () => void;
   isSyncing?: boolean;
+  syncProgress?: { fetched?: number; expected?: number } | null;
   vendas?: Venda[];
   lastSyncedAt?: string | null;
   showInfoDropdown?: boolean;
@@ -223,11 +225,8 @@ export default function TabelaVendas({
     disconnect
   } = useVendas(platform);
   
-  console.log("TabelaVendas - contasConectadas:", contasConectadas);
-  console.log("TabelaVendas - isLoadingAccounts:", isLoadingAccounts);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
-  const [vendasProcessadas, setVendasProcessadas] = useState<ProcessedVenda[]>([]);
   const [localSyncProgress, setLocalSyncProgress] = useState({ fetched: 0, expected: 0 });
 
   // Atualizar progresso quando receber eventos SSE
@@ -240,39 +239,34 @@ export default function TabelaVendas({
     }
   }, [progress]);
 
-  useEffect(() => {
-    if (vendas && vendas.length > 0) {
-      const initialVendas = vendas.map(v => ({ venda: v as any, isCalculating: true }));
-      setVendasProcessadas(initialVendas);
-
-      vendas.forEach((venda, index) => {
-        setTimeout(() => {
-        // Não aplicar calcularFreteAdjust para vendas do Shopee
-          const freteCorrigido = venda.plataforma === "Shopee" 
-            ? venda.frete // Usar o valor original do frete para Shopee
-            : calcularFreteAdjust({
-                shipment_logistic_type: venda.logisticType || null,
-                base_cost: (venda as any).freteBaseCost || null,
-                shipment_list_cost: (venda as any).freteListCost || null,
-                shipment_cost: (venda as any).freteFinalCost || null,
-                order_cost: venda.valorTotal,
-              quantity: venda.quantidade,
-            });
-
-          setVendasProcessadas(prev => {
-            const newVendas = [...prev];
-            newVendas[index] = {
-              ...newVendas[index],
-              venda: { ...newVendas[index].venda, frete: freteCorrigido },
-          isCalculating: false,
-        };
-            return newVendas;
-          });
-        }, index * 50); // Stagger of 50ms
-      });
-    } else {
-      setVendasProcessadas([]);
+  // Processar vendas usando useMemo para evitar recálculos desnecessários
+  const vendasProcessadas = useMemo(() => {
+    if (!vendas || vendas.length === 0) {
+      return [];
     }
+
+    // Processar todas as vendas de uma vez
+    const processedVendas = vendas.map(venda => {
+      // Não aplicar calcularFreteAdjust para vendas do Shopee
+      const freteCorrigido = venda.plataforma === "Shopee" 
+        ? venda.frete // Usar o valor original do frete para Shopee
+        : calcularFreteAdjust({
+            shipment_logistic_type: venda.logisticType || null,
+            base_cost: (venda as any).freteBaseCost || null,
+            shipment_list_cost: (venda as any).freteListCost || null,
+            shipment_cost: (venda as any).freteFinalCost || null,
+            order_cost: venda.valorTotal,
+            quantity: venda.quantidade,
+          });
+
+      return {
+        venda: { ...venda, frete: freteCorrigido } as any,
+        isCalculating: false,
+      };
+    });
+
+    console.log(`[TabelaVendas] ✅ ${processedVendas.length} vendas processadas`);
+    return processedVendas;
   }, [vendas]);
 
   // Função para filtrar por período
@@ -383,25 +377,22 @@ export default function TabelaVendas({
   // Função para filtrar por Conta
   const filtrarPorConta = (item: ProcessedVenda, contaId: string) => {
     if (contaId === "todas") return true;
-    return item.venda.meliAccountId === contaId;
+    const venda = item.venda as any;
+
+    if (platform === "Shopee") {
+      return venda?.shopeeAccountId === contaId || venda?.conta === contaId;
+    }
+
+    return venda?.meliAccountId === contaId || venda?.conta === contaId;
   };
 
   const vendasFiltradas = useMemo(() => {
     return vendasProcessadas.filter(item => {
-      if (filtroAtivo !== "todos") {
-        const status = item.venda.status?.toLowerCase();
-        let match = false;
-        switch (filtroAtivo) {
-          case "pagos":
-            match = status === 'paid' || status === 'pago' || status === 'payment_approved';
-            break;
-          case "cancelados":
-            match = status === 'cancelled' || status === 'cancelado';
-            break;
-          default: 
-            match = true;
-        }
-        if (!match) return false;
+      if (filtroAtivo === "pagos" && !isStatusPago(item.venda.status, platform)) {
+        return false;
+      }
+      if (filtroAtivo === "cancelados" && !isStatusCancelado(item.venda.status, platform)) {
+        return false;
       }
       if (periodoAtivo !== "todos" && !filtrarPorPeriodo(item, periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada)) return false;
       if (filtroADS !== "todos" && !filtrarPorADS(item, filtroADS)) return false;
@@ -411,7 +402,7 @@ export default function TabelaVendas({
       if (filtroConta !== "todas" && !filtrarPorConta(item, filtroConta)) return false;
       return true;
     });
-  }, [vendasProcessadas, filtroAtivo, periodoAtivo, filtroADS, filtroExposicao, filtroTipoAnuncio, filtroModalidadeEnvio, filtroConta, dataInicioPersonalizada, dataFimPersonalizada]);
+  }, [vendasProcessadas, filtroAtivo, periodoAtivo, filtroADS, filtroExposicao, filtroTipoAnuncio, filtroModalidadeEnvio, filtroConta, dataInicioPersonalizada, dataFimPersonalizada, platform]);
 
   const totalPages = Math.max(1, Math.ceil(vendasFiltradas.length / ITEMS_PER_PAGE));
 
@@ -570,26 +561,38 @@ export default function TabelaVendas({
             </ul>
           </div>
       )}
-      {isTableLoading && vendas.length === 0 && !isSyncing ? (
+      {isTableLoading ? (
         <div className="flex items-center justify-center min-h-[320px] bg-white">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-orange-500 mx-auto mb-4"></div>
             <p className="text-sm font-medium text-gray-600">Carregando vendas...</p>
-            <p className="text-xs text-gray-500 mt-1">Buscando dados dos últimos 2 meses</p>
+            <p className="text-xs text-gray-500 mt-1">Buscando dados dos últimos 6 meses</p>
           </div>
         </div>
-      ) : vendasFiltradas.length === 0 && vendas.length === 0 ? (
+      ) : vendas.length === 0 ? (
         <div className="relative">
           <EmptyState
-            title={vendas.length === 0 ? "Nenhuma venda encontrada" : "Nenhuma venda encontrada para este filtro"}
-            description={vendas.length === 0 
-              ? platform === "Geral" 
-                ? "Nenhuma venda sincronizada encontrada. Sincronize vendas nas páginas individuais do Shopee ou Mercado Livre."
-                : `Use o botão "Sincronizar Vendas" para atualizar ou conecte uma nova conta do ${platform}.`
-              : `Não há vendas com status "${filtroAtivo === 'todos' ? 'todos' : filtroAtivo}" no momento.`
+            title="Nenhuma venda encontrada"
+            description={platform === "Geral" 
+              ? "Nenhuma venda sincronizada encontrada. Sincronize vendas nas páginas individuais do Shopee ou Mercado Livre."
+              : `Use o botão "Sincronizar Vendas" para atualizar ou conecte uma nova conta do ${platform}.`
             }
             icons={emptyStateIcons}
-            footer={vendas.length === 0 ? <EmptyStateActionButton /> : undefined}
+            footer={<EmptyStateActionButton />}
+            variant="default"
+            size="default"
+            theme="light"
+            isIconAnimated={true}
+            className="w-full min-h-[320px]"
+          />
+        </div>
+      ) : vendasFiltradas.length === 0 ? (
+        <div className="relative">
+          <EmptyState
+            title="Nenhuma venda encontrada para este filtro"
+            description={`Não há vendas com status "${filtroAtivo === 'todos' ? 'todos' : filtroAtivo}" no momento.`}
+            icons={emptyStateIcons}
+            footer={undefined}
             variant="default"
             size="default"
             theme="light"

@@ -12,6 +12,7 @@ export const SHOPEE_API_BASE = (
 // Paths
 export const SHOPEE_PATH_AUTH_PARTNER = "/api/v2/shop/auth_partner";
 export const SHOPEE_PATH_TOKEN_GET = "/api/v2/auth/token/get";
+export const SHOPEE_PATH_ACCESS_TOKEN_GET = "/api/v2/auth/access_token/get";
 
 function firstHeaderValue(v?: string | null): string | undefined {
   return v?.split(",")[0]?.trim() || undefined;
@@ -306,41 +307,101 @@ export async function getShopInfo(opts: {
   };
 }
 
-// Função para renovar token de conta Shopee
+// Função para renovar token de conta Shopee usando a API oficial
 export async function refreshShopeeAccountToken(
   account: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date },
   forceRefresh: boolean = false
-): Promise<{ id: string; shop_id: string; expires_at: Date }> {
+): Promise<{ id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date }> {
   const now = new Date();
   const expiresAt = new Date(account.expires_at);
   
-  // Se não for refresh forçado e o token ainda não expirou, retornar a conta atual
-  if (!forceRefresh && expiresAt.getTime() > now.getTime() + (5 * 60 * 1000)) { // 5 minutos de margem
+  // Se não for refresh forçado e o token ainda não expirou (margem de 5 minutos), retornar a conta atual
+  if (!forceRefresh && expiresAt.getTime() > now.getTime() + (5 * 60 * 1000)) {
     return {
       id: account.id,
       shop_id: account.shop_id,
+      access_token: account.access_token,
+      refresh_token: account.refresh_token,
       expires_at: expiresAt,
     };
   }
 
+  const partnerId = process.env.SHOPEE_PARTNER_ID;
+  const partnerKey = process.env.SHOPEE_PARTNER_KEY;
+  
+  if (!partnerId || !partnerKey) {
+    throw new Error("SHOPEE_PARTNER_ID e SHOPEE_PARTNER_KEY são obrigatórios para renovar tokens");
+  }
+
   // Usar retry com backoff exponencial para renovação de token
   return await retryWithBackoff(async () => {
-    // Para Shopee, vamos simular uma renovação de token
-    // Na prática, você precisaria implementar a lógica real de renovação da Shopee
-    const newExpiresAt = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000)); // 30 dias
+    console.log(`[Shopee Token Refresh] Renovando token para loja ${account.shop_id}...`);
+    
+    // Construir URL e assinatura para a API de renovação de token
+    // IMPORTANTE: Para refresh, usamos /api/v2/auth/access_token/get
+    const ts = Math.floor(Date.now() / 1000);
+    const baseString = `${partnerId}${SHOPEE_PATH_ACCESS_TOKEN_GET}${ts}`;
+    const sign = signShopeeBaseString(partnerKey, baseString);
+
+    const tokenUrl = new URL(`${SHOPEE_API_BASE}${SHOPEE_PATH_ACCESS_TOKEN_GET}`);
+    tokenUrl.searchParams.set("partner_id", partnerId);
+    tokenUrl.searchParams.set("timestamp", ts.toString());
+    tokenUrl.searchParams.set("sign", sign);
+
+    // Body com refresh_token para renovação
+    const body = {
+      refresh_token: account.refresh_token,
+      shop_id: Number(account.shop_id),
+      partner_id: Number(partnerId),
+    };
+
+    const response = await fetch(tokenUrl.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => `Status ${response.status}`);
+      throw new Error(`Shopee token refresh falhou: ${errorText}`);
+    }
+
+    const payload: any = await response.json();
+
+    if (payload.error) {
+      const errorMsg = payload.message || payload.error || "Erro desconhecido";
+      throw new Error(`Shopee token refresh falhou: ${errorMsg}`);
+    }
+
+    const newAccessToken = payload.access_token;
+    const newRefreshToken = payload.refresh_token;
+    const expireIn = payload.expire_in;
+
+    if (!newAccessToken || !newRefreshToken || !expireIn) {
+      throw new Error(`Resposta inválida ao renovar token: ${JSON.stringify(payload)}`);
+    }
+
+    // Calcular nova data de expiração (com margem de 60 segundos)
+    const newExpiresAt = new Date(Date.now() + Math.max(30, expireIn - 60) * 1000);
     
     // Atualizar no banco de dados
     const updated = await prisma.shopeeAccount.update({
       where: { id: account.id },
       data: {
+        access_token: newAccessToken,
+        refresh_token: newRefreshToken,
         expires_at: newExpiresAt,
         updated_at: new Date(),
       },
     });
 
+    console.log(`[Shopee Token Refresh] Token renovado com sucesso para loja ${account.shop_id}. Expira em: ${newExpiresAt.toISOString()}`);
+
     return {
       id: updated.id,
       shop_id: updated.shop_id,
+      access_token: updated.access_token,
+      refresh_token: updated.refresh_token,
       expires_at: updated.expires_at,
     };
   }, 3, 1000, 10000); // 3 tentativas, delay base 1s, max delay 10s

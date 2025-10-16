@@ -34,28 +34,27 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Verificar cache primeiro (TTL de 30 segundos)
+    // Verificar cache primeiro (TTL de 5 minutos)
     const cacheKey = createCacheKey("vendas-meli", session.sub);
-    const cachedData = cache.get<any>(cacheKey, 30000);
+    const cachedData = cache.get<any>(cacheKey, 300000);
     
     if (cachedData) {
       console.log(`[Cache Hit] Retornando vendas do Mercado Livre do cache`);
       return NextResponse.json(cachedData);
     }
 
-    // Calcular data de início: 1 mês atrás a partir do primeiro dia do mês atual
+    // Calcular data de início: 6 meses atrás (alinhado com Shopee e Vendas Geral)
     const hoje = new Date();
-    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-    const dataInicio = new Date(primeiroDiaMesAtual);
-    dataInicio.setMonth(dataInicio.getMonth() - 1); // Voltar 1 mês
+    const dataInicio = new Date(hoje);
+    dataInicio.setMonth(dataInicio.getMonth() - 6); // Voltar 6 meses
     
-    console.log(`Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
+    console.log(`[Mercado Livre] Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
 
     const vendas = await prisma.meliVenda.findMany({
       where: { 
         userId: session.sub,
         dataVenda: {
-          gte: dataInicio, // Filtrar vendas >= data de início (últimos 2 meses)
+          gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
         }
       },
       select: {

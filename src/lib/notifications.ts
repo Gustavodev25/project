@@ -14,24 +14,24 @@ export interface TokenRefreshNotification {
  */
 export async function sendTokenRefreshNotification(notification: TokenRefreshNotification) {
   try {
-    // Criar notificação no banco de dados
-    await prisma.notification.create({
-      data: {
-        userId: notification.userId,
-        type: 'token_refresh',
-        title: `Token ${notification.platform} ${getActionText(notification.action)}`,
-        message: notification.message,
-        data: {
-          platform: notification.platform,
-          accountId: notification.accountId,
-          accountName: notification.accountName,
-          action: notification.action,
-        },
-        read: false,
-      },
-    });
+    // TODO: Implementar modelo Notification no Prisma schema antes de ativar
+    // await prisma.notification.create({
+    //   data: {
+    //     userId: notification.userId,
+    //     type: 'token_refresh',
+    //     title: `Token ${notification.platform} ${getActionText(notification.action)}`,
+    //     message: notification.message,
+    //     data: {
+    //       platform: notification.platform,
+    //       accountId: notification.accountId,
+    //       accountName: notification.accountName,
+    //       action: notification.action,
+    //     },
+    //     read: false,
+    //   },
+    // });
 
-    console.log(`📢 Notificação enviada: ${notification.message}`);
+    console.log(`📢 Notificação: ${notification.message}`);
   } catch (error) {
     console.error("Erro ao enviar notificação de renovação de token:", error);
   }
