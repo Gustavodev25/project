@@ -33,16 +33,38 @@ export function useSyncProgress() {
 
     eventSource.onmessage = (event) => {
       try {
-        const progress: SyncProgress = JSON.parse(event.data);
-        handleProgress(progress);
+        const data = JSON.parse(event.data);
+        
+        // Ignorar evento de conexão estabelecida
+        if (data.type === 'connected') {
+          console.log('[SSE] Conexão estabelecida com sucesso');
+          return;
+        }
+        
+        // Processar apenas eventos de progresso de sincronização
+        if (data.type && ['sync_start', 'sync_progress', 'sync_complete', 'sync_error'].includes(data.type)) {
+          handleProgress(data as SyncProgress);
+        }
       } catch (error) {
-        console.error('Erro ao processar progresso:', error);
+        console.error('[SSE] Erro ao processar mensagem:', error);
       }
     };
 
     eventSource.onerror = (error) => {
-      console.error('Erro na conexão SSE:', error);
-      setIsConnected(false);
+      // EventSource errors são geralmente objetos vazios
+      // Usar readyState para diagnóstico
+      const readyState = eventSource.readyState;
+      const stateNames = ['CONNECTING', 'OPEN', 'CLOSED'];
+      const stateName = stateNames[readyState] || 'UNKNOWN';
+      
+      console.warn(`[SSE] Conexão em estado: ${stateName} (${readyState})`);
+      
+      // Apenas logar erro se a conexão foi fechada
+      if (readyState === EventSource.CLOSED) {
+        console.error('[SSE] Conexão SSE fechada');
+        setIsConnected(false);
+      }
+      // Se está CONNECTING, não é um erro real, apenas reconectando
     };
 
     return eventSource;

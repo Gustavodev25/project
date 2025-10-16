@@ -372,6 +372,7 @@ model ContaPagar {
   dataVencimento   DateTime        @map("data_vencimento")
   dataPagamento    DateTime?       @map("data_pagamento")
   status           String          @default("pendente")
+  origem           String          @default("MANUAL") // MANUAL, BLING, EXCEL
   sincronizadoEm   DateTime        @default(now()) @map("sincronizado_em")
   atualizadoEm     DateTime        @updatedAt @map("atualizado_em")
   categoria        Categoria?      @relation(fields: [categoriaId], references: [id])
@@ -382,6 +383,7 @@ model ContaPagar {
   @@index([userId])
   @@index([blingId])
   @@index([dataVencimento])
+  @@index([origem])
   @@map("conta_pagar")
 }
 
@@ -396,6 +398,7 @@ model ContaReceber {
   dataVencimento   DateTime        @map("data_vencimento")
   dataRecebimento  DateTime?       @map("data_recebimento")
   status           String          @default("pendente")
+  origem           String          @default("MANUAL") // MANUAL, BLING, EXCEL
   sincronizadoEm   DateTime        @default(now()) @map("sincronizado_em")
   atualizadoEm     DateTime        @updatedAt @map("atualizado_em")
   categoria        Categoria?      @relation(fields: [categoriaId], references: [id])
@@ -406,6 +409,7 @@ model ContaReceber {
   @@index([userId])
   @@index([blingId])
   @@index([dataVencimento])
+  @@index([origem])
   @@map("conta_receber")
 }
 

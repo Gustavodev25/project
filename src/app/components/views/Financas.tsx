@@ -12,6 +12,7 @@ import { useToast } from "./ui/toaster";
 import { ImportFinanceModal } from "./ui/ImportFinanceModal";
 import VendasPagination from "./ui/VendasPagination";
 import { useSyncProgress } from "@/hooks/useSyncProgress";
+import FiltrosFinancas, { FiltroPeriodo, FiltroStatus, FiltroOrigem } from "./ui/FiltrosFinancas";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -31,6 +32,7 @@ interface HeaderFinancasProps {
   onIncrementalSync?: () => void;
   hasSyncedBefore?: boolean;
   isIncrementalSyncing?: boolean;
+  filtrosComponent?: React.ReactNode;
 }
 
 const HeaderFinancas = ({ 
@@ -40,7 +42,8 @@ const HeaderFinancas = ({
   onImportClick, 
   onIncrementalSync, 
   hasSyncedBefore = false, 
-  isIncrementalSyncing = false 
+  isIncrementalSyncing = false,
+  filtrosComponent
 }: HeaderFinancasProps) => {
   const tabs = [
     { id: "contas_pagar" as TabOption, label: "Contas a Pagar" },
@@ -137,23 +140,32 @@ const HeaderFinancas = ({
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={[
-                activeTab === tab.id
-                  ? "border-orange-500 text-orange-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
-                "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
-              ].join(" ")}
-              aria-current={activeTab === tab.id ? "page" : undefined}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+        <div className="flex items-center justify-between">
+          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={[
+                  activeTab === tab.id
+                    ? "border-orange-500 text-orange-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
+                  "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
+                ].join(" ")}
+                aria-current={activeTab === tab.id ? "page" : undefined}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          
+          {/* Filtros na mesma linha das tabs */}
+          {filtrosComponent && (
+            <div className="flex items-center gap-2 pb-px">
+              {filtrosComponent}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -197,6 +209,14 @@ export default function Financas() {
   const [pageReceber, setPageReceber] = useState(1);
   const itemsPerPage = 15;
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Estados de filtros
+  const [filtroPeriodo, setFiltroPeriodo] = useState<FiltroPeriodo>("todos");
+  const [filtroDataInicio, setFiltroDataInicio] = useState<Date | null>(null);
+  const [filtroDataFim, setFiltroDataFim] = useState<Date | null>(null);
+  const [filtroCategoria, setFiltroCategoria] = useState<string>("todas");
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>("todos");
+  const [filtroOrigem, setFiltroOrigem] = useState<FiltroOrigem>("todas");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -631,13 +651,72 @@ export default function Financas() {
     setIsModalOpen(true);
   };
 
+  // Aplicar filtros de período
+  const calcularPeriodo = (periodo: FiltroPeriodo) => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    
+    switch (periodo) {
+      case "hoje":
+        return { inicio: hoje, fim: hoje };
+      case "ontem": {
+        const ontem = new Date(hoje);
+        ontem.setDate(ontem.getDate() - 1);
+        return { inicio: ontem, fim: ontem };
+      }
+      case "este_mes": {
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+        return { inicio, fim };
+      }
+      case "mes_passado": {
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+        return { inicio, fim };
+      }
+      case "personalizado":
+        if (filtroDataInicio && filtroDataFim) {
+          return { inicio: filtroDataInicio, fim: filtroDataFim };
+        }
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  // Aplicar filtros
+  const aplicarFiltros = (contas: any[]) => {
+    return contas.filter(conta => {
+      // Filtro de data/período
+      const periodo = calcularPeriodo(filtroPeriodo);
+      if (periodo) {
+        const dataVencimento = new Date(conta.dataVencimento);
+        dataVencimento.setHours(0, 0, 0, 0);
+        const inicio = new Date(periodo.inicio);
+        inicio.setHours(0, 0, 0, 0);
+        const fim = new Date(periodo.fim);
+        fim.setHours(23, 59, 59, 999);
+        if (dataVencimento < inicio || dataVencimento > fim) return false;
+      }
+      // Filtro de categoria
+      if (filtroCategoria !== "todas" && conta.categoriaId !== filtroCategoria) return false;
+      // Filtro de status
+      if (filtroStatus !== "todos" && conta.status !== filtroStatus) return false;
+      // Filtro de origem
+      if (filtroOrigem !== "todas" && conta.origem !== filtroOrigem) return false;
+      return true;
+    });
+  };
+
   // Paginação (client-side) para tabelas de contas
-  const totalPagar = contasPagar.length;
-  const totalReceber = contasReceber.length;
+  const contasPagarFiltradas = aplicarFiltros(contasPagar);
+  const contasReceberFiltradas = aplicarFiltros(contasReceber);
+  const totalPagar = contasPagarFiltradas.length;
+  const totalReceber = contasReceberFiltradas.length;
   const totalPagesPagar = Math.max(1, Math.ceil(totalPagar / itemsPerPage));
   const totalPagesReceber = Math.max(1, Math.ceil(totalReceber / itemsPerPage));
-  const paginatedContasPagar = contasPagar.slice((pagePagar - 1) * itemsPerPage, pagePagar * itemsPerPage);
-  const paginatedContasReceber = contasReceber.slice((pageReceber - 1) * itemsPerPage, pageReceber * itemsPerPage);
+  const paginatedContasPagar = contasPagarFiltradas.slice((pagePagar - 1) * itemsPerPage, pagePagar * itemsPerPage);
+  const paginatedContasReceber = contasReceberFiltradas.slice((pageReceber - 1) * itemsPerPage, pageReceber * itemsPerPage);
 
   useEffect(() => {
     // Garantir que a página atual exista após alterações de dados
@@ -1346,6 +1425,24 @@ export default function Financas() {
             onIncrementalSync={handleIncrementalSync}
             hasSyncedBefore={hasSyncedBefore}
             isIncrementalSyncing={isIncrementalSyncing}
+            filtrosComponent={(activeTab === "contas_pagar" || activeTab === "contas_receber") ? (
+              <FiltrosFinancas
+                tipo={activeTab}
+                periodoAtivo={filtroPeriodo}
+                onPeriodoChange={setFiltroPeriodo}
+                onPeriodoPersonalizadoChange={(inicio, fim) => {
+                  setFiltroDataInicio(inicio);
+                  setFiltroDataFim(fim);
+                }}
+                filtroCategoria={filtroCategoria}
+                onCategoriaChange={setFiltroCategoria}
+                categoriasDisponiveis={categorias.filter(c => c.tipo === (activeTab === "contas_pagar" ? 'DESPESA' : 'RECEITA')).map(c => ({ id: c.id, nome: c.nome, descricao: c.descricao }))}
+                filtroStatus={filtroStatus}
+                onStatusChange={setFiltroStatus}
+                filtroOrigem={filtroOrigem}
+                onOrigemChange={setFiltroOrigem}
+              />
+            ) : undefined}
           />
 
           {/* Conteúdo da Tab */}
@@ -1584,6 +1681,7 @@ export default function Financas() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Forma</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Origem</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                       </tr>
                     </thead>
@@ -1600,6 +1698,7 @@ export default function Financas() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">{c.status}</span></td>
+                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'BLING' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem || 'MANUAL'}</span></td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center space-x-2">
                               <button
@@ -1674,6 +1773,7 @@ export default function Financas() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Forma</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Origem</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                       </tr>
                     </thead>
@@ -1686,6 +1786,7 @@ export default function Financas() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">{c.status}</span></td>
+                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'BLING' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem || 'MANUAL'}</span></td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center space-x-2">
                               <button

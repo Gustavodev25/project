@@ -91,6 +91,20 @@ export async function GET(request: NextRequest) {
 
     const userId = session.sub;
 
+    console.log(`[Categorias GET] Buscando categorias para userId: ${userId}`);
+
+    // Buscar TODAS as categorias primeiro para debug
+    const todasCategorias = await prisma.categoria.findMany({
+      where: {
+        userId: userId,
+      },
+    });
+    
+    console.log(`[Categorias GET] Total de categorias no banco: ${todasCategorias.length}`);
+    console.log(`[Categorias GET] Categorias ativas: ${todasCategorias.filter(c => c.ativo).length}`);
+    console.log(`[Categorias GET] Categorias inativas: ${todasCategorias.filter(c => !c.ativo).length}`);
+
+    // Buscar apenas categorias ativas com relacionamentos
     const categorias = await prisma.categoria.findMany({
       where: {
         userId: userId,
@@ -111,6 +125,8 @@ export async function GET(request: NextRequest) {
         nome: "asc",
       },
     });
+
+    console.log(`[Categorias GET] Retornando ${categorias.length} categorias ativas`);
 
     return NextResponse.json({
       success: true,
