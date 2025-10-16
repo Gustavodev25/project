@@ -1,5 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { useVendasSyncProgress } from "@/hooks/useVendasSyncProgress";
+import { 
+  loadVendasFromCache, 
+  saveVendasToCache, 
+  hasCachedVendas,
+  clearVendasCache 
+} from "@/lib/vendasCache";
+
+// Re-exportar funções de cache para uso externo
+export { 
+  clearVendasCache, 
+  clearAllVendasCache, 
+  getCacheInfo,
+  getLocalStorageUsage 
+} from "@/lib/vendasCache";
 
 export interface Venda {
   id: string;
@@ -78,6 +92,7 @@ export function useVendas(platform: string = "Mercado Livre") {
   const [isTableLoading, setIsTableLoading] = useState(false);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [syncProgress, setSyncProgress] = useState({ fetched: 0, expected: 0 });
+  const [isLoadingFromCache, setIsLoadingFromCache] = useState(false);
   
   // Hook para progresso em tempo real
   const { isConnected, progress, connect, disconnect } = useVendasSyncProgress();
@@ -248,7 +263,7 @@ export function useVendas(platform: string = "Mercado Livre") {
       setLastSyncedAt(payload.syncedAt ?? null);
       setSyncErrors(payload.errors ?? []);
 
-      // Carregar vendas atualizadas do banco
+      // Carregar vendas atualizadas do banco (vai atualizar cache automaticamente)
       await loadVendasFromDatabase();
       
     } catch (error) {
@@ -307,9 +322,22 @@ export function useVendas(platform: string = "Mercado Livre") {
 
   const loadVendasFromDatabase = async () => {
     try {
-      setIsTableLoading(true);
+      // 1. PRIMEIRO: Tentar carregar do cache instantaneamente (SEM loading)
+      const cachedData = loadVendasFromCache(platform);
+      if (cachedData && cachedData.vendas.length > 0) {
+        console.log(`[useVendas] 🚀 Carregando ${cachedData.vendas.length} vendas do CACHE (${platform})`);
+        setVendas(cachedData.vendas);
+        setIsTableLoading(false); // Não mostrar loading se tem cache
+        setIsLoadingFromCache(true); // Indicar que dados vêm do cache
+      } else {
+        // Só mostrar loading se NÃO houver cache
+        setIsTableLoading(true);
+        setIsLoadingFromCache(false);
+      }
+
       console.log(`[useVendas] Iniciando carregamento de vendas para plataforma: ${platform}`);
 
+      // 2. DEPOIS: Atualizar da API em background
       // Determinar a URL da API baseada na plataforma
       let apiUrl = "/api/vendas"; // Default para "Geral"
       
@@ -319,7 +347,7 @@ export function useVendas(platform: string = "Mercado Livre") {
         apiUrl = "/api/shopee/vendas";
       }
 
-      console.log(`[useVendas] Chamando API: ${apiUrl}`);
+      console.log(`[useVendas] Atualizando da API: ${apiUrl}`);
 
       const res = await fetch(apiUrl, {
         cache: "no-store",
@@ -340,15 +368,29 @@ export function useVendas(platform: string = "Mercado Livre") {
         vendasLength: data.vendas?.length || 0,
         lastSync: data.lastSync 
       });
+      
+      // 3. Atualizar estado com dados da API
       setVendas(data.vendas || []);
       console.log(`[useVendas] ✅ ${data.vendas?.length || 0} vendas carregadas para ${platform}`);
+      
+      // 4. Salvar no cache para próxima vez
+      if (data.vendas && data.vendas.length > 0) {
+        saveVendasToCache(platform, data.vendas);
+      }
+      
+      setIsLoadingFromCache(false); // Dados agora vêm da API
     } catch (error) {
       console.error(`[useVendas] Erro ao carregar vendas (${platform}):`, error);
       // Não mostrar erro em dev mode com strict mode (double render)
       if (error instanceof TypeError && error.message === "Failed to fetch") {
         console.warn("[useVendas] Fetch falhou - provavelmente servidor não está rodando ou rota incorreta");
       }
-      setVendas([]);
+      
+      // Se API falhar mas tem cache, manter cache
+      const cachedData = loadVendasFromCache(platform);
+      if (!cachedData || cachedData.vendas.length === 0) {
+        setVendas([]);
+      }
     } finally {
       setIsTableLoading(false);
     }
@@ -387,6 +429,7 @@ export function useVendas(platform: string = "Mercado Livre") {
     isTableLoading: isTableLoading || false,
     isLoadingAccounts: isLoadingAccounts || false,
     syncProgress,
+    isLoadingFromCache: isLoadingFromCache || false,
     handleSyncOrders,
     handleConnectAccount,
     // Novas propriedades para progresso em tempo real

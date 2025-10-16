@@ -954,6 +954,7 @@ export default function VendasMercadolivre() {
             }))}
             colunasVisiveis={colunasVisiveis}
             onColunasChange={setColunasVisiveis}
+            platform="Mercado Livre"
           />
         
         <TabelaVendas 

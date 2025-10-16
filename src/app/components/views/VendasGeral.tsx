@@ -202,9 +202,9 @@ export default function VendasGeral() {
     canal: true,
     conta: true,
     pedido: true,
-    ads: true,
-    exposicao: true,
-    tipo: true,
+    ads: false, // Específico do ML - desmarcado por padrão na tabela Geral
+    exposicao: false, // Específico do ML - desmarcado por padrão na tabela Geral
+    tipo: false, // Específico do ML - desmarcado por padrão na tabela Geral
     produto: true,
     sku: true,
     quantidade: true,

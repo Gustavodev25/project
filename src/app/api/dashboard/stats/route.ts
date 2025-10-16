@@ -4,6 +4,8 @@ import prisma from "@/lib/prisma";
 import { getStatusWhere, getCanalWhere, getTipoAnuncioWhere, getModalidadeWhere } from "@/lib/dashboard-filters";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60; // 60 segundos para planos Pro/Enterprise da Vercel
 
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -148,41 +150,41 @@ export async function GET(req: NextRequest) {
     // Helper for trend calculations (apenas vendas pagas/completas)
     const paidOnly = getStatusWhere('pagos');
 
-    // Buscar vendas do Mercado Livre
-    const vendasMeli = await prisma.meliVenda.findMany({
-      where: useRange
-        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere }
-        : { userId: session.sub, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere },
-      select: {
-        valorTotal: true,
-        taxaPlataforma: true,
-        frete: true,
-        quantidade: true,
-        sku: true,
-        plataforma: true,
-        dataVenda: true,
-      },
-      distinct: ['orderId'],
-      orderBy: { dataVenda: "desc" },
-    });
-
-    // Buscar vendas do Shopee
-    const vendasShopee = await prisma.shopeeVenda.findMany({
-      where: useRange
-        ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere }
-        : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere },
-      select: {
-        valorTotal: true,
-        taxaPlataforma: true,
-        frete: true,
-        quantidade: true,
-        sku: true,
-        plataforma: true,
-        dataVenda: true,
-      },
-      distinct: ['orderId'],
-      orderBy: { dataVenda: "desc" },
-    });
+    // Buscar vendas do Mercado Livre e Shopee em PARALELO para melhor performance
+    const [vendasMeli, vendasShopee] = await Promise.all([
+      prisma.meliVenda.findMany({
+        where: useRange
+          ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere }
+          : { userId: session.sub, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere },
+        select: {
+          valorTotal: true,
+          taxaPlataforma: true,
+          frete: true,
+          quantidade: true,
+          sku: true,
+          plataforma: true,
+          dataVenda: true,
+        },
+        distinct: ['orderId'],
+        orderBy: { dataVenda: "desc" },
+      }),
+      prisma.shopeeVenda.findMany({
+        where: useRange
+          ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere }
+          : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere },
+        select: {
+          valorTotal: true,
+          taxaPlataforma: true,
+          frete: true,
+          quantidade: true,
+          sku: true,
+          plataforma: true,
+          dataVenda: true,
+        },
+        distinct: ['orderId'],
+        orderBy: { dataVenda: "desc" },
+      })
+    ]);
 
     // Consolidar vendas baseado no filtro de canal
     let vendas;
@@ -326,27 +328,34 @@ export async function GET(req: NextRequest) {
       console.log('Alíquotas encontradas mas período não filtrado (todos). Selecione um período específico no dashboard.');
     }
 
-    // Trend: faturamento do último mês vs penúltimo mês (considerando ambas plataformas)
-    const vendasMeliUltimoMes = await prisma.meliVenda.findMany({
-      where: { userId: session.sub, dataVenda: { gte: prevStart, lte: prevEnd }, ...paidOnly },
-      select: { valorTotal: true },
-      distinct: ['orderId'],
-    });
-    const vendasShopeeUltimoMes = await prisma.shopeeVenda.findMany({
-      where: { userId: session.sub, dataVenda: { gte: prevStart, lte: prevEnd }, ...paidOnly },
-      select: { valorTotal: true },
-      distinct: ['orderId'],
-    });
-    const vendasMeliPenultimoMes = await prisma.meliVenda.findMany({
-      where: { userId: session.sub, dataVenda: { gte: penultStart, lte: penultEnd }, ...paidOnly },
-      select: { valorTotal: true },
-      distinct: ['orderId'],
-    });
-    const vendasShopeePenultimoMes = await prisma.shopeeVenda.findMany({
-      where: { userId: session.sub, dataVenda: { gte: penultStart, lte: penultEnd }, ...paidOnly },
-      select: { valorTotal: true },
-      distinct: ['orderId'],
-    });
+    // Trend: faturamento do último mês vs penúltimo mês (TODAS AS QUERIES EM PARALELO)
+    const [
+      vendasMeliUltimoMes,
+      vendasShopeeUltimoMes,
+      vendasMeliPenultimoMes,
+      vendasShopeePenultimoMes
+    ] = await Promise.all([
+      prisma.meliVenda.findMany({
+        where: { userId: session.sub, dataVenda: { gte: prevStart, lte: prevEnd }, ...paidOnly },
+        select: { valorTotal: true },
+        distinct: ['orderId'],
+      }),
+      prisma.shopeeVenda.findMany({
+        where: { userId: session.sub, dataVenda: { gte: prevStart, lte: prevEnd }, ...paidOnly },
+        select: { valorTotal: true },
+        distinct: ['orderId'],
+      }),
+      prisma.meliVenda.findMany({
+        where: { userId: session.sub, dataVenda: { gte: penultStart, lte: penultEnd }, ...paidOnly },
+        select: { valorTotal: true },
+        distinct: ['orderId'],
+      }),
+      prisma.shopeeVenda.findMany({
+        where: { userId: session.sub, dataVenda: { gte: penultStart, lte: penultEnd }, ...paidOnly },
+        select: { valorTotal: true },
+        distinct: ['orderId'],
+      })
+    ]);
 
     const faturamentoPrev =
       vendasMeliPenultimoMes.reduce((acc, it) => acc + toNumber(it.valorTotal), 0) +

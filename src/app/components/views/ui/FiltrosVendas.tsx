@@ -1138,8 +1138,9 @@ export default function FiltrosVendas({
                         { id: "cmv" as keyof ColunasVisiveis, label: "CMV" },
                         { id: "margem" as keyof ColunasVisiveis, label: "Margem" },
                       ].filter(coluna => {
-                        // Esconde colunas de Mercado Livre quando for Shopee
-                        if ((platform === "Shopee" || platform === "Geral") && (coluna.id === "ads" || coluna.id === "exposicao" || coluna.id === "tipo")) {
+                        // Esconde colunas de Mercado Livre APENAS quando for Shopee
+                        // Na tabela Geral, mantém as colunas disponíveis (mas desmarcadas por padrão)
+                        if (platform === "Shopee" && (coluna.id === "ads" || coluna.id === "exposicao" || coluna.id === "tipo")) {
                           return false;
                         }
                         return true;

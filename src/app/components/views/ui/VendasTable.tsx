@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import gsap from "gsap";
 import { openVendaDetails } from "./VendaDetailsModal";
 import { classifyFrete, formatCurrency, formatarFreteShopee } from "@/lib/frete";
 import FreteDetailsDropdown from "./FreteDetailsDropdown";
@@ -90,6 +88,7 @@ interface VendasTableProps {
   currentPage: number;
   itemsPerPage: number;
   colunasVisiveis?: import('./FiltrosVendas').ColunasVisiveis;
+  platform?: "Mercado Livre" | "Shopee" | "Geral";
 }
 
 // Skeleton para carregamento
@@ -161,34 +160,13 @@ export default function VendasTable({
     frete: true,
     cmv: true,
     margem: true, // margem contribuição
-  }
+  },
+  platform = "Mercado Livre"
 }: VendasTableProps) {
-  const tableRef = useRef<HTMLDivElement>(null);
-
   const paginatedVendas = vendas.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-
-  // Animações da tabela
-  useEffect(() => {
-    if (!isLoading && paginatedVendas.length > 0 && tableRef.current) {
-      const rows = tableRef.current.querySelectorAll("tbody tr");
-      
-      gsap.set(rows, {
-        opacity: 0,
-        y: 20,
-      });
-
-      gsap.to(rows, {
-        opacity: 1,
-        y: 0,
-        duration: 0.6,
-        stagger: 0.1,
-        ease: "power2.out",
-      });
-    }
-  }, [isLoading, paginatedVendas, currentPage]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -258,7 +236,7 @@ export default function VendasTable({
   }
 
   return (
-    <div ref={tableRef} className="h-full flex flex-col">
+    <div className="h-full flex flex-col">
       {/* CSS para ocultar scrollbars e animação de gradiente */}
       <style dangerouslySetInnerHTML={{
         __html: `
@@ -329,17 +307,17 @@ export default function VendasTable({
                   Id venda
                 </th>
               )}
-              {colunasVisiveis.ads && (
+              {colunasVisiveis.ads && platform !== "Shopee" && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px] bg-gray-50">
                   ADS
                 </th>
               )}
-              {colunasVisiveis.exposicao && (
+              {colunasVisiveis.exposicao && platform !== "Shopee" && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px] bg-gray-50">
                   Exposição
                 </th>
               )}
-              {colunasVisiveis.tipo && (
+              {colunasVisiveis.tipo && platform !== "Shopee" && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px] bg-gray-50">
                   Tipo de anúncio
                 </th>
@@ -432,7 +410,7 @@ export default function VendasTable({
                   </td>
                 )}
                 {/* ADS - Apenas para Mercado Livre */}
-                {colunasVisiveis.ads && (
+                {colunasVisiveis.ads && platform !== "Shopee" && (
                   <td className="px-6 py-4 whitespace-nowrap min-w-[80px]">
                     {venda.plataforma === "Mercado Livre" ? (
                       <div className="text-sm text-gray-900">
@@ -450,7 +428,7 @@ export default function VendasTable({
                   </td>
                 )}
                 {/* Exposição - Apenas para Mercado Livre */}
-                {colunasVisiveis.exposicao && (
+                {colunasVisiveis.exposicao && platform !== "Shopee" && (
                   <td className="px-6 py-4 whitespace-nowrap min-w-[100px]">
                     {venda.plataforma === "Mercado Livre" ? (
                       <div className="text-sm text-gray-900">
@@ -472,7 +450,7 @@ export default function VendasTable({
                   </td>
                 )}
                 {/* Tipo de anúncio - Apenas para Mercado Livre */}
-                {colunasVisiveis.tipo && (
+                {colunasVisiveis.tipo && platform !== "Shopee" && (
                   <td className="px-6 py-4 whitespace-nowrap min-w-[120px]">
                     {venda.plataforma === "Mercado Livre" ? (
                       <div className="text-sm text-gray-900">

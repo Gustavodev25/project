@@ -609,6 +609,7 @@ export default function TabelaVendas({
               currentPage={currentPage}
               itemsPerPage={ITEMS_PER_PAGE}
               colunasVisiveis={colunasVisiveis}
+              platform={platform as "Mercado Livre" | "Shopee" | "Geral"}
             />
           </div>
           <div className="border-t border-gray-200 bg-white">
