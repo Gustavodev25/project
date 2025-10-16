@@ -15,6 +15,7 @@ const TopProdutosMargem = lazy(() => import("../views/ui/TopProdutosMargem"));
 const FaturamentoPorOrigem = lazy(() => import("../views/ui/FaturamentoPorOrigem"));
 const FaturamentoPorExposicao = lazy(() => import("../views/ui/FaturamentoPorExposicao"));
 const FaturamentoPorTipoAnuncio = lazy(() => import("../views/ui/FaturamentoPorTipoAnuncio"));
+const MapaCalorBrasil = lazy(() => import("../views/ui/MapaCalorBrasil"));
 import type { FiltroCanal, FiltroStatus, FiltroTipoAnuncio, FiltroModalidadeEnvio } from "../views/ui/FiltrosDashboardExtra";
 import type { FiltroAgrupamentoSKU } from "../views/ui/FiltroSKU";
 import { AlertBanner } from "@/components/ui/alert-banner";
@@ -332,6 +333,20 @@ export default function Dashboard() {
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
                 selectedAccount={selectedAccount}
+              />
+            </Suspense>
+          </div>
+
+          {/* Mapa de Calor - Vendas por Estado */}
+          <div className="mt-6">
+            <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
+              <MapaCalorBrasil
+                periodoAtivo={periodoAtivo}
+                dataInicioPersonalizada={dataInicioPersonalizada}
+                dataFimPersonalizada={dataFimPersonalizada}
+                canalAtivo={canalAtivo}
+                statusAtivo={statusAtivo}
+                refreshKey={refreshKey}
               />
             </Suspense>
           </div>

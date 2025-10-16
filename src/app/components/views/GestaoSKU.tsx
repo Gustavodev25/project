@@ -218,6 +218,17 @@ export default function GestaoSKU() {
     setShowSKUsPendentes(true);
   };
 
+  const handleNovoSKU = () => {
+    // Scroll suave até a tabela e foca no campo SKU da linha de criação
+    const skuInput = document.querySelector('input[placeholder="Ex: SKU-123"]') as HTMLInputElement;
+    if (skuInput) {
+      skuInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => {
+        skuInput.focus();
+      }, 300); // Aguarda o scroll terminar
+    }
+  };
+
   const handleToggleEditMode = () => {
     setIsEditMode(!isEditMode);
     if (isEditMode) {
@@ -455,6 +466,8 @@ export default function GestaoSKU() {
             onBackClick={() => setSelectedCategory(null)}
             onImportExcel={handleImportExcel}
             onExportExcel={handleExportExcel}
+            onSKUsPendentes={handleSKUsPendentes}
+            onNovoSKU={handleNovoSKU}
             isLoading={isLoading}
           />
           
@@ -497,11 +510,12 @@ export default function GestaoSKU() {
         onPickToCreate={handlePickToCreate}
       />
 
+      {/* TODO: Revisar ImportExcelModal - precisa de platform prop específico para SKU
       <ImportExcelModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={handleImportComplete}
-      />
+      /> */}
     </div>
   );
 }

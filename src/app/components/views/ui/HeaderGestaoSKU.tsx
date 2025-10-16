@@ -8,6 +8,8 @@ interface HeaderGestaoSKUProps {
   onBackClick?: () => void;
   onImportExcel?: () => void;
   onExportExcel?: () => void;
+  onSKUsPendentes?: () => void;
+  onNovoSKU?: () => void;
   isLoading?: boolean;
 }
 
@@ -16,6 +18,8 @@ export default function HeaderGestaoSKU({
   onBackClick,
   onImportExcel,
   onExportExcel,
+  onSKUsPendentes,
+  onNovoSKU,
   isLoading = false
 }: HeaderGestaoSKUProps) {
   const [showExcelDropdown, setShowExcelDropdown] = useState(false);
@@ -75,8 +79,54 @@ export default function HeaderGestaoSKU({
           </p>
         </div>
 
-        {/* Botão Excel */}
-        <div className="relative">
+        {/* Botões de Ação */}
+        <div className="flex items-center gap-3">
+          {/* Botão Novo SKU */}
+          <button
+            onClick={onNovoSKU}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-orange-600 text-white text-sm font-medium hover:bg-orange-700 transition-all duration-200 shadow-sm hover:shadow-md"
+            disabled={isLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14m-7-7h14"/>
+            </svg>
+            <span>Novo SKU</span>
+          </button>
+
+          {/* Botão SKUs Pendentes */}
+          <button
+            onClick={onSKUsPendentes}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-yellow-500 bg-yellow-50 text-yellow-900 text-sm font-medium hover:bg-yellow-100 transition-all duration-200"
+            disabled={isLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <span>SKUs Pendentes</span>
+          </button>
+
+          {/* Botão Excel */}
+          <div className="relative">
           <button
             ref={excelDropdown.triggerRef}
             onClick={() => setShowExcelDropdown(!showExcelDropdown)}
@@ -153,6 +203,7 @@ export default function HeaderGestaoSKU({
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
