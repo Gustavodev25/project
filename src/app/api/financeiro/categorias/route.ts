@@ -102,45 +102,49 @@ export async function GET(request: NextRequest) {
     const userId = session.sub;
     console.log(`[Categorias GET] UserId: ${userId}`);
 
-    // Buscar TODAS as categorias primeiro para debug
-    console.log('[Categorias GET] Buscando todas categorias...');
-    const todasCategorias = await prisma.categoria.findMany({
-      where: {
-        userId: userId,
-      },
-    });
-    
-    console.log(`[Categorias GET] Total no banco: ${todasCategorias.length}`);
-    console.log(`[Categorias GET] Ativas: ${todasCategorias.filter(c => c.ativo).length}`);
-
-    // Buscar apenas categorias ativas com relacionamentos
-    console.log('[Categorias GET] Buscando categorias com relacionamentos...');
+    // Buscar categorias ativas - query simplificada SEM includes
+    console.log('[Categorias GET] Buscando categorias...');
     const categorias = await prisma.categoria.findMany({
       where: {
         userId: userId,
         ativo: true,
-      },
-      include: {
-        subCategorias: {
-          where: {
-            ativo: true,
-          },
-          orderBy: {
-            nome: "asc",
-          },
-        },
-        categoriaPai: true,
       },
       orderBy: {
         nome: "asc",
       },
     });
 
-    console.log(`[Categorias GET] Retornando ${categorias.length} categorias ativas`);
+    console.log(`[Categorias GET] Encontradas ${categorias.length} categorias`);
+
+    // Buscar subcategorias separadamente (evita consulta com lista vazia)
+    const categoriaIds = categorias.map((c) => c.id);
+    let subCategorias = [] as typeof categorias;
+    if (categoriaIds.length > 0) {
+      subCategorias = await prisma.categoria.findMany({
+        where: {
+          categoriaPaiId: { in: categoriaIds },
+          ativo: true,
+        },
+        orderBy: {
+          nome: "asc",
+        },
+      });
+    }
+
+    console.log(`[Categorias GET] Encontradas ${subCategorias.length} subcategorias`);
+
+    // Montar estrutura com subcategorias
+    const categoriasComSubs = categorias.map(cat => ({
+      ...cat,
+      subCategorias: subCategorias.filter(sub => sub.categoriaPaiId === cat.id),
+      categoriaPai: null,
+    }));
+
+    console.log(`[Categorias GET] Retornando ${categoriasComSubs.length} categorias`);
 
     return NextResponse.json({
       success: true,
-      data: categorias,
+      data: categoriasComSubs,
     });
   } catch (error) {
     console.error("[Categorias GET] ERRO CRÍTICO:", error);
