@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
-
-export type MesKey = string; // yyyy-MM
+import FiltrosDashboard, { FiltroPeriodo } from "./FiltrosDashboard";
 
 type Categoria = {
   id: string;
@@ -13,9 +12,12 @@ type Categoria = {
 };
 
 interface HeaderDREProps {
-  meses: Array<{ key: MesKey; label: string; ano: number; mes: number }>;
-  mesesSelecionados: Set<MesKey>;
-  onMesesSelecionadosChange: (keys: Set<MesKey>) => void;
+  periodoAtivo: FiltroPeriodo;
+  onPeriodoChange: (periodo: FiltroPeriodo) => void;
+  dataInicioPersonalizada: Date | null;
+  dataFimPersonalizada: Date | null;
+  onDataInicioChange: (data: Date | null) => void;
+  onDataFimChange: (data: Date | null) => void;
 
   categorias: Categoria[];
   categoriasSelecionadas: Set<string>; // ids
@@ -26,25 +28,19 @@ interface HeaderDREProps {
 }
 
 export default function HeaderDRE({
-  meses,
-  mesesSelecionados,
-  onMesesSelecionadosChange,
+  periodoAtivo,
+  onPeriodoChange,
+  dataInicioPersonalizada,
+  dataFimPersonalizada,
+  onDataInicioChange,
+  onDataFimChange,
   categorias,
   categoriasSelecionadas,
   onCategoriasSelecionadasChange,
   tipoVisualizacao,
   onTipoVisualizacaoChange,
 }: HeaderDREProps) {
-  const [showMesesDropdown, setShowMesesDropdown] = useState(false);
   const [showCategoriasDropdown, setShowCategoriasDropdown] = useState(false);
-
-  const mesesDropdown = useSmartDropdown<HTMLButtonElement>({
-    isOpen: showMesesDropdown,
-    onClose: () => setShowMesesDropdown(false),
-    preferredPosition: "bottom-right",
-    offset: 8,
-    minDistanceFromEdge: 16,
-  });
   const categoriasDropdown = useSmartDropdown<HTMLButtonElement>({
     isOpen: showCategoriasDropdown,
     onClose: () => setShowCategoriasDropdown(false),
@@ -53,8 +49,6 @@ export default function HeaderDRE({
     minDistanceFromEdge: 16,
   });
 
-  const totalMeses = meses.length;
-  const totalMesesSelecionados = mesesSelecionados.size;
   const totalCategorias = categorias.length;
   const totalCategoriasSelecionadas = categoriasSelecionadas.size;
 
@@ -63,25 +57,11 @@ export default function HeaderDRE({
     onTipoVisualizacaoChange(novoTipo);
   };
 
-  const toggleMes = (key: MesKey) => {
-    const next = new Set(mesesSelecionados);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    onMesesSelecionadosChange(next);
-  };
-
   const toggleCategoria = (id: string) => {
     const next = new Set(categoriasSelecionadas);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     onCategoriasSelecionadasChange(next);
-  };
-
-  const selecionarTodosMeses = () => {
-    onMesesSelecionadosChange(new Set(meses.map((m) => m.key)));
-  };
-  const limparMeses = () => {
-    onMesesSelecionadosChange(new Set());
   };
 
   const selecionarTodasCategorias = () => {
@@ -183,57 +163,15 @@ export default function HeaderDRE({
             )}
           </div>
 
-          {/* Filtrar Meses (64/64) */}
-          <div className="relative">
-            <button
-              ref={mesesDropdown.triggerRef}
-              onClick={() => setShowMesesDropdown(!showMesesDropdown)}
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-all duration-200 ${
-                showMesesDropdown
-                  ? "border-gray-400 bg-gray-50 text-gray-900"
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400"
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-              <span>
-                Filtrar Meses ({totalMesesSelecionados}/{totalMeses || 0})
-              </span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showMesesDropdown ? 'rotate-180' : ''}`}>
-                <polyline points="6,9 12,15 18,9"/>
-              </svg>
-            </button>
-            {mesesDropdown.isVisible && (
-              <div
-                ref={mesesDropdown.dropdownRef}
-                className={`smart-dropdown w-72 ${mesesDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
-                style={mesesDropdown.position}
-              >
-                <div className="p-2">
-                  <div className="flex items-center justify-between px-2 pb-2">
-                    <button onClick={() => { selecionarTodosMeses(); setShowMesesDropdown(false); }} className="text-xs text-blue-600 hover:text-blue-700">
-                      Selecionar todos
-                    </button>
-                    <button onClick={() => { limparMeses(); setShowMesesDropdown(false); }} className="text-xs text-gray-600 hover:text-gray-700">
-                      Limpar
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 max-h-72 overflow-y-auto">
-                    {meses.map((m) => (
-                      <label key={m.key} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-50 cursor-pointer">
-                        <input type="checkbox" className="rounded border-gray-300" checked={mesesSelecionados.has(m.key)} onChange={() => toggleMes(m.key)} />
-                        <span className="text-gray-700">{m.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Filtro de Período */}
+          <FiltrosDashboard
+            periodoAtivo={periodoAtivo}
+            onPeriodoChange={onPeriodoChange}
+            onPeriodoPersonalizadoChange={(dataInicio, dataFim) => {
+              onDataInicioChange(dataInicio);
+              onDataFimChange(dataFim);
+            }}
+          />
         </div>
       </div>
     </div>

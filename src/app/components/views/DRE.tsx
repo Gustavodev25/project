@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import Sidebar from "./ui/Sidebar";
 import Topbar from "./ui/Topbar";
-import HeaderDRE, { MesKey } from "./ui/HeaderDRE";
+import HeaderDRE from "./ui/HeaderDRE";
+import { FiltroPeriodo } from "./ui/FiltrosDashboard";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -18,22 +19,6 @@ type Categoria = {
   descricao?: string | null;
   tipo?: string | null; // RECEITA | DESPESA
 };
-
-function buildLastMonths(count: number): Array<{ key: MesKey; label: string; ano: number; mes: number }> {
-  const out: Array<{ key: MesKey; label: string; ano: number; mes: number }> = [];
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  for (let i = 0; i < count; i++) {
-    const d = new Date(start.getFullYear(), start.getMonth() - i, 1);
-    const y = d.getFullYear();
-    const m = d.getMonth() + 1; // 1..12
-    const key: MesKey = `${y}-${String(m).padStart(2, "0")}`;
-    const label = `${String(m).padStart(2, "0")}/${y}`;
-    out.push({ key, label, ano: y, mes: m });
-  }
-  // Mostrar do mais recente para o mais antigo já está assim; para tabela, usaremos ordem crescente
-  return out;
-}
 
 export default function DRE() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -69,11 +54,10 @@ export default function DRE() {
     } catch {}
   }, [isSidebarCollapsed]);
 
-  // Meses (padrão: últimos 64 meses, todos selecionados)
-  const meses = useMemo(() => buildLastMonths(64), []);
-  const [mesesSelecionados, setMesesSelecionados] = useState<Set<MesKey>>(
-    () => new Set(meses.map((m) => m.key))
-  );
+  // Filtro de período (igual ao dashboard)
+  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
+  const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
+  const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
 
   // Categorias de despesas
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -103,10 +87,7 @@ export default function DRE() {
   }, []);
 
   // DRE data loading
-  const mesesAsc = useMemo(
-    () => [...meses.filter((m) => mesesSelecionados.has(m.key))].sort((a, b) => (a.ano !== b.ano ? a.ano - b.ano : a.mes - b.mes)),
-    [meses, mesesSelecionados]
-  );
+  // TODO: Ajustar API para receber parâmetros de período (dataInicio/dataFim) ao invés de meses
 
   type DREApi = {
     months: Array<{ key: string; label: string; ano: number; mes: number }>;
@@ -146,35 +127,6 @@ export default function DRE() {
   };
 
   useEffect(() => {
-    let aborted = false;
-    (async () => {
-      try {
-        setLoading(true);
-        const monthsParam = mesesAsc.map((m) => m.key).join(",");
-        const catsParam = Array.from(categoriasSelecionadas).join(",");
-        const qs = new URLSearchParams();
-        if (monthsParam) qs.set("meses", monthsParam);
-        if (catsParam) qs.set("categorias", catsParam);
-        qs.set("tipo", tipoVisualizacao);
-        const res = await fetch(`/api/financeiro/dre/series?${qs.toString()}`, {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as DREApi;
-        if (!aborted) setDreData(data);
-      } catch (e) {
-        if (!aborted) setDreData(null);
-      } finally {
-        if (!aborted) setLoading(false);
-      }
-    })();
-    return () => {
-      aborted = true;
-    };
-  }, [mesesAsc.map((m) => m.key).join("|"), Array.from(categoriasSelecionadas).sort().join("|"), tipoVisualizacao]);
-
-  useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => updateArrows();
@@ -186,7 +138,7 @@ export default function DRE() {
       el.removeEventListener("scroll", onScroll as any);
       window.removeEventListener("resize", onResize);
     };
-  }, [dreData, mesesAsc.length]);
+  }, [dreData]);
 
   const mdLeftVar = "md:left-[var(--sidebar-w,16rem)]";
   const mdMlVar = "md:ml-[var(--sidebar-w,16rem)]";
@@ -228,9 +180,12 @@ export default function DRE() {
       <main className={`relative z-20 pt-16 p-6 ${mdMlVar}`}>
         <section className="p-6">
           <HeaderDRE
-            meses={meses}
-            mesesSelecionados={mesesSelecionados}
-            onMesesSelecionadosChange={setMesesSelecionados}
+            periodoAtivo={periodoAtivo}
+            onPeriodoChange={setPeriodoAtivo}
+            dataInicioPersonalizada={dataInicioPersonalizada}
+            dataFimPersonalizada={dataFimPersonalizada}
+            onDataInicioChange={setDataInicioPersonalizada}
+            onDataFimChange={setDataFimPersonalizada}
             categorias={categorias}
             categoriasSelecionadas={categoriasSelecionadas}
             onCategoriasSelecionadasChange={setCategoriasSelecionadas}
@@ -337,7 +292,7 @@ export default function DRE() {
                <thead>
                  <tr>
                    <th className="sticky left-0 z-10 bg-[#F3F3F3] text-left text-gray-700 font-medium py-2 pr-4 whitespace-nowrap border-r border-gray-200">Categoria</th>
-                  {mesesAsc.map((m, idx) => (
+                  {(dreData?.months || []).map((m, idx) => (
                     <th
                       key={m.key}
                       ref={idx === 0 ? firstMonthThRef : undefined}
@@ -351,7 +306,7 @@ export default function DRE() {
               <tbody>
                 {!dreData || dreData.categorias.length === 0 ? (
                   <tr>
-                    <td className="py-3 text-gray-500" colSpan={1 + mesesAsc.length}>Nenhuma categoria selecionada</td>
+                    <td className="py-3 text-gray-500" colSpan={1 + (dreData?.months?.length || 0)}>Nenhuma categoria selecionada</td>
                   </tr>
                 ) : (
                   dreData.categorias.map((c) => {
@@ -359,7 +314,7 @@ export default function DRE() {
                     return (
                       <tr key={c.id} className="border-t border-gray-200">
                         <td className="sticky left-0 z-10 bg-[#F3F3F3] py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200">{c.descricao || c.nome}</td>
-                        {mesesAsc.map((m) => {
+                        {(dreData.months || []).map((m) => {
                           const v = row[m.key] || 0;
                           return (
                             <td key={m.key} className="py-2 px-2 text-right text-gray-600">{v > 0 ? currency(v) : "—"}</td>
