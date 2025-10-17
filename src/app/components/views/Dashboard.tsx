@@ -286,55 +286,59 @@ export default function Dashboard() {
             </Suspense>
           </div>
 
-          {/* Gráficos Donut - Origem e Exposição */}
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
-              <FaturamentoPorOrigem
-                periodoAtivo={periodoAtivo}
-                dataInicioPersonalizada={dataInicioPersonalizada}
-                dataFimPersonalizada={dataFimPersonalizada}
-                canalAtivo={canalAtivo}
-                statusAtivo={statusAtivo}
-                tipoAnuncioAtivo={tipoAnuncioAtivo}
-                modalidadeEnvioAtiva={modalidadeEnvioAtiva}
-                agrupamentoSKUAtivo={agrupamentoSKUAtivo}
-                refreshKey={refreshKey}
-                selectedAccount={selectedAccount}
-              />
-            </Suspense>
-            <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
-              <FaturamentoPorExposicao
-                periodoAtivo={periodoAtivo}
-                dataInicioPersonalizada={dataInicioPersonalizada}
-                dataFimPersonalizada={dataFimPersonalizada}
-                canalAtivo={canalAtivo}
-                statusAtivo={statusAtivo}
-                tipoAnuncioAtivo={tipoAnuncioAtivo}
-                modalidadeEnvioAtiva={modalidadeEnvioAtiva}
-                agrupamentoSKUAtivo={agrupamentoSKUAtivo}
-                refreshKey={refreshKey}
-                selectedAccount={selectedAccount}
-              />
-            </Suspense>
-          </div>
+          {/* Gráficos Donut - Origem e Exposição (apenas para Mercado Livre e Todos) */}
+          {canalAtivo !== 'shopee' && (
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
+                <FaturamentoPorOrigem
+                  periodoAtivo={periodoAtivo}
+                  dataInicioPersonalizada={dataInicioPersonalizada}
+                  dataFimPersonalizada={dataFimPersonalizada}
+                  canalAtivo={canalAtivo}
+                  statusAtivo={statusAtivo}
+                  tipoAnuncioAtivo={tipoAnuncioAtivo}
+                  modalidadeEnvioAtiva={modalidadeEnvioAtiva}
+                  agrupamentoSKUAtivo={agrupamentoSKUAtivo}
+                  refreshKey={refreshKey}
+                  selectedAccount={selectedAccount}
+                />
+              </Suspense>
+              <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
+                <FaturamentoPorExposicao
+                  periodoAtivo={periodoAtivo}
+                  dataInicioPersonalizada={dataInicioPersonalizada}
+                  dataFimPersonalizada={dataFimPersonalizada}
+                  canalAtivo={canalAtivo}
+                  statusAtivo={statusAtivo}
+                  tipoAnuncioAtivo={tipoAnuncioAtivo}
+                  modalidadeEnvioAtiva={modalidadeEnvioAtiva}
+                  agrupamentoSKUAtivo={agrupamentoSKUAtivo}
+                  refreshKey={refreshKey}
+                  selectedAccount={selectedAccount}
+                />
+              </Suspense>
+            </div>
+          )}
 
-          {/* Gráfico Donut - Tipo de Anúncio */}
-          <div className="mt-6">
-            <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
-              <FaturamentoPorTipoAnuncio
-                periodoAtivo={periodoAtivo}
-                dataInicioPersonalizada={dataInicioPersonalizada}
-                dataFimPersonalizada={dataFimPersonalizada}
-                canalAtivo={canalAtivo}
-                statusAtivo={statusAtivo}
-                tipoAnuncioAtivo={tipoAnuncioAtivo}
-                modalidadeEnvioAtiva={modalidadeEnvioAtiva}
-                agrupamentoSKUAtivo={agrupamentoSKUAtivo}
-                refreshKey={refreshKey}
-                selectedAccount={selectedAccount}
-              />
-            </Suspense>
-          </div>
+          {/* Gráfico Donut - Tipo de Anúncio (apenas para Mercado Livre e Todos) */}
+          {canalAtivo !== 'shopee' && (
+            <div className="mt-6">
+              <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
+                <FaturamentoPorTipoAnuncio
+                  periodoAtivo={periodoAtivo}
+                  dataInicioPersonalizada={dataInicioPersonalizada}
+                  dataFimPersonalizada={dataFimPersonalizada}
+                  canalAtivo={canalAtivo}
+                  statusAtivo={statusAtivo}
+                  tipoAnuncioAtivo={tipoAnuncioAtivo}
+                  modalidadeEnvioAtiva={modalidadeEnvioAtiva}
+                  agrupamentoSKUAtivo={agrupamentoSKUAtivo}
+                  refreshKey={refreshKey}
+                  selectedAccount={selectedAccount}
+                />
+              </Suspense>
+            </div>
+          )}
         </section>
       </main>
     </div>
