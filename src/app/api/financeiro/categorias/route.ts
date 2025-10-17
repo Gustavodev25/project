@@ -75,86 +75,134 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  console.log('[Categorias GET] === INÍCIO DA REQUISIÇÃO ===');
+  console.log('[Categorias GET] Runtime:', process.env.VERCEL ? 'VERCEL' : 'LOCAL');
+  
   try {
-    console.log('[Categorias GET] Iniciando requisição...');
+    // STEP 1: Cookies
+    console.log('[Categorias GET] STEP 1: Obtendo cookies...');
+    let cookieStore;
+    try {
+      cookieStore = await cookies();
+      console.log('[Categorias GET] ✅ Cookies obtidos com sucesso');
+    } catch (cookieError) {
+      console.error('[Categorias GET] ❌ ERRO ao obter cookies:', cookieError);
+      throw new Error(`Erro ao obter cookies: ${cookieError}`);
+    }
     
-    const cookieStore = await cookies();
-    console.log('[Categorias GET] Cookies obtidos');
-    
+    // STEP 2: Session Cookie
+    console.log('[Categorias GET] STEP 2: Buscando session cookie...');
     const sessionCookie = cookieStore.get("session");
 
     if (!sessionCookie?.value) {
-      console.log('[Categorias GET] Não autenticado - sem cookie de sessão');
+      console.log('[Categorias GET] ❌ Não autenticado - sem cookie de sessão');
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
+    console.log('[Categorias GET] ✅ Cookie de sessão encontrado');
 
-    console.log('[Categorias GET] Cookie de sessão encontrado');
-
-    // Verificar o token JWT de sessão
-    const session = await tryVerifySessionToken(sessionCookie.value);
-    console.log('[Categorias GET] Verificação de token concluída');
+    // STEP 3: Verify Token
+    console.log('[Categorias GET] STEP 3: Verificando token...');
+    let session;
+    try {
+      session = await tryVerifySessionToken(sessionCookie.value);
+      console.log('[Categorias GET] ✅ Token verificado com sucesso');
+    } catch (tokenError) {
+      console.error('[Categorias GET] ❌ ERRO ao verificar token:', tokenError);
+      throw new Error(`Erro ao verificar token: ${tokenError}`);
+    }
     
     if (!session) {
-      console.log('[Categorias GET] Sessão inválida');
+      console.log('[Categorias GET] ❌ Sessão inválida');
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
     }
 
     const userId = session.sub;
-    console.log(`[Categorias GET] UserId: ${userId}`);
+    console.log(`[Categorias GET] ✅ UserId obtido: ${userId}`);
 
-    // Buscar categorias ativas - query simplificada SEM includes
-    console.log('[Categorias GET] Buscando categorias...');
-    const categorias = await prisma.categoria.findMany({
-      where: {
-        userId: userId,
-        ativo: true,
-      },
-      orderBy: {
-        nome: "asc",
-      },
-    });
-
-    console.log(`[Categorias GET] Encontradas ${categorias.length} categorias`);
-
-    // Buscar subcategorias separadamente (evita consulta com lista vazia)
-    const categoriaIds = categorias.map((c) => c.id);
-    let subCategorias = [] as typeof categorias;
-    if (categoriaIds.length > 0) {
-      subCategorias = await prisma.categoria.findMany({
+    // STEP 4: Query Categorias
+    console.log('[Categorias GET] STEP 4: Buscando categorias no banco...');
+    let categorias;
+    try {
+      categorias = await prisma.categoria.findMany({
         where: {
-          categoriaPaiId: { in: categoriaIds },
+          userId: userId,
           ativo: true,
         },
         orderBy: {
           nome: "asc",
         },
       });
+      console.log(`[Categorias GET] ✅ ${categorias.length} categorias encontradas`);
+    } catch (dbError) {
+      console.error('[Categorias GET] ❌ ERRO ao buscar categorias:', dbError);
+      throw new Error(`Erro no banco de dados (categorias): ${dbError}`);
     }
 
-    console.log(`[Categorias GET] Encontradas ${subCategorias.length} subcategorias`);
+    // STEP 5: Query Subcategorias
+    console.log('[Categorias GET] STEP 5: Buscando subcategorias...');
+    const categoriaIds = categorias.map((c) => c.id);
+    let subCategorias = [] as typeof categorias;
+    
+    if (categoriaIds.length > 0) {
+      try {
+        subCategorias = await prisma.categoria.findMany({
+          where: {
+            categoriaPaiId: { in: categoriaIds },
+            ativo: true,
+          },
+          orderBy: {
+            nome: "asc",
+          },
+        });
+        console.log(`[Categorias GET] ✅ ${subCategorias.length} subcategorias encontradas`);
+      } catch (subDbError) {
+        console.error('[Categorias GET] ❌ ERRO ao buscar subcategorias:', subDbError);
+        throw new Error(`Erro no banco de dados (subcategorias): ${subDbError}`);
+      }
+    } else {
+      console.log('[Categorias GET] ⚠️ Nenhuma categoria pai, pulando subcategorias');
+    }
 
-    // Montar estrutura com subcategorias
-    const categoriasComSubs = categorias.map(cat => ({
-      ...cat,
-      subCategorias: subCategorias.filter(sub => sub.categoriaPaiId === cat.id),
-      categoriaPai: null,
-    }));
+    // STEP 6: Montar Estrutura
+    console.log('[Categorias GET] STEP 6: Montando estrutura de dados...');
+    let categoriasComSubs;
+    try {
+      categoriasComSubs = categorias.map(cat => ({
+        ...cat,
+        subCategorias: subCategorias.filter(sub => sub.categoriaPaiId === cat.id),
+        categoriaPai: null,
+      }));
+      console.log(`[Categorias GET] ✅ Estrutura montada: ${categoriasComSubs.length} categorias`);
+    } catch (mapError) {
+      console.error('[Categorias GET] ❌ ERRO ao montar estrutura:', mapError);
+      throw new Error(`Erro ao processar dados: ${mapError}`);
+    }
 
-    console.log(`[Categorias GET] Retornando ${categoriasComSubs.length} categorias`);
-
+    // STEP 7: Return Response
+    console.log('[Categorias GET] STEP 7: Preparando resposta...');
+    console.log('[Categorias GET] === REQUISIÇÃO CONCLUÍDA COM SUCESSO ===');
+    
     return NextResponse.json({
       success: true,
       data: categoriasComSubs,
     });
+    
   } catch (error) {
-    console.error("[Categorias GET] ERRO CRÍTICO:", error);
-    console.error("[Categorias GET] Stack trace:", error instanceof Error ? error.stack : 'N/A');
+    console.error("[Categorias GET] ========================================");
+    console.error("[Categorias GET] ❌❌❌ ERRO CRÍTICO CAPTURADO ❌❌❌");
+    console.error("[Categorias GET] ========================================");
+    console.error("[Categorias GET] Tipo do erro:", typeof error);
+    console.error("[Categorias GET] Nome do erro:", error instanceof Error ? error.name : 'Unknown');
     console.error("[Categorias GET] Mensagem:", error instanceof Error ? error.message : String(error));
+    console.error("[Categorias GET] Stack trace:", error instanceof Error ? error.stack : 'N/A');
+    console.error("[Categorias GET] Erro completo:", JSON.stringify(error, null, 2));
+    console.error("[Categorias GET] ========================================");
     
     return NextResponse.json(
       { 
         error: "Erro ao buscar categorias",
-        details: error instanceof Error ? error.message : String(error)
+        details: error instanceof Error ? error.message : String(error),
+        type: error instanceof Error ? error.name : typeof error
       },
       { status: 500 }
     );
