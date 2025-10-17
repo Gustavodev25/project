@@ -52,7 +52,7 @@ export default function Dashboard() {
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
 
   // Estados dos filtros
-  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("todos");
+  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
   const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
   const [canalAtivo, setCanalAtivo] = useState<FiltroCanal>("todos");

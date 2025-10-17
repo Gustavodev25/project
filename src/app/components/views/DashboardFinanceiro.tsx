@@ -23,7 +23,7 @@ export default function DashboardFinanceiro() {
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
 
   // Filtros
-  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("todos");
+  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
   const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
   const [portadorId, setPortadorId] = useState<string | null>(null);
