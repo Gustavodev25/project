@@ -47,6 +47,12 @@ export async function GET(req: NextRequest) {
     const categoriasParam = (url.searchParams.get("categorias") || "").split(",").map(s => s.trim()).filter(Boolean);
     const tipoParam = (url.searchParams.get("tipo") || "competencia").toLowerCase() as 'caixa' | 'competencia';
 
+    console.log('[DRE API] ===== INÍCIO DA REQUISIÇÃO =====');
+    console.log('[DRE API] Usuário:', session.sub);
+    console.log('[DRE API] Meses solicitados:', mesesParam);
+    console.log('[DRE API] Categorias filtradas:', categoriasParam.length > 0 ? categoriasParam : 'TODAS');
+    console.log('[DRE API] Tipo de visualização:', tipoParam);
+
     if (mesesParam.length === 0) {
       return NextResponse.json({ error: "Meses não informados" }, { status: 400 });
     }
@@ -75,9 +81,12 @@ export async function GET(req: NextRequest) {
       where: whereCategoria,
       select: { id: true, nome: true, descricao: true, tipo: true },
     });
+    console.log('[DRE API] Categorias encontradas no banco:', categorias.length);
+    
     // Focar em DESPESA para o DRE (lista de categorias para tabela)
     const categoriasDespesa = categorias.filter(c => (c.tipo || "").toUpperCase() === "DESPESA");
     const categoriaIdsDespesa = new Set(categoriasDespesa.map(c => c.id));
+    console.log('[DRE API] Categorias de DESPESA:', categoriasDespesa.length);
 
     // Definir critérios de data baseado no tipo de visualização
     // Por enquanto, ambos usam a mesma lógica (dataPagamento/dataRecebimento)
@@ -110,6 +119,58 @@ export async function GET(req: NextRequest) {
 
     const dateCriteria = getDateCriteria(tipoParam);
 
+    // ============================================
+    // BUSCAR VENDAS (Mercado Livre + Shopee)
+    // ============================================
+    const notCanceled = { NOT: { status: { contains: "cancel", mode: "insensitive" as const } } };
+    const [vendasMeli, vendasShopee] = await Promise.all([
+      prisma.meliVenda.findMany({
+        where: { 
+          userId: session.sub, 
+          dataVenda: { gte: rangeStart, lte: rangeEnd }, 
+          ...notCanceled 
+        },
+        select: { 
+          valorTotal: true, 
+          taxaPlataforma: true, 
+          frete: true, 
+          quantidade: true, 
+          sku: true, 
+          dataVenda: true 
+        },
+        distinct: ['orderId'],
+      }),
+      prisma.shopeeVenda.findMany({
+        where: { 
+          userId: session.sub, 
+          dataVenda: { gte: rangeStart, lte: rangeEnd }, 
+          ...notCanceled 
+        },
+        select: { 
+          valorTotal: true, 
+          taxaPlataforma: true, 
+          frete: true, 
+          quantidade: true, 
+          sku: true, 
+          dataVenda: true 
+        },
+        distinct: ['orderId'],
+      }),
+    ]);
+    const todasVendas = [...vendasMeli, ...vendasShopee];
+    console.log('[DRE API] Vendas (ML + Shopee) encontradas:', todasVendas.length);
+
+    // Buscar custos dos SKUs para calcular CMV
+    const skusUnicos = Array.from(new Set(todasVendas.map(v => v.sku).filter((s): s is string => Boolean(s))));
+    const skuCustos = skusUnicos.length
+      ? await prisma.sKU.findMany({ 
+          where: { userId: session.sub, sku: { in: skusUnicos } }, 
+          select: { sku: true, custoUnitario: true } 
+        })
+      : [];
+    const mapaCustos = new Map(skuCustos.map(s => [s.sku, Number(s.custoUnitario || 0)]));
+    console.log('[DRE API] SKUs com custo encontrados:', skuCustos.length);
+
     // Contas a pagar (despesas)
     const wherePagar: any = {
       userId: session.sub,
@@ -127,22 +188,20 @@ export async function GET(req: NextRequest) {
         categoria: { select: { id: true, nome: true, descricao: true } },
       },
     });
+    console.log('[DRE API] Contas a Pagar encontradas:', contasPagar.length);
+    if (contasPagar.length > 0) {
+      console.log('[DRE API] Exemplo de Conta a Pagar:', {
+        valor: contasPagar[0].valor,
+        dataVencimento: contasPagar[0].dataVencimento,
+        dataPagamento: contasPagar[0].dataPagamento,
+        categoria: contasPagar[0].categoria?.nome
+      });
+    }
 
-    // Contas a receber (receitas)
-    const whereReceber: any = {
-      userId: session.sub,
-      OR: dateCriteria.receber,
-    };
-    const contasReceber = await prisma.contaReceber.findMany({
-      where: whereReceber,
-      select: {
-        valor: true,
-        dataRecebimento: true,
-        dataVencimento: true,
-        categoriaId: true,
-        categoria: { select: { id: true, nome: true, descricao: true } },
-      },
-    });
+    // IMPORTANTE: Contas a receber NÃO entram na RECEITA BRUTA do DRE
+    // A RECEITA BRUTA é composta APENAS por vendas (Mercado Livre + Shopee)
+    // Este código foi removido para seguir o mesmo cálculo do faturamento do dashboard
+    console.log('[DRE API] ⚠️ Contas a Receber NÃO são incluídas na RECEITA BRUTA');
 
     // Prepare outputs keyed by month
     const receitasPorMes: Record<string, number> = {};
@@ -176,21 +235,37 @@ export async function GET(req: NextRequest) {
       if (!valoresPorCategoriaMes[catId]) valoresPorCategoriaMes[catId] = {};
       valoresPorCategoriaMes[catId][key] = (valoresPorCategoriaMes[catId][key] || 0) + Number(row.valor || 0);
       despesasPorMes[key] += Number(row.valor || 0);
+      
+      // CMV adicional de categorias específicas (CMV/CPV/CSP)
+      // Soma ao CMV das vendas calculado anteriormente
       if (cmvCategoryIds.has(catId)) cmvPorMes[key] += Number(row.valor || 0);
     }
 
-    // Aggregate receitas (contas a receber) por mês
-    for (const row of contasReceber) {
-      // Escolher data baseada no tipo de visualização
-      const d = tipoParam === 'caixa' 
-        ? (row.dataRecebimento || row.dataVencimento)  // Caixa: prioriza dataRecebimento
-        : row.dataVencimento;                          // Competência: sempre dataVencimento
-      
+    // ============================================
+    // PROCESSAR VENDAS (RECEITAS + CMV)
+    // ============================================
+    // IMPORTANTE: RECEITA BRUTA = valorTotal (faturamento)
+    // Igual ao cálculo do dashboard (faturamentoTotal)
+    // Taxas e frete NÃO entram na RECEITA BRUTA, pois são deduções
+    for (const venda of todasVendas) {
+      const d = venda.dataVenda;
       if (!d) continue;
       const key = monthKey(new Date(d));
       if (!receitasPorMes.hasOwnProperty(key)) continue;
-      receitasPorMes[key] += Number(row.valor || 0);
+
+      // RECEITA BRUTA = valorTotal (igual ao faturamento do dashboard)
+      const valorTotal = Number(venda.valorTotal || 0);
+      receitasPorMes[key] += valorTotal;
+
+      // CMV = custo unitário × quantidade
+      const quantidade = Number(venda.quantidade || 0);
+      const custoUnit = venda.sku && mapaCustos.has(venda.sku) ? mapaCustos.get(venda.sku)! : 0;
+      const cmvVenda = custoUnit * quantidade;
+      cmvPorMes[key] += cmvVenda;
     }
+
+    // NOTA: Contas a receber NÃO entram na RECEITA BRUTA
+    // Apenas vendas do Mercado Livre e Shopee compõem a RECEITA BRUTA
 
     // Filter categorias to those present in DESPESA set or that appear in valores
     const categoriasOut = categoriasDespesa.filter(c => {
@@ -201,6 +276,20 @@ export async function GET(req: NextRequest) {
     const totalReceitas = Object.values(receitasPorMes).reduce((a, b) => a + b, 0);
     const totalDespesas = Object.values(despesasPorMes).reduce((a, b) => a + b, 0);
     const totalCMV = Object.values(cmvPorMes).reduce((a, b) => a + b, 0);
+
+    console.log('[DRE API] ===== RESULTADO =====');
+    console.log('[DRE API] 💰 RECEITA BRUTA (Faturamento ML + Shopee):', totalReceitas);
+    console.log('[DRE API]    - Vendas Mercado Livre:', vendasMeli.length);
+    console.log('[DRE API]    - Vendas Shopee:', vendasShopee.length);
+    console.log('[DRE API]    - Total de Vendas:', todasVendas.length);
+    console.log('[DRE API] 📊 Total de Despesas:', totalDespesas);
+    console.log('[DRE API] 📦 Total de CMV:', totalCMV);
+    console.log('[DRE API] 📂 Categorias retornadas:', categoriasOut.length);
+    console.log('[DRE API] 📅 Receitas por mês:', receitasPorMes);
+    console.log('[DRE API] 💸 Despesas por mês:', despesasPorMes);
+    console.log('[DRE API] ⚠️ IMPORTANTE: Contas a receber NÃO incluídas na RECEITA BRUTA');
+    console.log('[DRE API] ✅ RECEITA BRUTA = Faturamento (igual ao dashboard)');
+    console.log('[DRE API] ===== FIM =====');
 
     return NextResponse.json({
       months: meses,
