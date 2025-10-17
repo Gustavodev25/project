@@ -18,6 +18,7 @@ import FiltrosVendas, {
 } from "../views/ui/FiltrosVendas";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
 import { useToast } from "./ui/toaster";
+import ModalSyncVendas from "./ui/ModalSyncVendas";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -34,6 +35,7 @@ interface HeaderVendasMercadolivreProps {
   isSyncing?: boolean;
   onSyncOrders: (accountIds?: string[]) => void;
   contasConectadas?: any[];
+  progress?: any;
 }
 
 const HeaderVendasMercadolivre = ({ 
@@ -41,26 +43,21 @@ const HeaderVendasMercadolivre = ({
   lastSyncedAt = null, 
   isSyncing = false, 
   onSyncOrders,
-  contasConectadas = []
+  contasConectadas = [],
+  progress
 }: HeaderVendasMercadolivreProps) => {
   const router = useRouter();
   const toast = useToast();
   // Verifica se já houve alguma sincronização
   const hasBeenSynced = lastSyncedAt !== null;
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
-  const [showSyncDropdown, setShowSyncDropdown] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState<any>(null);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   
   // Estados para sincronização automática
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
   const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Estados para seleção de contas
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
-  const [newOrdersByAccount, setNewOrdersByAccount] = useState<Record<string, number>>({});
 
   // Hook para dropdown de informações
   const infoDropdown = useSmartDropdown<HTMLButtonElement>({
@@ -71,61 +68,23 @@ const HeaderVendasMercadolivre = ({
     minDistanceFromEdge: 16
   });
 
-  // Hook para dropdown de sincronização
-  const syncDropdown = useSmartDropdown<HTMLButtonElement>({
-    isOpen: showSyncDropdown,
-    onClose: () => {
-      setShowSyncDropdown(false);
-      // Não limpar o checkResult aqui - apenas ao cancelar ou confirmar
-    },
-    preferredPosition: 'bottom-right',
-    offset: 8,
-    minDistanceFromEdge: 16
-  });
 
-  // Função para verificar novas vendas
+  // Função para verificar novas vendas (para auto-sync)
   const handleCheckNewOrders = async (silent = false) => {
-    if (isChecking) return;
-    
     try {
-      setIsChecking(true);
       const res = await fetch("/api/meli/vendas/check", { 
         cache: "no-store",
-        credentials: "include" // Incluir cookies de autenticação
+        credentials: "include"
       });
       if (!res.ok) {
         throw new Error(`Erro ${res.status}`);
       }
       
       const result = await res.json();
-      
-      // Sempre atualiza o contador de vendas novas
       const newCount = result.totals?.new || 0;
       setNewOrdersCount(newCount);
-      
-      // Armazenar contagem por conta
-      if (result.newOrdersByAccount) {
-        setNewOrdersByAccount(result.newOrdersByAccount);
-      }
-      
-      // Se é uma verificação silenciosa (automática) e encontrou vendas novas, salva o resultado
-      if (silent && newCount > 0) {
-        setCheckResult(result);
-      } else if (!silent) {
-        // Se é manual, sempre mostra o resultado
-        setCheckResult(result);
-      }
     } catch (error) {
       console.error("Erro ao verificar vendas:", error);
-      if (!silent) {
-        setCheckResult({
-          errors: [{ message: "Erro ao verificar vendas. Tente novamente." }],
-          newOrders: [],
-          totals: { new: 0 }
-        });
-      }
-    } finally {
-      setIsChecking(false);
     }
   };
 
@@ -202,10 +161,8 @@ const HeaderVendasMercadolivre = ({
       setAutoSyncEnabled(newValue);
       
       if (newValue) {
-        // Fazer uma verificação imediata ao ativar
         handleCheckNewOrders(true);
       } else {
-        // Limpar o contador ao desativar
         setNewOrdersCount(0);
       }
     } catch (error) {
@@ -218,50 +175,20 @@ const HeaderVendasMercadolivre = ({
     }
   };
 
-  // Função para confirmar sincronização
-  const handleConfirmSync = async () => {
-    setShowSyncDropdown(false);
-    setCheckResult(null);
-    
-    // Marcar notificações como lidas
-    try {
-      await fetch("/api/notifications", {
-        method: "DELETE",
-        credentials: "include", // Incluir cookies de autenticação
-      });
-      setNewOrdersCount(0); // Limpar badge após sincronizar
-    } catch (error) {
-      console.error("Erro ao marcar notificações:", error);
-    }
-    
-    // Passar contas selecionadas para sincronização (se houver)
-    const accountsToSync = selectedAccountIds.length > 0 ? selectedAccountIds : undefined;
-    onSyncOrders(accountsToSync);
+  // Função para abrir modal e limpar notificações
+  const handleOpenSyncModal = () => {
+    setShowSyncModal(true);
+    // Limpar notificações ao abrir o modal
+    fetch("/api/notifications", {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(err => console.error("Erro ao marcar notificações:", err));
+    setNewOrdersCount(0);
   };
 
-  // Função para cancelar
-  const handleCancelSync = () => {
-    setShowSyncDropdown(false);
-    setCheckResult(null);
-    setSelectedAccountIds([]);
-  };
-
-  // Função para alternar seleção de conta
-  const toggleAccountSelection = (accountId: string) => {
-    setSelectedAccountIds(prev => 
-      prev.includes(accountId)
-        ? prev.filter(id => id !== accountId)
-        : [...prev, accountId]
-    );
-  };
-
-  // Função para selecionar/desselecionar todas
-  const toggleSelectAll = () => {
-    if (selectedAccountIds.length === contasConectadas.length) {
-      setSelectedAccountIds([]);
-    } else {
-      setSelectedAccountIds(contasConectadas.map(c => c.id));
-    }
+  const handleSyncComplete = () => {
+    // Callback quando sincronização completa com sucesso
+    console.log("Sincronização concluída com sucesso");
   };
 
   // Effect para sincronização automática
@@ -384,350 +311,81 @@ const HeaderVendasMercadolivre = ({
         </p>
       </div>
 
-      {/* Botão de Sincronização com Dropdown */}
-      <div className="relative">
-        <button
-          ref={syncDropdown.triggerRef}
-          onClick={() => setShowSyncDropdown(!showSyncDropdown)}
-          className={`inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-            showSyncDropdown 
-              ? "text-gray-900 bg-gray-50 border-gray-400 ring-2 ring-gray-200" 
-              : "text-gray-700 hover:bg-gray-50 hover:border-gray-400"
-          }`}
-          disabled={isSyncing || (!hasBeenSynced && (vendas?.length || 0) === 0)}
-        >
-          {/* Ícone */}
-          <div className="flex items-center relative">
-            {isSyncing ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
-              >
-                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-                <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
-                <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
-              </svg>
-            )}
-            {/* Badge de vendas novas */}
-            {newOrdersCount > 0 && !isSyncing && (
-              <span className="absolute -top-2 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full animate-pulse">
-                {newOrdersCount > 99 ? '99+' : newOrdersCount}
-              </span>
-            )}
-          </div>
-          
-          {/* Texto */}
-          <span>{isSyncing ? "Sincronizando..." : "Sincronizar vendas"}</span>
-          
-          {/* Avatares das contas conectadas */}
-          {contasConectadas.length > 0 && (
-            <div className="flex items-center -space-x-1">
-              {contasConectadas.slice(0, 3).map((conta) => (
-                <div
-                  key={conta.id}
-                  className="relative bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6"
-                  title={conta.nickname || `Conta ${conta.ml_user_id}`}
-                >
-                  <span>
-                    {conta.nickname
-                      ? conta.nickname.charAt(0).toUpperCase()
-                      : conta.ml_user_id.toString().slice(-1)}
-                  </span>
-                </div>
-              ))}
-              {contasConectadas.length > 3 && (
-                <div className="relative bg-gray-400 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6 ml-1">
-                  <span>+{contasConectadas.length - 3}</span>
-                </div>
-              )}
-            </div>
+      {/* Botão de Sincronização */}
+      <button
+        onClick={handleOpenSyncModal}
+        className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700"
+        disabled={isSyncing}
+      >
+        {/* Ícone */}
+        <div className="flex items-center relative">
+          {isSyncing ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
+            >
+              <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+              <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
+              <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
+            </svg>
           )}
-        </button>
-
-
-        {/* Dropdown de Verificação */}
-        {syncDropdown.isVisible && (
-          <div 
-            ref={syncDropdown.dropdownRef}
-            className={`smart-dropdown w-80 ${
-              syncDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'
-            }`}
-            style={syncDropdown.position}
-          >
-            <div className="p-4">
-              {/* Seção de Sincronização Automática */}
-              <div className="mb-4 pb-4 border-b border-gray-200">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex-1">
-                    <h3 className="text-sm font-medium text-gray-900 mb-1">
-                      Pesquisa Automática
-                    </h3>
-                    <p className="text-xs text-gray-600">
-                      Verifica novas vendas a cada 10 minutos automaticamente
-                    </p>
-                  </div>
-                  {/* Toggle Switch */}
-                  <button
-                    onClick={handleToggleAutoSync}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
-                      autoSyncEnabled ? 'bg-orange-500' : 'bg-gray-300'
-                    }`}
-                    role="switch"
-                    aria-checked={autoSyncEnabled}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        autoSyncEnabled ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-                {autoSyncEnabled && (
-                  <div className="flex items-center gap-2 mt-2 px-2 py-1.5 bg-green-50 rounded-md">
-                    <div className="flex items-center justify-center">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    </div>
-                    <p className="text-xs text-green-700 font-medium">
-                      Pesquisa automática ativa
-                    </p>
-                  </div>
-                )}
+          {/* Badge de vendas novas */}
+          {newOrdersCount > 0 && !isSyncing && (
+            <span className="absolute -top-2 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full animate-pulse">
+              {newOrdersCount > 99 ? '99+' : newOrdersCount}
+            </span>
+          )}
+        </div>
+        
+        {/* Texto */}
+        <span>{isSyncing ? "Sincronizando..." : "Sincronizar vendas"}</span>
+        
+        {/* Avatares das contas conectadas */}
+        {contasConectadas.length > 0 && (
+          <div className="flex items-center -space-x-1">
+            {contasConectadas.slice(0, 3).map((conta) => (
+              <div
+                key={conta.id}
+                className="relative bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6"
+                title={conta.nickname || `Conta ${conta.ml_user_id}`}
+              >
+                <span>
+                  {conta.nickname
+                    ? conta.nickname.charAt(0).toUpperCase()
+                    : conta.ml_user_id.toString().slice(-1)}
+                </span>
               </div>
-
-              {!checkResult ? (
-                // Estado inicial - Verificar vendas
-                <div className="space-y-4">
-                  <div className="text-start">
-                    <h3 className="text-sm font-medium text-gray-900 mb-1">
-                      Sincronizar Vendas
-                    </h3>
-                    <p className="text-xs text-gray-600">
-                      {contasConectadas.length > 1 
-                        ? "Selecione as contas que deseja sincronizar ou deixe em branco para sincronizar todas"
-                        : "Primeiro vamos verificar se há novas vendas para sincronizar"}
-                    </p>
-                  </div>
-                  
-                  {/* Seleção de contas (apenas se houver mais de 1 conta) */}
-                  {contasConectadas.length > 1 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-gray-700">Contas:</span>
-                        <button
-                          onClick={toggleSelectAll}
-                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
-                        >
-                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
-                        </button>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
-                        {contasConectadas.map((conta) => {
-                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
-                          return (
-                            <label
-                              key={conta.id}
-                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedAccountIds.includes(conta.id)}
-                                onChange={() => toggleAccountSelection(conta.id)}
-                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
-                              />
-                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
-                                {conta.nickname || `Conta ${conta.ml_user_id}`}
-                              </span>
-                              {newOrdersCount > 0 && (
-                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
-                                  {newOrdersCount}
-                                </span>
-                              )}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {selectedAccountIds.length > 0 && (
-                        <p className="text-xs text-gray-500 italic">
-                          {selectedAccountIds.length} conta(s) selecionada(s)
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  
-                  <button
-                    onClick={() => handleCheckNewOrders(false)}
-                    disabled={isChecking}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isChecking ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
-                        <span>Verificando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                        </svg>
-                        <span>Verificar novas vendas</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              ) : (
-                // Estado com resultado da verificação
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <h3 className="text-sm font-medium text-gray-900 mb-1">
-                      Resultado da Verificação
-                    </h3>
-                    
-                    {checkResult.errors && checkResult.errors.length > 0 ? (
-                      <div className="text-xs text-red-600 bg-red-50 p-2 rounded-md">
-                        {checkResult.errors[0].message}
-                      </div>
-                    ) : (
-                      <div className="bg-blue-50 p-3 rounded-md">
-                        <div className="flex items-center justify-center gap-2 mb-2">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="text-blue-600"
-                          >
-                            <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-                            <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
-                            <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
-                          </svg>
-                          <span className="text-lg font-semibold text-blue-900">
-                            {checkResult.totals?.new || 0}
-                          </span>
-                        </div>
-                        <p className="text-xs text-blue-700">
-                          {checkResult.totals?.new === 0 
-                            ? "Nenhuma venda nova encontrada"
-                            : checkResult.totals?.new === 1
-                            ? "Nova venda encontrada"
-                            : "Novas vendas encontradas"
-                          }
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Seleção de contas (após verificação - apenas se houver mais de 1 conta) */}
-                  {contasConectadas.length > 1 && checkResult.totals?.new > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-gray-700">Sincronizar apenas:</span>
-                        <button
-                          onClick={toggleSelectAll}
-                          className="text-xs text-orange-600 hover:text-orange-700 font-medium"
-                        >
-                          {selectedAccountIds.length === contasConectadas.length ? "Limpar" : "Todas"}
-                        </button>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-md p-2">
-                        {contasConectadas.map((conta) => {
-                          const newOrdersCount = newOrdersByAccount[conta.id] || 0;
-                          return (
-                            <label
-                              key={conta.id}
-                              className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedAccountIds.includes(conta.id)}
-                                onChange={() => toggleAccountSelection(conta.id)}
-                                className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer flex-shrink-0"
-                              />
-                              <span className="flex-1 text-sm text-gray-700 leading-none select-none">
-                                {conta.nickname || `Conta ${conta.ml_user_id}`}
-                              </span>
-                              {newOrdersCount > 0 && (
-                                <span className="ml-auto text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
-                                  {newOrdersCount}
-                                </span>
-                              )}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {selectedAccountIds.length > 0 ? (
-                        <p className="text-xs text-gray-500 italic">
-                          {selectedAccountIds.length} conta(s) selecionada(s)
-                        </p>
-                      ) : (
-                        <p className="text-xs text-orange-600 italic">
-                          ⚠️ Nenhuma conta selecionada - todas serão sincronizadas
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Botões de ação */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelSync}
-                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    
-                    {checkResult.totals?.new > 0 && (
-                      <button
-                        onClick={handleConfirmSync}
-                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-orange-500 bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 transition-colors"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="20,6 9,17 4,12"/>
-                        </svg>
-                        Confirmar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            ))}
+            {contasConectadas.length > 3 && (
+              <div className="relative bg-gray-400 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6 ml-1">
+                <span>+{contasConectadas.length - 3}</span>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </button>
+
+      {/* Modal de Sincronização */}
+      <ModalSyncVendas
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        platform="Mercado Livre"
+        contas={contasConectadas}
+        onStartSync={onSyncOrders}
+        isSyncing={isSyncing}
+        progress={progress}
+        onSyncComplete={handleSyncComplete}
+      />
     </div>
   );
 };
@@ -926,6 +584,7 @@ export default function VendasMercadolivre() {
             isSyncing={isSyncing || false}
             onSyncOrders={handleSyncOrders}
             contasConectadas={contasConectadas || []}
+            progress={progress}
           />
           
           {/* Componente de Filtros */}

@@ -27,7 +27,8 @@
       "Bash(git restore:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(Select-String -Pattern \"DRE|dre\" -Context 2,2)"
+      "Bash(Select-String -Pattern \"DRE|dre\" -Context 2,2)",
+      "Bash(Select-String -Pattern \"ModalSyncVendas\" -Context 2,2)"
     ],
     "deny": [],
     "ask": []

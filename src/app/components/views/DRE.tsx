@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import gsap from "gsap";
 import Sidebar from "./ui/Sidebar";
 import Topbar from "./ui/Topbar";
@@ -10,7 +16,8 @@ const FULL_W = "16rem";
 const RAIL_W = "4rem";
 const LS_KEY = "cz_sidebar_collapsed";
 
-const useIsoLayout = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+const useIsoLayout =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 type Categoria = {
   id: string;
@@ -34,7 +41,9 @@ export default function DRE() {
     const el = containerRef.current;
     if (!el) return;
     hasInitialSet.current = true;
-    gsap.set(el, { css: { "--sidebar-w": isSidebarCollapsed ? RAIL_W : FULL_W } });
+    gsap.set(el, {
+      css: { "--sidebar-w": isSidebarCollapsed ? RAIL_W : FULL_W },
+    });
   }, [isSidebarCollapsed]);
 
   useIsoLayout(() => {
@@ -54,36 +63,46 @@ export default function DRE() {
   }, [isSidebarCollapsed]);
 
   // Filtro de meses (checkbox)
-  const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {
-    // Inicializar com os últimos 12 meses
-    const hoje = new Date();
-    const meses = new Set<string>();
-    for (let i = 0; i < 12; i++) {
-      const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-      const ano = data.getFullYear();
-      const mes = data.getMonth() + 1;
-      const key = `${ano}-${String(mes).padStart(2, "0")}`;
-      meses.add(key);
-    }
-    return meses;
-  });
+  const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(
+    () => {
+      // Inicializar com os últimos 12 meses
+      const hoje = new Date();
+      const meses = new Set<string>();
+      for (let i = 0; i < 12; i++) {
+        const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+        const ano = data.getFullYear();
+        const mes = data.getMonth() + 1;
+        const key = `${ano}-${String(mes).padStart(2, "0")}`;
+        meses.add(key);
+      }
+      return meses;
+    },
+  );
 
   // Categorias de despesas
   const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<Set<string>>(new Set());
+  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<
+    Set<string>
+  >(new Set());
 
   // Tipo de visualização (caixa ou competência)
-  const [tipoVisualizacao, setTipoVisualizacao] = useState<'caixa' | 'competencia'>('competencia');
+  const [tipoVisualizacao, setTipoVisualizacao] = useState<
+    "caixa" | "competencia"
+  >("competencia");
 
   useEffect(() => {
     let aborted = false;
     (async () => {
       try {
-        const res = await fetch("/api/financeiro/categorias", { credentials: "include" });
+        const res = await fetch("/api/financeiro/categorias", {
+          credentials: "include",
+        });
         if (!res.ok) return;
         const data = await res.json();
         const all = (data?.data || []) as Categoria[];
-        const onlyDespesas = all.filter((c) => (c.tipo || "").toUpperCase() === "DESPESA");
+        const onlyDespesas = all.filter(
+          (c) => (c.tipo || "").toUpperCase() === "DESPESA",
+        );
         if (!aborted) {
           setCategorias(onlyDespesas);
           setCategoriasSelecionadas(new Set(onlyDespesas.map((c) => c.id)));
@@ -132,7 +151,9 @@ export default function DRE() {
   const [loading, setLoading] = useState(false);
 
   // Controle de visibilidade de categorias
-  const [categoriasVisiveis, setCategoriasVisiveis] = useState<Set<string>>(new Set());
+  const [categoriasVisiveis, setCategoriasVisiveis] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Converter meses selecionados em array ordenado
   const calcularMeses = useMemo(() => {
@@ -142,10 +163,10 @@ export default function DRE() {
   // Carregar dados do DRE
   useEffect(() => {
     let aborted = false;
-    
+
     // Limpar dados antigos ao mudar filtros
     setDreData(null);
-    
+
     if (calcularMeses.length === 0) {
       setLoading(false);
       return;
@@ -160,8 +181,10 @@ export default function DRE() {
         qs.set("meses", mesesParam);
         if (catsParam) qs.set("categorias", catsParam);
         qs.set("tipo", tipoVisualizacao);
-        
-        const res = await fetch(`/api/financeiro/dre/series?${qs}`, { credentials: "include" });
+
+        const res = await fetch(`/api/financeiro/dre/series?${qs}`, {
+          credentials: "include",
+        });
         if (!res.ok) {
           if (!aborted) setDreData(null);
           return;
@@ -198,7 +221,10 @@ export default function DRE() {
     const el = scrollRef.current;
     if (!el) return;
     const colW = firstMonthThRef.current?.getBoundingClientRect()?.width || 120;
-    const target = Math.max(0, Math.min(el.scrollLeft + dir * colW, el.scrollWidth - el.clientWidth));
+    const target = Math.max(
+      0,
+      Math.min(el.scrollLeft + dir * colW, el.scrollWidth - el.clientWidth),
+    );
     el.scrollTo({ left: target, behavior: "smooth" });
     // Fallback to update arrows in case scroll event coalesces
     requestAnimationFrame(() => updateArrows());
@@ -222,14 +248,18 @@ export default function DRE() {
   const mdMlVar = "md:ml-[var(--sidebar-w,16rem)]";
 
   const currency = (n?: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n ?? 0);
+    new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(n ?? 0);
 
-  const sumValues = (obj?: Record<string, number>) => Object.values(obj || {}).reduce((a, b) => a + b, 0);
+  const sumValues = (obj?: Record<string, number>) =>
+    Object.values(obj || {}).reduce((a, b) => a + b, 0);
 
   // Inicializar categorias visíveis quando dreData é carregado
   React.useEffect(() => {
     if (dreData?.categorias) {
-      setCategoriasVisiveis(new Set(dreData.categorias.map(c => c.id)));
+      setCategoriasVisiveis(new Set(dreData.categorias.map((c) => c.id)));
     }
   }, [dreData?.categorias]);
 
@@ -257,14 +287,18 @@ export default function DRE() {
   const freteMeli = dreData?.totals?.freteMeli || 0;
   const freteShopee = dreData?.totals?.freteShopee || 0;
   const freteTotal = dreData?.totals?.freteTotal || 0;
-  const receitaOperacionalLiquida = receitaLiquidaTotal - taxasTotal - freteTotal;
+  const receitaOperacionalLiquida =
+    receitaLiquidaTotal - taxasTotal - freteTotal;
   const cmvTotal = dreData?.totals?.cmv || 0;
   const lucroBruto = receitaOperacionalLiquida - cmvTotal;
   const margemContribuicao = lucroBruto;
   const despesasOperacionais = despesasVisiveis;
   const ebitda = lucroBruto - despesasOperacionais;
   const resultadoLiquido = ebitda; // sem deprec/juros/IR
-  const lucratividadePct = receitaOperacionalLiquida > 0 ? (resultadoLiquido / receitaOperacionalLiquida) : 0;
+  const lucratividadePct =
+    receitaOperacionalLiquida > 0
+      ? resultadoLiquido / receitaOperacionalLiquida
+      : 0;
 
   return (
     <div ref={containerRef} className="min-h-screen overflow-x-hidden">
@@ -280,7 +314,9 @@ export default function DRE() {
         onMobileMenu={() => setIsSidebarMobileOpen((v) => !v)}
       />
 
-      <div className={`fixed top-16 bottom-0 left-0 right-0 ${mdLeftVar} z-10 bg-[#F3F3F3]`}>
+      <div
+        className={`fixed top-16 bottom-0 left-0 right-0 ${mdLeftVar} z-10 bg-[#F3F3F3]`}
+      >
         <div className="h-full w-full rounded-tl-none md:rounded-tl-2xl border border-gray-200 bg-white" />
       </div>
 
@@ -299,26 +335,42 @@ export default function DRE() {
           {/* Demonstrativo */}
           <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-900">Demonstrativo de Resultado do Exercício</h3>
+              <h3 className="text-sm font-semibold text-gray-900">
+                Demonstrativo de Resultado do Exercício
+              </h3>
               {loading && (
                 <div className="flex items-center gap-2 text-xs text-orange-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-600 border-t-transparent"></div>
                   <span>Atualizando...</span>
                 </div>
               )}
-              <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${
-                tipoVisualizacao === 'caixa'
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'bg-green-100 text-green-700'
-              }`}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  {tipoVisualizacao === 'caixa' ? (
+              <div
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${
+                  tipoVisualizacao === "caixa"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-green-100 text-green-700"
+                }`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {tipoVisualizacao === "caixa" ? (
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
                   ) : (
                     <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                   )}
                 </svg>
-                <span>{tipoVisualizacao === 'caixa' ? 'Caixa' : 'Competência'}</span>
+                <span>
+                  {tipoVisualizacao === "caixa" ? "Caixa" : "Competência"}
+                </span>
               </div>
             </div>
             <div className="space-y-2 text-sm">
@@ -328,32 +380,47 @@ export default function DRE() {
                 <span>{currency(receitaBrutaTotal)}</span>
               </div>
               <div className="flex items-center justify-between pl-4 text-xs">
-                <span className="text-gray-600">→ Receita Bruta Mercado Livre</span>
-                <span className="text-gray-700">{currency(receitaBrutaMeli)}</span>
+                <span className="text-gray-600">
+                  → Receita Bruta Mercado Livre
+                </span>
+                <span className="text-gray-700">
+                  {currency(receitaBrutaMeli)}
+                </span>
               </div>
               <div className="flex items-center justify-between pl-4 text-xs mb-2">
                 <span className="text-gray-600">→ Receita Bruta Shopee</span>
-                <span className="text-gray-700">{currency(receitaBrutaShopee)}</span>
+                <span className="text-gray-700">
+                  {currency(receitaBrutaShopee)}
+                </span>
               </div>
 
               {/* DEDUÇÕES */}
               <div className="flex items-center justify-between font-semibold text-gray-900">
-                <span>(-) DEDUÇÕES DA RECEITA BRUTA TOTAL</span>
+                <span>(-) DEDUÇÕES DA RECEITA BRUTA</span>
                 <span>{currency(deducoesTotal)}</span>
               </div>
               <div className="flex items-center justify-between pl-4 text-xs">
-                <span className="text-gray-600">→ Canceladas Mercado Livre</span>
+                <span className="text-gray-600">
+                  VENDAS CANCELADAS MERCADO LIVRE
+                </span>
                 <span className="text-gray-700">{currency(deducoesMeli)}</span>
               </div>
               <div className="flex items-center justify-between pl-4 text-xs mb-2">
-                <span className="text-gray-600">→ Canceladas Shopee</span>
-                <span className="text-gray-700">{currency(deducoesShopee)}</span>
+                <span className="text-gray-600">VENDAS CANCELADAS SHOPEE</span>
+                <span className="text-gray-700">
+                  {currency(deducoesShopee)}
+                </span>
               </div>
 
               {/* RECEITA LÍQUIDA TOTAL */}
               <div className="flex items-center justify-between border-t border-gray-300 pt-2 font-bold text-gray-900">
-                <span>(=) RECEITA LÍQUIDA TOTAL</span>
+                <span>(=) RECEITA LÍQUIDA</span>
                 <span>{currency(receitaLiquidaTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between pl-4 text-xs">
+                <span className="text-gray-600">
+                  RECEITA BRUTA TOTAL + (-) DEDUÇÕES DA RECEITA BRUTA
+                </span>
               </div>
 
               {/* TAXAS E COMISSÕES */}
@@ -415,13 +482,28 @@ export default function DRE() {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center">
                 <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
-                  <svg className="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  <svg
+                    className="w-3 h-3 text-gray-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-xs font-medium text-gray-700">Categorias por Mês</h3>
-                  <p className="text-xs text-gray-500">Todas as categorias (despesas) cruzadas com os meses selecionados</p>
+                  <h3 className="text-xs font-medium text-gray-700">
+                    Categorias por Mês
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Todas as categorias (despesas) cruzadas com os meses
+                    selecionados
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -430,12 +512,20 @@ export default function DRE() {
                   onClick={() => scrollByOneCol(-1)}
                   disabled={!canScrollLeft}
                   className={`inline-flex items-center justify-center h-7 w-7 rounded-md border transition ${
-                    canScrollLeft ? "bg-white text-gray-700 hover:bg-gray-50" : "bg-white/50 text-gray-400 cursor-not-allowed"
+                    canScrollLeft
+                      ? "bg-white text-gray-700 hover:bg-gray-50"
+                      : "bg-white/50 text-gray-400 cursor-not-allowed"
                   }`}
                   aria-label="Meses anteriores"
                   title="Meses anteriores"
                 >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
                     <path d="M15 6l-6 6 6 6" />
                   </svg>
                 </button>
@@ -444,79 +534,101 @@ export default function DRE() {
                   onClick={() => scrollByOneCol(1)}
                   disabled={!canScrollRight}
                   className={`inline-flex items-center justify-center h-7 w-7 rounded-md border transition ${
-                    canScrollRight ? "bg-white text-gray-700 hover:bg-gray-50" : "bg-white/50 text-gray-400 cursor-not-allowed"
+                    canScrollRight
+                      ? "bg-white text-gray-700 hover:bg-gray-50"
+                      : "bg-white/50 text-gray-400 cursor-not-allowed"
                   }`}
                   aria-label="Próximos meses"
                   title="Próximos meses"
                 >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
                     <path d="M9 6l6 6-6 6" />
                   </svg>
                 </button>
               </div>
             </div>
 
-            <div ref={scrollRef} className="overflow-x-auto table-scroll-hidden">
-             
-             <table className="min-w-full text-xs">
-               <thead>
-                 <tr>
-                   <th className="sticky left-0 z-10 bg-[#F3F3F3] text-left text-gray-700 font-medium py-2 pr-4 whitespace-nowrap border-r border-gray-200">Categoria</th>
-                  {(dreData?.months || []).map((m, idx) => (
-                    <th
-                      key={m.key}
-                      ref={idx === 0 ? firstMonthThRef : undefined}
-                      className="text-right text-gray-700 font-medium py-2 px-2 whitespace-nowrap"
-                    >
-                      {m.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {!dreData || dreData.categorias.length === 0 ? (
+            <div
+              ref={scrollRef}
+              className="overflow-x-auto table-scroll-hidden"
+            >
+              <table className="min-w-full text-xs">
+                <thead>
                   <tr>
-                    <td className="py-3 text-gray-500" colSpan={1 + (dreData?.months?.length || 0)}>Nenhuma categoria selecionada</td>
+                    <th className="sticky left-0 z-10 bg-[#F3F3F3] text-left text-gray-700 font-medium py-2 pr-4 whitespace-nowrap border-r border-gray-200">
+                      Categoria
+                    </th>
+                    {(dreData?.months || []).map((m, idx) => (
+                      <th
+                        key={m.key}
+                        ref={idx === 0 ? firstMonthThRef : undefined}
+                        className="text-right text-gray-700 font-medium py-2 px-2 whitespace-nowrap"
+                      >
+                        {m.label}
+                      </th>
+                    ))}
                   </tr>
-                ) : (
-                  dreData.categorias.map((c) => {
-                    const row = dreData.valoresPorCategoriaMes[c.id] || {};
-                    const isVisible = categoriasVisiveis.has(c.id);
-                    return (
-                      <tr key={c.id} className="border-t border-gray-200">
-                        <td className="sticky left-0 z-10 bg-[#F3F3F3] py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={isVisible}
-                              onChange={(e) => {
-                                const newSet = new Set(categoriasVisiveis);
-                                if (e.target.checked) {
-                                  newSet.add(c.id);
-                                } else {
-                                  newSet.delete(c.id);
-                                }
-                                setCategoriasVisiveis(newSet);
-                              }}
-                              className="w-3 h-3 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                            />
-                            <span className={!isVisible ? 'opacity-50' : ''}>{c.descricao || c.nome}</span>
-                          </div>
-                        </td>
-                        {(dreData.months || []).map((m) => {
-                          const v = row[m.key] || 0;
-                          return (
-                            <td key={m.key} className={`py-2 px-2 text-right ${!isVisible ? 'opacity-50 line-through' : 'text-gray-600'}`}>
-                              {v > 0 ? currency(v) : "—"}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {!dreData || dreData.categorias.length === 0 ? (
+                    <tr>
+                      <td
+                        className="py-3 text-gray-500"
+                        colSpan={1 + (dreData?.months?.length || 0)}
+                      >
+                        Nenhuma categoria selecionada
+                      </td>
+                    </tr>
+                  ) : (
+                    dreData.categorias.map((c) => {
+                      const row = dreData.valoresPorCategoriaMes[c.id] || {};
+                      const isVisible = categoriasVisiveis.has(c.id);
+                      return (
+                        <tr key={c.id} className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-[#F3F3F3] py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isVisible}
+                                onChange={(e) => {
+                                  const newSet = new Set(categoriasVisiveis);
+                                  if (e.target.checked) {
+                                    newSet.add(c.id);
+                                  } else {
+                                    newSet.delete(c.id);
+                                  }
+                                  setCategoriasVisiveis(newSet);
+                                }}
+                                className="w-3 h-3 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                              />
+                              <span className={!isVisible ? "opacity-50" : ""}>
+                                {c.descricao || c.nome}
+                              </span>
+                            </div>
+                          </td>
+                          {(dreData.months || []).map((m) => {
+                            const v = row[m.key] || 0;
+                            return (
+                              <td
+                                key={m.key}
+                                className={`py-2 px-2 text-right ${!isVisible ? "opacity-50 line-through" : "text-gray-600"}`}
+                              >
+                                {v > 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -524,22 +636,46 @@ export default function DRE() {
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="text-xs text-gray-600 mb-1">(=) EBITDA</div>
-              <div className={`text-lg font-semibold ${ebitda >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(ebitda)}</div>
+              <div
+                className={`text-lg font-semibold ${ebitda >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {currency(ebitda)}
+              </div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-xs text-gray-600 mb-1">(=) RESULTADO LÍQUIDO DO EXERCÍCIO</div>
-              <div className={`text-lg font-semibold ${resultadoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(resultadoLiquido)}</div>
+              <div className="text-xs text-gray-600 mb-1">
+                (=) RESULTADO LÍQUIDO DO EXERCÍCIO
+              </div>
+              <div
+                className={`text-lg font-semibold ${resultadoLiquido >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {currency(resultadoLiquido)}
+              </div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-xs text-gray-600 mb-1">Margem de Contribuição</div>
-              <div className={`text-lg font-semibold ${margemContribuicao >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(margemContribuicao)}</div>
+              <div className="text-xs text-gray-600 mb-1">
+                Margem de Contribuição
+              </div>
+              <div
+                className={`text-lg font-semibold ${margemContribuicao >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {currency(margemContribuicao)}
+              </div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-xs text-gray-600 mb-1">Lucratividade (%)</div>
-              <div className={`text-lg font-semibold ${lucratividadePct >= 0 ? 'text-green-600' : 'text-red-600'}`}>{(lucratividadePct * 100).toFixed(1)}%</div>
+              <div className="text-xs text-gray-600 mb-1">
+                Lucratividade (%)
+              </div>
+              <div
+                className={`text-lg font-semibold ${lucratividadePct >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {(lucratividadePct * 100).toFixed(1)}%
+              </div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-xs text-gray-600 mb-1">Ponto de Equilíbrio (Período)</div>
+              <div className="text-xs text-gray-600 mb-1">
+                Ponto de Equilíbrio (Período)
+              </div>
               <div className="text-lg font-semibold text-gray-900">—</div>
             </div>
           </div>

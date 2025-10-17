@@ -157,7 +157,7 @@ export function useVendas(platform: string = "Mercado Livre") {
     }
   };
 
-  const handleSyncOrders = async (accountIds?: string[]) => {
+  const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>) => {
     try {
       setIsSyncing(true);
       setIsTableLoading(true);
@@ -175,6 +175,14 @@ export function useVendas(platform: string = "Mercado Livre") {
 
       let res: Response;
       if (platform === "Mercado Livre") {
+        const body: any = {};
+        if (accountIds && accountIds.length > 0) {
+          body.accountIds = accountIds;
+        }
+        if (orderIdsByAccount) {
+          body.orderIdsByAccount = orderIdsByAccount;
+        }
+        
         res = await fetch("/api/meli/vendas/sync", { 
           method: "POST",
           cache: "no-store",
@@ -182,9 +190,17 @@ export function useVendas(platform: string = "Mercado Livre") {
           headers: {
             "Content-Type": "application/json",
           },
-          body: accountIds && accountIds.length > 0 ? JSON.stringify({ accountIds }) : undefined,
+          body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
       } else if (platform === "Shopee") {
+        const body: any = {};
+        if (accountIds && accountIds.length > 0) {
+          body.accountIds = accountIds;
+        }
+        if (orderIdsByAccount) {
+          body.orderIdsByAccount = orderIdsByAccount;
+        }
+        
         // Sincronização completa em uma única chamada (com paginação automática interna)
         res = await fetch("/api/shopee/vendas/sync", {
           method: "POST",
@@ -193,7 +209,7 @@ export function useVendas(platform: string = "Mercado Livre") {
           headers: {
             "Content-Type": "application/json",
           },
-          body: accountIds && accountIds.length > 0 ? JSON.stringify({ accountIds }) : undefined,
+          body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
 
         if (!res.ok) {

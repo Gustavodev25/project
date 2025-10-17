@@ -345,25 +345,77 @@ type SkuCacheEntry = {
 async function fetchOrdersForAccount(
   account: MeliAccount,
   userId: string,
+  specificOrderIds?: string[] // IDs específicos para buscar
 ): Promise<OrdersFetchResult> {
   const results: MeliOrderPayload[] = [];
   const headers = { Authorization: `Bearer ${account.access_token}` };
 
+  // Se houver IDs específicos, buscar apenas esses pedidos
+  if (specificOrderIds && specificOrderIds.length > 0) {
+    console.log(`[Sync] Buscando ${specificOrderIds.length} pedidos específicos para conta ${account.ml_user_id}`);
+    
+    const detailedOrders = await Promise.all(
+      specificOrderIds.map(async (orderId) => {
+        try {
+          const res = await fetch(`${MELI_API_BASE}/orders/${orderId}`, { headers });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const shipments = await Promise.all(
+      detailedOrders.map(async (order: any) => {
+        const shippingId = order?.shipping?.id;
+        if (!shippingId) return null;
+        try {
+          const res = await fetch(`${MELI_API_BASE}/shipments/${shippingId}`, { headers });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    detailedOrders.forEach((order: any, idx: number) => {
+      if (!order) return;
+      const shipment = shipments[idx] ?? undefined;
+      const freight = calculateFreight(order, shipment);
+      results.push({
+        accountId: account.id,
+        accountNickname: account.nickname,
+        mlUserId: account.ml_user_id,
+        order,
+        shipment,
+        freight,
+      });
+    });
+
+    return { orders: results, expectedTotal: specificOrderIds.length };
+  }
+
+  // Caso contrário, buscar das últimas 48 horas (verificação rápida)
+  const now = new Date();
+  const last48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+  
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
   while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
-    // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
+    // Usar endpoint /orders/search com filtro de data das últimas 48 horas
     const url = new URL(`${MELI_API_BASE}/orders/search`);
     url.searchParams.set("seller", account.ml_user_id.toString());
     url.searchParams.set("sort", "date_desc");
     url.searchParams.set("limit", limit.toString());
     url.searchParams.set("offset", offset.toString());
-    // Filtrar vendas desde janeiro de 2024 até hoje
-    url.searchParams.set("order.date_created.from", "2024-01-01T00:00:00.000Z");
-    url.searchParams.set("order.date_created.to", new Date().toISOString());
+    // Filtrar vendas das últimas 48 horas
+    url.searchParams.set("order.date_created.from", last48Hours.toISOString());
+    url.searchParams.set("order.date_created.to", now.toISOString());
 
     const response = await fetch(url.toString(), { headers });
     let payload: any = null;
@@ -450,11 +502,11 @@ async function fetchOrdersForAccount(
     offset += fetched;
     
     // Debug: log para verificar paginação
-    console.log(`[meli][vendas] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (período: 2024-01-01 até hoje)`);
+    console.log(`[meli][vendas] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (últimas 48h)`);
     
     // Debug: verificar se as vendas estão sendo processadas
     if (fetched > 0) {
-      console.log(`[DEBUG] Processando ${fetched} pedidos da conta ${account.ml_user_id} desde janeiro de 2024`);
+      console.log(`[DEBUG] Processando ${fetched} pedidos da conta ${account.ml_user_id} das últimas 48 horas`);
     }
     
     // Enviar progresso em tempo real via SSE
@@ -952,8 +1004,26 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.sub;
+  
+  // Ler body para obter contas selecionadas e IDs de vendas verificadas
+  let requestBody: {
+    accountIds?: string[];
+    orderIdsByAccount?: Record<string, string[]>;
+  } = {};
+  
+  try {
+    const bodyText = await req.text();
+    if (bodyText) {
+      requestBody = JSON.parse(bodyText);
+    }
+  } catch (error) {
+    console.error('[Sync] Erro ao parsear body:', error);
+  }
 
-  console.log(`[Sync] Iniciando sincronização para usuário ${userId}`);
+  console.log(`[Sync] Iniciando sincronização para usuário ${userId}`, {
+    accountIds: requestBody.accountIds,
+    hasOrderIds: !!requestBody.orderIdsByAccount
+  });
 
   // Dar um delay para garantir que o SSE está conectado
   await new Promise(resolve => setTimeout(resolve, 500));
@@ -968,8 +1038,14 @@ export async function POST(req: NextRequest) {
     expected: 0
   });
 
+  // Buscar contas - filtrar por IDs se fornecidos
+  const accountsWhere: any = { userId: session.sub };
+  if (requestBody.accountIds && requestBody.accountIds.length > 0) {
+    accountsWhere.id = { in: requestBody.accountIds };
+  }
+  
   const accounts = await prisma.meliAccount.findMany({
-    where: { userId: session.sub },
+    where: accountsWhere,
     orderBy: { created_at: "desc" },
   });
 
@@ -1000,6 +1076,17 @@ export async function POST(req: NextRequest) {
   let totalExpectedOrders = 0;
   let totalFetchedOrders = 0;
   let totalSavedOrders = 0;
+  
+  // Preparar steps para cada conta
+  const steps = accounts.map(acc => ({
+    accountId: acc.id,
+    accountName: acc.nickname || `Conta ${acc.ml_user_id}`,
+    currentStep: 'pending' as 'pending' | 'fetching' | 'saving' | 'completed' | 'error',
+    progress: 0,
+    fetched: 0,
+    expected: 0,
+    error: undefined as string | undefined
+  }));
 
   for (let accountIndex = 0; accountIndex < accounts.length; accountIndex++) {
     const account = accounts[accountIndex];
@@ -1011,16 +1098,20 @@ export async function POST(req: NextRequest) {
     };
     summaries.push(summary);
 
+    // Atualizar step para fetching
+    steps[accountIndex].currentStep = 'fetching';
+    
     // Enviar progresso: processando conta
     sendProgressToUser(userId, {
       type: "sync_progress",
-      message: `Processando conta ${accountIndex + 1}/${accounts.length}: ${account.nickname || account.ml_user_id}`,
+      message: `Buscando vendas da conta ${account.nickname || account.ml_user_id}...`,
       current: accountIndex,
       total: accounts.length,
       fetched: totalFetchedOrders,
       expected: totalExpectedOrders,
       accountId: account.id,
-      accountNickname: account.nickname || `Conta ${account.ml_user_id}`
+      accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+      steps: steps
     });
 
     let current = account;
@@ -1042,13 +1133,39 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const { orders: accountOrders, expectedTotal } = await fetchOrdersForAccount(current, userId);
+      // Obter IDs específicos para esta conta, se fornecidos
+      const specificOrderIds = requestBody.orderIdsByAccount?.[account.id];
+      
+      const { orders: accountOrders, expectedTotal } = await fetchOrdersForAccount(
+        current, 
+        userId,
+        specificOrderIds
+      );
+      
       const accountExpected = expectedTotal || accountOrders.length;
       totalExpectedOrders += accountExpected;
       totalFetchedOrders += accountOrders.length;
       orders.push(...accountOrders);
+      
+      steps[accountIndex].expected = accountExpected;
+      steps[accountIndex].fetched = accountOrders.length;
+      steps[accountIndex].progress = accountOrders.length > 0 ? 50 : 100; // 50% após fetch
 
       console.log(`[Sync] Conta ${account.nickname}: ${accountOrders.length} vendas encontradas`);
+      
+      // Atualizar step para saving
+      steps[accountIndex].currentStep = 'saving';
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Salvando vendas da conta ${account.nickname || account.ml_user_id}...`,
+        current: accountIndex,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: account.id,
+        accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+        steps: steps
+      });
 
       // Salvar vendas no banco de dados em lotes
       if (accountOrders.length > 0) {
@@ -1061,16 +1178,39 @@ export async function POST(req: NextRequest) {
           console.warn(`[meli][vendas] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
         }
       }
+      
+      // Marcar como concluída
+      steps[accountIndex].currentStep = 'completed';
+      steps[accountIndex].progress = 100;
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Conta ${account.nickname || account.ml_user_id} concluída!`,
+        current: accountIndex + 1,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: account.id,
+        accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+        steps: steps
+      });
     } catch (error) {
+      steps[accountIndex].currentStep = 'error';
+      steps[accountIndex].error = error instanceof Error ? error.message : 'Erro desconhecido';
       const message = error instanceof Error ? error.message : "Erro desconhecido ao buscar pedidos.";
       errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
       console.error(`[meli][vendas] Erro ao buscar pedidos da conta ${current.id}:`, error);
       
       // Enviar erro via SSE
       sendProgressToUser(userId, {
-        type: "sync_error",
-        message: `Erro ao buscar vendas da conta ${current.nickname || current.ml_user_id}: ${message}`,
-        errorCode: "FETCH_ORDERS_FAILED"
+        type: "sync_progress",
+        message: `Erro na conta ${current.nickname || current.ml_user_id}`,
+        current: accountIndex + 1,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: current.id,
+        accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+        steps: steps
       });
     }
   }

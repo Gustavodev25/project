@@ -16,6 +16,15 @@ export function sendProgressToUser(userId: string, progress: {
   timestamp?: string;
   errorCode?: string;
   debugData?: any;
+  steps?: Array<{
+    accountId: string;
+    accountName: string;
+    currentStep: 'pending' | 'fetching' | 'saving' | 'completed' | 'error';
+    progress: number;
+    fetched?: number;
+    expected?: number;
+    error?: string;
+  }>;
 }) {
   const timestamp = progress.timestamp || new Date().toISOString();
   const eventData = {

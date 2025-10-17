@@ -32,6 +32,7 @@ type NewOrderSummary = {
   totalAmount: number;
   dateCreated: string;
   accountNickname: string | null;
+  accountId: string; // ID da conta para mapeamento
 };
 
 async function checkNewOrdersForAccount(
@@ -51,17 +52,21 @@ async function checkNewOrdersForAccount(
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
+  // Buscar apenas últimas 48 horas para verificação rápida
+  const now = new Date();
+  const last48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+  
   while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
-    // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
+    // Usar endpoint /orders/search com filtro de data das últimas 48 horas
     const url = new URL(`${MELI_API_BASE}/orders/search`);
     url.searchParams.set("seller", account.ml_user_id.toString());
     url.searchParams.set("sort", "date_desc");
     url.searchParams.set("limit", limit.toString());
     url.searchParams.set("offset", offset.toString());
-    // Filtrar vendas desde janeiro de 2024 até hoje
-    url.searchParams.set("order.date_created.from", "2024-01-01T00:00:00.000Z");
-    url.searchParams.set("order.date_created.to", new Date().toISOString());
+    // Filtrar vendas das últimas 48 horas apenas
+    url.searchParams.set("order.date_created.from", last48Hours.toISOString());
+    url.searchParams.set("order.date_created.to", now.toISOString());
 
     const response = await fetch(url.toString(), { headers });
     let payload: any = null;
@@ -105,7 +110,8 @@ async function checkNewOrdersForAccount(
           title,
           totalAmount: Number(order.total_amount || 0),
           dateCreated: order.date_created || order.date_last_updated || new Date().toISOString(),
-          accountNickname: account.nickname
+          accountNickname: account.nickname,
+          accountId: account.id
         });
       }
     }
@@ -114,7 +120,7 @@ async function checkNewOrdersForAccount(
     offset += fetched;
     
     // Debug: log para verificar paginação
-    console.log(`[meli][check] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (período: 2024-01-01 até hoje)`);
+    console.log(`[meli][check] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (últimas 48h)`);
     
     // Parar apenas se não há mais vendas ou atingiu o total
     if (fetched === 0 || offset >= total) break;
