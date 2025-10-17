@@ -87,8 +87,6 @@ export default function DRE() {
   }, []);
 
   // DRE data loading
-  // TODO: Ajustar API para receber parâmetros de período (dataInicio/dataFim) ao invés de meses
-
   type DREApi = {
     months: Array<{ key: string; label: string; ano: number; mes: number }>;
     categorias: Array<{ id: string; nome: string; descricao?: string | null }>;
@@ -101,6 +99,112 @@ export default function DRE() {
 
   const [dreData, setDreData] = useState<DREApi | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Calcular meses baseado no período selecionado
+  const calcularMeses = useMemo(() => {
+    const hoje = new Date();
+    let dataInicio: Date;
+    let dataFim: Date = new Date(hoje);
+
+    switch (periodoAtivo) {
+      case "hoje":
+        dataInicio = new Date(hoje);
+        dataFim = new Date(hoje);
+        break;
+      case "ontem":
+        dataInicio = new Date(hoje);
+        dataInicio.setDate(dataInicio.getDate() - 1);
+        dataFim = new Date(dataInicio);
+        break;
+      case "ultimos_7d":
+        dataInicio = new Date(hoje);
+        dataInicio.setDate(dataInicio.getDate() - 7);
+        break;
+      case "ultimos_30d":
+        dataInicio = new Date(hoje);
+        dataInicio.setDate(dataInicio.getDate() - 30);
+        break;
+      case "ultimos_12m":
+        dataInicio = new Date(hoje);
+        dataInicio.setMonth(dataInicio.getMonth() - 12);
+        break;
+      case "mes_passado":
+        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+        dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+        break;
+      case "este_mes":
+        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        dataFim = new Date(hoje);
+        break;
+      case "personalizado":
+        if (dataInicioPersonalizada && dataFimPersonalizada) {
+          dataInicio = dataInicioPersonalizada;
+          dataFim = dataFimPersonalizada;
+        } else {
+          return [];
+        }
+        break;
+      default:
+        dataInicio = new Date(hoje);
+        dataInicio.setMonth(dataInicio.getMonth() - 12);
+        break;
+    }
+
+    // Gerar lista de meses entre dataInicio e dataFim
+    const meses: string[] = [];
+    const mesAtual = new Date(dataInicio.getFullYear(), dataInicio.getMonth(), 1);
+    const mesFinal = new Date(dataFim.getFullYear(), dataFim.getMonth(), 1);
+
+    while (mesAtual <= mesFinal) {
+      const ano = mesAtual.getFullYear();
+      const mes = String(mesAtual.getMonth() + 1).padStart(2, "0");
+      meses.push(`${ano}-${mes}`);
+      mesAtual.setMonth(mesAtual.getMonth() + 1);
+    }
+
+    return meses;
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada]);
+
+  // Carregar dados do DRE
+  useEffect(() => {
+    let aborted = false;
+    
+    // Limpar dados antigos ao mudar filtros
+    setDreData(null);
+    
+    if (calcularMeses.length === 0) {
+      setLoading(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        setLoading(true);
+        const mesesParam = calcularMeses.join(",");
+        const catsParam = Array.from(categoriasSelecionadas).join(",");
+        const qs = new URLSearchParams();
+        qs.set("meses", mesesParam);
+        if (catsParam) qs.set("categorias", catsParam);
+        qs.set("tipo", tipoVisualizacao);
+        
+        const res = await fetch(`/api/financeiro/dre/series?${qs}`, { credentials: "include" });
+        if (!res.ok) {
+          if (!aborted) setDreData(null);
+          return;
+        }
+        const data = await res.json();
+        if (!aborted) setDreData(data);
+      } catch {
+        if (!aborted) setDreData(null);
+      } finally {
+        if (!aborted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      aborted = true;
+    };
+  }, [calcularMeses, categoriasSelecionadas, tipoVisualizacao]);
 
   // Horizontal navigation controls for months table
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -197,6 +301,12 @@ export default function DRE() {
           <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-900">Demonstrativo</h3>
+              {loading && (
+                <div className="flex items-center gap-2 text-xs text-orange-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-600 border-t-transparent"></div>
+                  <span>Atualizando...</span>
+                </div>
+              )}
               <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${
                 tipoVisualizacao === 'caixa' 
                   ? 'bg-blue-100 text-blue-700' 

@@ -71,11 +71,49 @@ export default function HeaderDRE({
     onCategoriasSelecionadasChange(new Set());
   };
 
+  // Formatar texto do período
+  const getPeriodoTexto = (): string => {
+    const hoje = new Date();
+    const mesAtual = hoje.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase();
+    
+    switch (periodoAtivo) {
+      case "hoje":
+        return mesAtual;
+      case "ontem":
+        return mesAtual;
+      case "ultimos_7d":
+        return "ÚLTIMOS 7 DIAS";
+      case "ultimos_30d":
+        return "ÚLTIMOS 30 DIAS";
+      case "ultimos_12m":
+        return "ÚLTIMOS 12 MESES";
+      case "mes_passado":
+        const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1);
+        return mesPassado.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase();
+      case "este_mes":
+        return mesAtual;
+      case "personalizado":
+        if (dataInicioPersonalizada && dataFimPersonalizada) {
+          const inicio = dataInicioPersonalizada.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+          const fim = dataFimPersonalizada.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+          return `${inicio} - ${fim}`.toUpperCase();
+        }
+        return "PERÍODO PERSONALIZADO";
+      default:
+        return "ÚLTIMOS 12 MESES";
+    }
+  };
+
   return (
     <div className="mb-6">
       <div className="flex items-center justify-between">
         <div className="text-left">
-          <h1 className="text-2xl font-semibold text-gray-900">DRE</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-gray-900">DRE</h1>
+            <span className="inline-flex px-3 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+              {getPeriodoTexto()}
+            </span>
+          </div>
           <p className="mt-1 text-sm text-gray-600">
             Demonstrativo de Resultado do Exercício com filtros por meses e categorias de despesas.
           </p>
