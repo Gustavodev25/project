@@ -38,7 +38,27 @@ export default function EditModal({
 
   useEffect(() => {
     if (isOpen && data) {
-      setFormData({ ...data });
+      // Normalizar datas para o formato YYYY-MM-DD (sem problemas de timezone)
+      const normalizedData = { ...data };
+      
+      // Campos de data conhecidos que precisam ser normalizados
+      const dateFields = ['dataVencimento', 'dataPagamento', 'dataRecebimento'];
+      
+      dateFields.forEach(field => {
+        if (normalizedData[field]) {
+          const dateStr = typeof normalizedData[field] === 'string' 
+            ? normalizedData[field] 
+            : normalizedData[field].toISOString();
+          
+          // Extrair apenas YYYY-MM-DD sem conversão de timezone
+          const match = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
+          if (match) {
+            normalizedData[field] = match[1];
+          }
+        }
+      });
+      
+      setFormData(normalizedData);
     }
   }, [isOpen, data]);
 

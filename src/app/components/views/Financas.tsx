@@ -171,6 +171,25 @@ const HeaderFinancas = ({
   );
 };
 
+// Helper para formatar data sem problemas de timezone
+const formatDateBR = (dateValue: string | Date | null | undefined): string => {
+  if (!dateValue) return "-";
+  
+  // Se vier como string ISO (ex: "2025-10-31T00:00:00.000Z")
+  // Extrair apenas a parte da data YYYY-MM-DD
+  const dateStr = typeof dateValue === 'string' ? dateValue : dateValue.toISOString();
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  
+  if (match) {
+    const [, year, month, day] = match;
+    return `${day}/${month}/${year}`;
+  }
+  
+  // Fallback: usar Date normal
+  const date = new Date(dateValue);
+  return date.toLocaleDateString("pt-BR");
+};
+
 const emptyStateIcons = [
   <svg
     key="icon1"
@@ -1528,7 +1547,7 @@ export default function Financas() {
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {new Date(forma.sincronizadoEm).toLocaleDateString("pt-BR")}
+                            {formatDateBR(forma.sincronizadoEm)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center space-x-2">
@@ -1692,7 +1711,7 @@ export default function Financas() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{Number(c.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             <div className="flex flex-col leading-tight">
-                              <span>{c.dataVencimento ? new Date(c.dataVencimento).toLocaleDateString("pt-BR") : "-"}</span>
+                              <span>{formatDateBR(c.dataVencimento)}</span>
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
@@ -1782,7 +1801,7 @@ export default function Financas() {
                         <tr key={c.id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.descricao}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{Number(c.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(c.dataRecebimento || c.dataVencimento).toLocaleDateString("pt-BR")}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDateBR(c.dataRecebimento || c.dataVencimento)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">{c.status}</span></td>
