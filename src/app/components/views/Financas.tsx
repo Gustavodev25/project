@@ -1698,7 +1698,7 @@ export default function Financas() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">{c.status}</span></td>
-                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'BLING' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem || 'MANUAL'}</span></td>
+                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'SINCRONIZACAO' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem === 'SINCRONIZACAO' ? 'Sincronização' : c.origem === 'EXCEL' ? 'Excel' : 'Manual'}</span></td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center space-x-2">
                               <button
@@ -1786,7 +1786,7 @@ export default function Financas() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">{c.status}</span></td>
-                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'BLING' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem || 'MANUAL'}</span></td>
+                          <td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${c.origem === 'SINCRONIZACAO' ? 'bg-blue-100 text-blue-800' : c.origem === 'EXCEL' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{c.origem === 'SINCRONIZACAO' ? 'Sincronização' : c.origem === 'EXCEL' ? 'Excel' : 'Manual'}</span></td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center space-x-2">
                               <button

@@ -364,7 +364,7 @@ export async function POST(request: Request) {
             status,
             categoriaId,
             formaPagamentoId,
-            origem: "BLING",
+            origem: "SINCRONIZACAO",
             atualizadoEm: new Date(),
           },
           create: {
@@ -377,7 +377,7 @@ export async function POST(request: Request) {
             status,
             categoriaId,
             formaPagamentoId,
-            origem: "BLING",
+            origem: "SINCRONIZACAO",
           },
         });
           synced++;

@@ -336,6 +336,7 @@ function parseRowData(
         status: getValue('dataPagamento') ? 'pago' : 'pendente',
         categoriaId: resolveCategoriaId(getValue('categoria'), refs),
         formaPagamentoId: resolveFormaId(getValue('formaPagamento'), refs),
+        origem: "EXCEL",
       };
 
     case 'contas_receber':
@@ -356,6 +357,7 @@ function parseRowData(
         status: getValue('dataRecebimento') ? 'recebido' : 'pendente',
         categoriaId: resolveCategoriaId(getValue('categoria'), refs),
         formaPagamentoId: resolveFormaId(getValue('formaPagamento'), refs),
+        origem: "EXCEL",
       };
 
     case 'categorias':
