@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
-import FiltrosDashboard, { FiltroPeriodo } from "./FiltrosDashboard";
+import FiltroMesesCheckbox from "./FiltroMesesCheckbox";
 
 type Categoria = {
   id: string;
@@ -12,12 +12,8 @@ type Categoria = {
 };
 
 interface HeaderDREProps {
-  periodoAtivo: FiltroPeriodo;
-  onPeriodoChange: (periodo: FiltroPeriodo) => void;
-  dataInicioPersonalizada: Date | null;
-  dataFimPersonalizada: Date | null;
-  onDataInicioChange: (data: Date | null) => void;
-  onDataFimChange: (data: Date | null) => void;
+  mesesSelecionados: Set<string>; // formato "YYYY-MM"
+  onMesesChange: (meses: Set<string>) => void;
 
   categorias: Categoria[];
   categoriasSelecionadas: Set<string>; // ids
@@ -28,12 +24,8 @@ interface HeaderDREProps {
 }
 
 export default function HeaderDRE({
-  periodoAtivo,
-  onPeriodoChange,
-  dataInicioPersonalizada,
-  dataFimPersonalizada,
-  onDataInicioChange,
-  onDataFimChange,
+  mesesSelecionados,
+  onMesesChange,
   categorias,
   categoriasSelecionadas,
   onCategoriasSelecionadasChange,
@@ -71,37 +63,31 @@ export default function HeaderDRE({
     onCategoriasSelecionadasChange(new Set());
   };
 
-  // Formatar texto do período
+  // Formatar texto do período baseado nos meses selecionados
   const getPeriodoTexto = (): string => {
-    const hoje = new Date();
-    const mesAtual = hoje.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase();
-    
-    switch (periodoAtivo) {
-      case "hoje":
-        return mesAtual;
-      case "ontem":
-        return mesAtual;
-      case "ultimos_7d":
-        return "ÚLTIMOS 7 DIAS";
-      case "ultimos_30d":
-        return "ÚLTIMOS 30 DIAS";
-      case "ultimos_12m":
-        return "ÚLTIMOS 12 MESES";
-      case "mes_passado":
-        const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1);
-        return mesPassado.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase();
-      case "este_mes":
-        return mesAtual;
-      case "personalizado":
-        if (dataInicioPersonalizada && dataFimPersonalizada) {
-          const inicio = dataInicioPersonalizada.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
-          const fim = dataFimPersonalizada.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
-          return `${inicio} - ${fim}`.toUpperCase();
-        }
-        return "PERÍODO PERSONALIZADO";
-      default:
-        return "ÚLTIMOS 12 MESES";
+    const total = mesesSelecionados.size;
+    if (total === 0) return "NENHUM MÊS SELECIONADO";
+    if (total === 1) {
+      const mesKey = Array.from(mesesSelecionados)[0];
+      const [ano, mes] = mesKey.split('-');
+      const data = new Date(Number(ano), Number(mes) - 1, 1);
+      return data.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase();
     }
+
+    // Ordenar meses
+    const mesesOrdenados = Array.from(mesesSelecionados).sort();
+    const primeiroMes = mesesOrdenados[0];
+    const ultimoMes = mesesOrdenados[mesesOrdenados.length - 1];
+
+    const [ano1, mes1] = primeiroMes.split('-');
+    const [ano2, mes2] = ultimoMes.split('-');
+    const data1 = new Date(Number(ano1), Number(mes1) - 1, 1);
+    const data2 = new Date(Number(ano2), Number(mes2) - 1, 1);
+
+    const inicio = data1.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+    const fim = data2.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+
+    return `${inicio.toUpperCase()} - ${fim.toUpperCase()}`;
   };
 
   return (
@@ -201,14 +187,10 @@ export default function HeaderDRE({
             )}
           </div>
 
-          {/* Filtro de Período */}
-          <FiltrosDashboard
-            periodoAtivo={periodoAtivo}
-            onPeriodoChange={onPeriodoChange}
-            onPeriodoPersonalizadoChange={(dataInicio, dataFim) => {
-              onDataInicioChange(dataInicio);
-              onDataFimChange(dataFim);
-            }}
+          {/* Filtro de Meses */}
+          <FiltroMesesCheckbox
+            mesesSelecionados={mesesSelecionados}
+            onMesesChange={onMesesChange}
           />
         </div>
       </div>

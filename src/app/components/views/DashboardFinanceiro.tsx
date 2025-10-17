@@ -23,11 +23,19 @@ export default function DashboardFinanceiro() {
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
 
   // Filtros
-  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
+  const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {
+    // Inicializar com último mês
+    const hoje = new Date();
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth() + 1;
+    const key = `${ano}-${String(mes).padStart(2, "0")}`;
+    return new Set([key]);
+  });
+  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("personalizado");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
   const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
   const [portadorId, setPortadorId] = useState<string | null>(null);
-  const [categoriaId, setCategoriaId] = useState<string | null>(null);
+  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -57,19 +65,29 @@ export default function DashboardFinanceiro() {
     } catch {}
   }, [isSidebarCollapsed]);
 
-  const handlePeriodoChange = (periodo: FiltroPeriodo) => {
-    setPeriodoAtivo(periodo);
-    if (periodo !== "personalizado") {
+  // Calcular datas baseado nos meses selecionados
+  useEffect(() => {
+    if (mesesSelecionados.size === 0) {
       setDataInicioPersonalizada(null);
       setDataFimPersonalizada(null);
+      return;
     }
-    setRefreshKey((v) => v + 1);
-  };
 
-  const handlePeriodoPersonalizadoChange = (inicio: Date, fim: Date) => {
-    setDataInicioPersonalizada(inicio);
-    setDataFimPersonalizada(fim);
-  };
+    const mesesOrdenados = Array.from(mesesSelecionados).sort();
+    const primeiroMes = mesesOrdenados[0];
+    const ultimoMes = mesesOrdenados[mesesOrdenados.length - 1];
+
+    const [ano1, mes1] = primeiroMes.split('-').map(Number);
+    const [ano2, mes2] = ultimoMes.split('-').map(Number);
+
+    const dataInicio = new Date(ano1, mes1 - 1, 1);
+    const dataFim = new Date(ano2, mes2, 0, 23, 59, 59, 999);
+
+    setDataInicioPersonalizada(dataInicio);
+    setDataFimPersonalizada(dataFim);
+    setPeriodoAtivo("personalizado");
+    setRefreshKey((v) => v + 1);
+  }, [mesesSelecionados]);
 
   const mdLeftVar = "md:left-[var(--sidebar-w,16rem)]";
   const mdMlVar = "md:ml-[var(--sidebar-w,16rem)]";
@@ -95,13 +113,12 @@ export default function DashboardFinanceiro() {
       <main className={`relative z-20 pt-16 p-6 ${mdMlVar}`}>
         <section className="p-6">
           <HeaderFinanceiro
-            periodoAtivo={periodoAtivo}
-            onPeriodoChange={handlePeriodoChange}
-            onPeriodoPersonalizadoChange={handlePeriodoPersonalizadoChange}
+            mesesSelecionados={mesesSelecionados}
+            onMesesChange={setMesesSelecionados}
             portadorId={portadorId}
             onPortadorChange={(id) => { setPortadorId(id); setRefreshKey((v) => v + 1); }}
-            categoriaId={categoriaId}
-            onCategoriaChange={(id) => { setCategoriaId(id); setRefreshKey((v) => v + 1); }}
+            categoriasSelecionadas={categoriasSelecionadas}
+            onCategoriasSelecionadasChange={(ids) => { setCategoriasSelecionadas(ids); setRefreshKey((v) => v + 1); }}
           />
 
           <FinanceiroStats
@@ -109,7 +126,7 @@ export default function DashboardFinanceiro() {
             dataInicioPersonalizada={dataInicioPersonalizada}
             dataFimPersonalizada={dataFimPersonalizada}
             portadorId={portadorId}
-            categoriaId={categoriaId}
+            categoriasSelecionadas={categoriasSelecionadas}
             refreshKey={refreshKey}
           />
 
@@ -119,7 +136,7 @@ export default function DashboardFinanceiro() {
               dataInicioPersonalizada={dataInicioPersonalizada}
               dataFimPersonalizada={dataFimPersonalizada}
               portadorId={portadorId}
-              categoriaId={categoriaId}
+              categoriasSelecionadas={categoriasSelecionadas}
               refreshKey={refreshKey}
               tipo="despesas"
             />

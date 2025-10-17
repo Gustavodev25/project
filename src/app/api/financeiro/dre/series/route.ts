@@ -122,50 +122,66 @@ export async function GET(req: NextRequest) {
     // ============================================
     // BUSCAR VENDAS (Mercado Livre + Shopee)
     // ============================================
-    const notCanceled = { NOT: { status: { contains: "cancel", mode: "insensitive" as const } } };
+    // IMPORTANTE: Buscar TODAS as vendas (incluindo canceladas) para o DRE
+    // Canceladas vão para "DEDUÇÕES DA RECEITA BRUTA"
     const [vendasMeli, vendasShopee] = await Promise.all([
       prisma.meliVenda.findMany({
-        where: { 
-          userId: session.sub, 
-          dataVenda: { gte: rangeStart, lte: rangeEnd }, 
-          ...notCanceled 
+        where: {
+          userId: session.sub,
+          dataVenda: { gte: rangeStart, lte: rangeEnd }
         },
-        select: { 
-          valorTotal: true, 
-          taxaPlataforma: true, 
-          frete: true, 
-          quantidade: true, 
-          sku: true, 
-          dataVenda: true 
+        select: {
+          valorTotal: true,
+          taxaPlataforma: true,
+          frete: true,
+          quantidade: true,
+          sku: true,
+          dataVenda: true,
+          status: true
         },
         distinct: ['orderId'],
       }),
       prisma.shopeeVenda.findMany({
-        where: { 
-          userId: session.sub, 
-          dataVenda: { gte: rangeStart, lte: rangeEnd }, 
-          ...notCanceled 
+        where: {
+          userId: session.sub,
+          dataVenda: { gte: rangeStart, lte: rangeEnd }
         },
-        select: { 
-          valorTotal: true, 
-          taxaPlataforma: true, 
-          frete: true, 
-          quantidade: true, 
-          sku: true, 
-          dataVenda: true 
+        select: {
+          valorTotal: true,
+          taxaPlataforma: true,
+          frete: true,
+          quantidade: true,
+          sku: true,
+          dataVenda: true,
+          status: true
         },
         distinct: ['orderId'],
       }),
     ]);
-    const todasVendas = [...vendasMeli, ...vendasShopee];
-    console.log('[DRE API] Vendas (ML + Shopee) encontradas:', todasVendas.length);
 
-    // Buscar custos dos SKUs para calcular CMV
-    const skusUnicos = Array.from(new Set(todasVendas.map(v => v.sku).filter((s): s is string => Boolean(s))));
+    // Separar vendas confirmadas vs canceladas
+    const isCanceled = (status?: string | null) =>
+      status ? status.toLowerCase().includes('cancel') : false;
+
+    const vendasMeliConfirmadas = vendasMeli.filter(v => !isCanceled(v.status));
+    const vendasMeliCanceladas = vendasMeli.filter(v => isCanceled(v.status));
+    const vendasShopeeConfirmadas = vendasShopee.filter(v => !isCanceled(v.status));
+    const vendasShopeeCanceladas = vendasShopee.filter(v => isCanceled(v.status));
+
+    const todasVendasConfirmadas = [...vendasMeliConfirmadas, ...vendasShopeeConfirmadas];
+    const todasVendasCanceladas = [...vendasMeliCanceladas, ...vendasShopeeCanceladas];
+
+    console.log('[DRE API] Vendas encontradas:', {
+      mercadoLivre: { confirmadas: vendasMeliConfirmadas.length, canceladas: vendasMeliCanceladas.length },
+      shopee: { confirmadas: vendasShopeeConfirmadas.length, canceladas: vendasShopeeCanceladas.length }
+    });
+
+    // Buscar custos dos SKUs para calcular CMV (apenas vendas confirmadas)
+    const skusUnicos = Array.from(new Set(todasVendasConfirmadas.map(v => v.sku).filter((s): s is string => Boolean(s))));
     const skuCustos = skusUnicos.length
-      ? await prisma.sKU.findMany({ 
-          where: { userId: session.sub, sku: { in: skusUnicos } }, 
-          select: { sku: true, custoUnitario: true } 
+      ? await prisma.sKU.findMany({
+          where: { userId: session.sub, sku: { in: skusUnicos } },
+          select: { sku: true, custoUnitario: true }
         })
       : [];
     const mapaCustos = new Map(skuCustos.map(s => [s.sku, Number(s.custoUnitario || 0)]));
@@ -204,13 +220,27 @@ export async function GET(req: NextRequest) {
     console.log('[DRE API] ⚠️ Contas a Receber NÃO são incluídas na RECEITA BRUTA');
 
     // Prepare outputs keyed by month
-    const receitasPorMes: Record<string, number> = {};
+    const receitaBrutaMeliPorMes: Record<string, number> = {};
+    const receitaBrutaShopeePorMes: Record<string, number> = {};
+    const deducoesMeliPorMes: Record<string, number> = {};
+    const deducoesShopeePorMes: Record<string, number> = {};
+    const taxasMeliPorMes: Record<string, number> = {};
+    const taxasShopeePorMes: Record<string, number> = {};
+    const freteMeliPorMes: Record<string, number> = {};
+    const freteShopeePorMes: Record<string, number> = {};
     const despesasPorMes: Record<string, number> = {};
     const cmvPorMes: Record<string, number> = {};
     const valoresPorCategoriaMes: Record<string, Record<string, number>> = {};
 
     for (const m of meses) {
-      receitasPorMes[m.key] = 0;
+      receitaBrutaMeliPorMes[m.key] = 0;
+      receitaBrutaShopeePorMes[m.key] = 0;
+      deducoesMeliPorMes[m.key] = 0;
+      deducoesShopeePorMes[m.key] = 0;
+      taxasMeliPorMes[m.key] = 0;
+      taxasShopeePorMes[m.key] = 0;
+      freteMeliPorMes[m.key] = 0;
+      freteShopeePorMes[m.key] = 0;
       despesasPorMes[m.key] = 0;
       cmvPorMes[m.key] = 0;
     }
@@ -224,48 +254,103 @@ export async function GET(req: NextRequest) {
     // Aggregate despesas (contas a pagar) por categoria e mês
     for (const row of contasPagar) {
       // Escolher data baseada no tipo de visualização
-      const d = tipoParam === 'caixa' 
+      const d = tipoParam === 'caixa'
         ? (row.dataPagamento || row.dataVencimento)  // Caixa: prioriza dataPagamento
         : row.dataVencimento;                        // Competência: sempre dataVencimento
-      
+
       if (!d) continue;
       const key = monthKey(new Date(d));
-      if (!receitasPorMes.hasOwnProperty(key)) continue; // fora dos meses solicitados
+      if (!despesasPorMes.hasOwnProperty(key)) continue; // fora dos meses solicitados
       const catId = row.categoriaId || row.categoria?.id || "sem_categoria";
       if (!valoresPorCategoriaMes[catId]) valoresPorCategoriaMes[catId] = {};
       valoresPorCategoriaMes[catId][key] = (valoresPorCategoriaMes[catId][key] || 0) + Number(row.valor || 0);
       despesasPorMes[key] += Number(row.valor || 0);
-      
+
       // CMV adicional de categorias específicas (CMV/CPV/CSP)
       // Soma ao CMV das vendas calculado anteriormente
       if (cmvCategoryIds.has(catId)) cmvPorMes[key] += Number(row.valor || 0);
     }
 
     // ============================================
-    // PROCESSAR VENDAS (RECEITAS + CMV)
+    // PROCESSAR TODAS AS VENDAS (RECEITA OPERACIONAL BRUTA)
     // ============================================
-    // IMPORTANTE: RECEITA BRUTA = valorTotal (faturamento)
-    // Igual ao cálculo do dashboard (faturamentoTotal)
-    // Taxas e frete NÃO entram na RECEITA BRUTA, pois são deduções
-    for (const venda of todasVendas) {
+    // IMPORTANTE: Receita Operacional Bruta = TODAS as vendas (incluindo canceladas)
+    // As canceladas serão deduzidas posteriormente
+    
+    // Processar Mercado Livre - TODAS as vendas
+    for (const venda of vendasMeli) {
       const d = venda.dataVenda;
       if (!d) continue;
       const key = monthKey(new Date(d));
-      if (!receitasPorMes.hasOwnProperty(key)) continue;
+      if (!receitaBrutaMeliPorMes.hasOwnProperty(key)) continue;
 
-      // RECEITA BRUTA = valorTotal (igual ao faturamento do dashboard)
       const valorTotal = Number(venda.valorTotal || 0);
-      receitasPorMes[key] += valorTotal;
+      receitaBrutaMeliPorMes[key] += valorTotal;
+      
+      // Taxas e frete apenas para vendas confirmadas
+      if (!isCanceled(venda.status)) {
+        const taxaPlataforma = Math.abs(Number(venda.taxaPlataforma || 0));
+        const frete = Math.abs(Number(venda.frete || 0));
+        taxasMeliPorMes[key] += taxaPlataforma;
+        freteMeliPorMes[key] += frete;
 
-      // CMV = custo unitário × quantidade
-      const quantidade = Number(venda.quantidade || 0);
-      const custoUnit = venda.sku && mapaCustos.has(venda.sku) ? mapaCustos.get(venda.sku)! : 0;
-      const cmvVenda = custoUnit * quantidade;
-      cmvPorMes[key] += cmvVenda;
+        // CMV = custo unitário × quantidade (apenas vendas confirmadas)
+        const quantidade = Number(venda.quantidade || 0);
+        const custoUnit = venda.sku && mapaCustos.has(venda.sku) ? mapaCustos.get(venda.sku)! : 0;
+        const cmvVenda = custoUnit * quantidade;
+        cmvPorMes[key] += cmvVenda;
+      }
     }
 
-    // NOTA: Contas a receber NÃO entram na RECEITA BRUTA
-    // Apenas vendas do Mercado Livre e Shopee compõem a RECEITA BRUTA
+    // Processar Shopee - TODAS as vendas
+    for (const venda of vendasShopee) {
+      const d = venda.dataVenda;
+      if (!d) continue;
+      const key = monthKey(new Date(d));
+      if (!receitaBrutaShopeePorMes.hasOwnProperty(key)) continue;
+
+      const valorTotal = Number(venda.valorTotal || 0);
+      receitaBrutaShopeePorMes[key] += valorTotal;
+      
+      // Taxas e frete apenas para vendas confirmadas
+      if (!isCanceled(venda.status)) {
+        const taxaPlataforma = Math.abs(Number(venda.taxaPlataforma || 0));
+        const frete = Math.abs(Number(venda.frete || 0));
+        taxasShopeePorMes[key] += taxaPlataforma;
+        freteShopeePorMes[key] += frete;
+
+        // CMV = custo unitário × quantidade (apenas vendas confirmadas)
+        const quantidade = Number(venda.quantidade || 0);
+        const custoUnit = venda.sku && mapaCustos.has(venda.sku) ? mapaCustos.get(venda.sku)! : 0;
+        const cmvVenda = custoUnit * quantidade;
+        cmvPorMes[key] += cmvVenda;
+      }
+    }
+
+    // ============================================
+    // PROCESSAR VENDAS CANCELADAS (DEDUÇÕES)
+    // ============================================
+    // Processar Mercado Livre - Canceladas
+    for (const venda of vendasMeliCanceladas) {
+      const d = venda.dataVenda;
+      if (!d) continue;
+      const key = monthKey(new Date(d));
+      if (!deducoesMeliPorMes.hasOwnProperty(key)) continue;
+
+      const valorTotal = Number(venda.valorTotal || 0);
+      deducoesMeliPorMes[key] += valorTotal;
+    }
+
+    // Processar Shopee - Canceladas
+    for (const venda of vendasShopeeCanceladas) {
+      const d = venda.dataVenda;
+      if (!d) continue;
+      const key = monthKey(new Date(d));
+      if (!deducoesShopeePorMes.hasOwnProperty(key)) continue;
+
+      const valorTotal = Number(venda.valorTotal || 0);
+      deducoesShopeePorMes[key] += valorTotal;
+    }
 
     // Filter categorias to those present in DESPESA set or that appear in valores
     const categoriasOut = categoriasDespesa.filter(c => {
@@ -273,35 +358,67 @@ export async function GET(req: NextRequest) {
     }).map(c => ({ id: c.id, nome: c.nome, descricao: c.descricao }));
 
     // Totals
-    const totalReceitas = Object.values(receitasPorMes).reduce((a, b) => a + b, 0);
+    const totalReceitaBrutaMeli = Object.values(receitaBrutaMeliPorMes).reduce((a, b) => a + b, 0);
+    const totalReceitaBrutaShopee = Object.values(receitaBrutaShopeePorMes).reduce((a, b) => a + b, 0);
+    const totalReceitaBruta = totalReceitaBrutaMeli + totalReceitaBrutaShopee;
+    const totalDeducoesMeli = Object.values(deducoesMeliPorMes).reduce((a, b) => a + b, 0);
+    const totalDeducoesShopee = Object.values(deducoesShopeePorMes).reduce((a, b) => a + b, 0);
+    const totalDeducoes = totalDeducoesMeli + totalDeducoesShopee;
+    const totalTaxasMeli = Object.values(taxasMeliPorMes).reduce((a, b) => a + b, 0);
+    const totalTaxasShopee = Object.values(taxasShopeePorMes).reduce((a, b) => a + b, 0);
+    const totalTaxas = totalTaxasMeli + totalTaxasShopee;
+    const totalFreteMeli = Object.values(freteMeliPorMes).reduce((a, b) => a + b, 0);
+    const totalFreteShopee = Object.values(freteShopeePorMes).reduce((a, b) => a + b, 0);
+    const totalFrete = totalFreteMeli + totalFreteShopee;
     const totalDespesas = Object.values(despesasPorMes).reduce((a, b) => a + b, 0);
     const totalCMV = Object.values(cmvPorMes).reduce((a, b) => a + b, 0);
 
     console.log('[DRE API] ===== RESULTADO =====');
-    console.log('[DRE API] 💰 RECEITA BRUTA (Faturamento ML + Shopee):', totalReceitas);
-    console.log('[DRE API]    - Vendas Mercado Livre:', vendasMeli.length);
-    console.log('[DRE API]    - Vendas Shopee:', vendasShopee.length);
-    console.log('[DRE API]    - Total de Vendas:', todasVendas.length);
-    console.log('[DRE API] 📊 Total de Despesas:', totalDespesas);
-    console.log('[DRE API] 📦 Total de CMV:', totalCMV);
-    console.log('[DRE API] 📂 Categorias retornadas:', categoriasOut.length);
-    console.log('[DRE API] 📅 Receitas por mês:', receitasPorMes);
-    console.log('[DRE API] 💸 Despesas por mês:', despesasPorMes);
-    console.log('[DRE API] ⚠️ IMPORTANTE: Contas a receber NÃO incluídas na RECEITA BRUTA');
-    console.log('[DRE API] ✅ RECEITA BRUTA = Faturamento (igual ao dashboard)');
+    console.log('[DRE API] 💰 RECEITA BRUTA TOTAL:', totalReceitaBruta);
+    console.log('[DRE API]    - Mercado Livre:', totalReceitaBrutaMeli);
+    console.log('[DRE API]    - Shopee:', totalReceitaBrutaShopee);
+    console.log('[DRE API] ❌ DEDUÇÕES (Canceladas):', totalDeducoes);
+    console.log('[DRE API]    - Mercado Livre:', totalDeducoesMeli);
+    console.log('[DRE API]    - Shopee:', totalDeducoesShopee);
+    console.log('[DRE API] 💳 TAXAS E COMISSÕES:', totalTaxas);
+    console.log('[DRE API]    - Mercado Livre:', totalTaxasMeli);
+    console.log('[DRE API]    - Shopee:', totalTaxasShopee);
+    console.log('[DRE API] 📦 CUSTO DE FRETE:', totalFrete);
+    console.log('[DRE API]    - Mercado Livre:', totalFreteMeli);
+    console.log('[DRE API]    - Shopee:', totalFreteShopee);
+    console.log('[DRE API] 🏭 CMV:', totalCMV);
+    console.log('[DRE API] 💸 DESPESAS OPERACIONAIS:', totalDespesas);
     console.log('[DRE API] ===== FIM =====');
 
     return NextResponse.json({
       months: meses,
       categorias: categoriasOut,
       valoresPorCategoriaMes,
-      receitasPorMes,
+      receitaBrutaMeliPorMes,
+      receitaBrutaShopeePorMes,
+      deducoesMeliPorMes,
+      deducoesShopeePorMes,
+      taxasMeliPorMes,
+      taxasShopeePorMes,
+      freteMeliPorMes,
+      freteShopeePorMes,
       despesasPorMes,
       cmvPorMes,
       totals: {
-        receitas: totalReceitas,
-        despesas: totalDespesas,
+        receitaBrutaMeli: totalReceitaBrutaMeli,
+        receitaBrutaShopee: totalReceitaBrutaShopee,
+        receitaBrutaTotal: totalReceitaBruta,
+        deducoesMeli: totalDeducoesMeli,
+        deducoesShopee: totalDeducoesShopee,
+        deducoesTotal: totalDeducoes,
+        taxasMeli: totalTaxasMeli,
+        taxasShopee: totalTaxasShopee,
+        taxasTotal: totalTaxas,
+        freteMeli: totalFreteMeli,
+        freteShopee: totalFreteShopee,
+        freteTotal: totalFrete,
         cmv: totalCMV,
+        despesas: totalDespesas,
       },
     });
   } catch (err) {

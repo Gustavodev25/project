@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
-import FiltrosDashboard, { FiltroPeriodo } from "./FiltrosDashboard";
+import FiltroMesesCheckbox from "./FiltroMesesCheckbox";
 
 interface FormaPagamento {
   id: string;
@@ -17,23 +17,21 @@ interface Categoria {
 }
 
 interface HeaderFinanceiroProps {
-  periodoAtivo: FiltroPeriodo;
-  onPeriodoChange: (periodo: FiltroPeriodo) => void;
-  onPeriodoPersonalizadoChange?: (dataInicio: Date, dataFim: Date) => void;
+  mesesSelecionados: Set<string>;
+  onMesesChange: (meses: Set<string>) => void;
   portadorId: string | null;
   onPortadorChange: (id: string | null) => void;
-  categoriaId: string | null;
-  onCategoriaChange: (id: string | null) => void;
+  categoriasSelecionadas: Set<string>;
+  onCategoriasSelecionadasChange: (ids: Set<string>) => void;
 }
 
 export default function HeaderFinanceiro({
-  periodoAtivo,
-  onPeriodoChange,
-  onPeriodoPersonalizadoChange,
+  mesesSelecionados,
+  onMesesChange,
   portadorId,
   onPortadorChange,
-  categoriaId,
-  onCategoriaChange,
+  categoriasSelecionadas,
+  onCategoriasSelecionadasChange,
 }: HeaderFinanceiroProps) {
   const [formas, setFormas] = useState<FormaPagamento[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -100,9 +98,24 @@ export default function HeaderFinanceiro({
   };
 
   const getCategoriaLabel = () => {
-    if (!categoriaId) return 'Categoria: Todas (Desp.)';
-    const c = categorias.find((x) => x.id === categoriaId);
-    return `Categoria: ${c ? (c.descricao || c.nome) : 'Selecionada'}`;
+    const total = categorias.length;
+    const selecionadas = categoriasSelecionadas.size;
+    return `Filtrar Despesas (${selecionadas}/${total})`;
+  };
+
+  const toggleCategoria = (id: string) => {
+    const next = new Set(categoriasSelecionadas);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onCategoriasSelecionadasChange(next);
+  };
+
+  const selecionarTodasCategorias = () => {
+    onCategoriasSelecionadasChange(new Set(categorias.map((c) => c.id)));
+  };
+
+  const limparCategorias = () => {
+    onCategoriasSelecionadasChange(new Set());
   };
 
   return (
@@ -134,30 +147,43 @@ export default function HeaderFinanceiro({
             {categoriaDropdown.isVisible && (
               <div
                 ref={categoriaDropdown.dropdownRef}
-                className={`smart-dropdown w-72 ${categoriaDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
+                className={`smart-dropdown w-80 ${categoriaDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
                 style={categoriaDropdown.position}
               >
                 <div className="p-2">
-                  <button
-                    onClick={() => { onCategoriaChange(null); setShowCategoriaDropdown(false); }}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${!categoriaId ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
-                  >
-                    Todas as despesas
-                  </button>
-                  <div className="max-h-72 overflow-y-auto mt-1">
+                  <div className="flex items-center justify-between px-2 pb-2">
+                    <button
+                      onClick={() => { selecionarTodasCategorias(); }}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      Selecionar todas
+                    </button>
+                    <button
+                      onClick={() => { limparCategorias(); }}
+                      className="text-xs text-gray-600 hover:text-gray-700"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto mt-1 space-y-1">
                     {loadingCategorias ? (
                       <div className="text-xs text-gray-600 px-3 py-2">Carregando...</div>
                     ) : categorias.length === 0 ? (
                       <div className="text-xs text-gray-600 px-3 py-2">Nenhuma categoria de despesa</div>
                     ) : (
                       categorias.map((c) => (
-                        <button
+                        <label
                           key={c.id}
-                          onClick={() => { onCategoriaChange(c.id); setShowCategoriaDropdown(false); }}
-                          className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${categoriaId === c.id ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-gray-50 cursor-pointer"
                         >
-                          {c.descricao || c.nome}
-                        </button>
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={categoriasSelecionadas.has(c.id)}
+                            onChange={() => toggleCategoria(c.id)}
+                          />
+                          <span className="text-gray-700">{c.descricao || c.nome}</span>
+                        </label>
                       ))
                     )}
                   </div>
@@ -219,11 +245,10 @@ export default function HeaderFinanceiro({
             )}
           </div>
 
-          {/* Período */}
-          <FiltrosDashboard
-            periodoAtivo={periodoAtivo}
-            onPeriodoChange={onPeriodoChange}
-            onPeriodoPersonalizadoChange={onPeriodoPersonalizadoChange}
+          {/* Filtro de Meses */}
+          <FiltroMesesCheckbox
+            mesesSelecionados={mesesSelecionados}
+            onMesesChange={onMesesChange}
           />
         </div>
       </div>

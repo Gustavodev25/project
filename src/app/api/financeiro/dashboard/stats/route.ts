@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
     const dataInicioParam = url.searchParams.get("dataInicio");
     const dataFimParam = url.searchParams.get("dataFim");
     const portadorIdParam = url.searchParams.get("portadorId");
-    const categoriaIdParam = url.searchParams.get("categoriaId");
+    const categoriaIdsParam = url.searchParams.get("categoriaIds");
+    const categoriaIds = categoriaIdsParam ? categoriaIdsParam.split(",").filter(Boolean) : [];
 
     const now = new Date();
 
@@ -138,7 +139,7 @@ export async function GET(req: NextRequest) {
       ],
     };
     if (portadorIdParam) whereReceitas.formaPagamentoId = String(portadorIdParam);
-    if (categoriaIdParam) whereReceitas.categoriaId = String(categoriaIdParam);
+    if (categoriaIds.length > 0) whereReceitas.categoriaId = { in: categoriaIds };
     const receitasFin = await prisma.contaReceber.findMany({ where: whereReceitas, select: { valor: true } });
     const totalReceitasFin = receitasFin.reduce((acc, it) => acc + toNumber(it.valor), 0);
 
@@ -151,7 +152,7 @@ export async function GET(req: NextRequest) {
       ],
     };
     if (portadorIdParam) whereDespesas.formaPagamentoId = String(portadorIdParam);
-    if (categoriaIdParam) whereDespesas.categoriaId = String(categoriaIdParam);
+    if (categoriaIds.length > 0) whereDespesas.categoriaId = { in: categoriaIds };
     const despesas = await prisma.contaPagar.findMany({ where: whereDespesas, select: { valor: true } });
     const despesasOperacionais = despesas.reduce((acc, it) => acc + toNumber(it.valor), 0);
 

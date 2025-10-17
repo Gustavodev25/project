@@ -9,7 +9,7 @@ interface FinanceiroStatsProps {
   dataInicioPersonalizada?: Date | null;
   dataFimPersonalizada?: Date | null;
   portadorId?: string | null;
-  categoriaId?: string | null;
+  categoriasSelecionadas?: Set<string>;
   refreshKey?: number;
 }
 
@@ -42,7 +42,7 @@ export default function FinanceiroStats({
   dataInicioPersonalizada = null,
   dataFimPersonalizada = null,
   portadorId = null,
-  categoriaId = null,
+  categoriasSelecionadas = new Set(),
   refreshKey = 0,
 }: FinanceiroStatsProps) {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
@@ -60,7 +60,9 @@ export default function FinanceiroStats({
           params.append('dataFim', dataFimPersonalizada.toISOString());
         }
         if (portadorId) params.append('portadorId', portadorId);
-        if (categoriaId) params.append('categoriaId', categoriaId);
+        if (categoriasSelecionadas.size > 0) {
+          params.append('categoriaIds', Array.from(categoriasSelecionadas).join(','));
+        }
         if (refreshKey) params.append('refresh', String(refreshKey));
 
         const url = `/api/financeiro/dashboard/stats${params.toString() ? `?${params.toString()}` : ''}`;
@@ -76,7 +78,7 @@ export default function FinanceiroStats({
     }
     load();
     return () => { isMounted = false; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriaId, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, refreshKey]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
   const formatPercentage = (value: number) => `${value > 0 ? "+" : ""}${(value || 0).toFixed(1)}%`;
@@ -246,22 +248,22 @@ export default function FinanceiroStats({
       </div>
 
       {/* Despesas Operacionais */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Soma das despesas operacionais">
+      <div className="bg-red-50 rounded-lg border border-red-200 p-3 shadow-sm" title="Soma das despesas operacionais">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
-            <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
-              <svg className="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-6 h-6 bg-red-100 rounded-lg flex items-center justify-center mr-2">
+              <svg className="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4 4m0 0l-4-4m4 4V3" />
               </svg>
             </div>
             <div>
-              <h3 className="text-xs font-medium text-gray-600">Despesas Operacionais</h3>
+              <h3 className="text-xs font-medium text-red-700">Despesas Operacionais</h3>
             </div>
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.despesasOperacionais), formatCurrency, "w-24", "currency")}</div>
-          <p className="text-xs text-gray-600">soma das despesas</p>
+          <div className="text-lg font-bold text-red-600">{renderValue(-Math.abs(stats.despesasOperacionais), formatCurrency, "w-24", "currency")}</div>
+          <p className="text-xs text-red-600">soma das despesas</p>
         </div>
       </div>
 

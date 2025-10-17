@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import Sidebar from "./ui/Sidebar";
 import Topbar from "./ui/Topbar";
 import HeaderDRE from "./ui/HeaderDRE";
-import { FiltroPeriodo } from "./ui/FiltrosDashboard";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -54,10 +53,20 @@ export default function DRE() {
     } catch {}
   }, [isSidebarCollapsed]);
 
-  // Filtro de período (igual ao dashboard)
-  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
-  const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
-  const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
+  // Filtro de meses (checkbox)
+  const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {
+    // Inicializar com os últimos 12 meses
+    const hoje = new Date();
+    const meses = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const ano = data.getFullYear();
+      const mes = data.getMonth() + 1;
+      const key = `${ano}-${String(mes).padStart(2, "0")}`;
+      meses.add(key);
+    }
+    return meses;
+  });
 
   // Categorias de despesas
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -91,79 +100,44 @@ export default function DRE() {
     months: Array<{ key: string; label: string; ano: number; mes: number }>;
     categorias: Array<{ id: string; nome: string; descricao?: string | null }>;
     valoresPorCategoriaMes: Record<string, Record<string, number>>;
-    receitasPorMes: Record<string, number>;
+    receitaBrutaMeliPorMes: Record<string, number>;
+    receitaBrutaShopeePorMes: Record<string, number>;
+    deducoesMeliPorMes: Record<string, number>;
+    deducoesShopeePorMes: Record<string, number>;
+    taxasMeliPorMes: Record<string, number>;
+    taxasShopeePorMes: Record<string, number>;
+    freteMeliPorMes: Record<string, number>;
+    freteShopeePorMes: Record<string, number>;
     despesasPorMes: Record<string, number>;
     cmvPorMes: Record<string, number>;
-    totals: { receitas: number; despesas: number; cmv: number };
+    totals: {
+      receitaBrutaMeli: number;
+      receitaBrutaShopee: number;
+      receitaBrutaTotal: number;
+      deducoesMeli: number;
+      deducoesShopee: number;
+      deducoesTotal: number;
+      taxasMeli: number;
+      taxasShopee: number;
+      taxasTotal: number;
+      freteMeli: number;
+      freteShopee: number;
+      freteTotal: number;
+      cmv: number;
+      despesas: number;
+    };
   };
 
   const [dreData, setDreData] = useState<DREApi | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Calcular meses baseado no período selecionado
+  // Controle de visibilidade de categorias
+  const [categoriasVisiveis, setCategoriasVisiveis] = useState<Set<string>>(new Set());
+
+  // Converter meses selecionados em array ordenado
   const calcularMeses = useMemo(() => {
-    const hoje = new Date();
-    let dataInicio: Date;
-    let dataFim: Date = new Date(hoje);
-
-    switch (periodoAtivo) {
-      case "hoje":
-        dataInicio = new Date(hoje);
-        dataFim = new Date(hoje);
-        break;
-      case "ontem":
-        dataInicio = new Date(hoje);
-        dataInicio.setDate(dataInicio.getDate() - 1);
-        dataFim = new Date(dataInicio);
-        break;
-      case "ultimos_7d":
-        dataInicio = new Date(hoje);
-        dataInicio.setDate(dataInicio.getDate() - 7);
-        break;
-      case "ultimos_30d":
-        dataInicio = new Date(hoje);
-        dataInicio.setDate(dataInicio.getDate() - 30);
-        break;
-      case "ultimos_12m":
-        dataInicio = new Date(hoje);
-        dataInicio.setMonth(dataInicio.getMonth() - 12);
-        break;
-      case "mes_passado":
-        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
-        dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
-        break;
-      case "este_mes":
-        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-        dataFim = new Date(hoje);
-        break;
-      case "personalizado":
-        if (dataInicioPersonalizada && dataFimPersonalizada) {
-          dataInicio = dataInicioPersonalizada;
-          dataFim = dataFimPersonalizada;
-        } else {
-          return [];
-        }
-        break;
-      default:
-        dataInicio = new Date(hoje);
-        dataInicio.setMonth(dataInicio.getMonth() - 12);
-        break;
-    }
-
-    // Gerar lista de meses entre dataInicio e dataFim
-    const meses: string[] = [];
-    const mesAtual = new Date(dataInicio.getFullYear(), dataInicio.getMonth(), 1);
-    const mesFinal = new Date(dataFim.getFullYear(), dataFim.getMonth(), 1);
-
-    while (mesAtual <= mesFinal) {
-      const ano = mesAtual.getFullYear();
-      const mes = String(mesAtual.getMonth() + 1).padStart(2, "0");
-      meses.push(`${ano}-${mes}`);
-      mesAtual.setMonth(mesAtual.getMonth() + 1);
-    }
-
-    return meses;
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada]);
+    return Array.from(mesesSelecionados).sort();
+  }, [mesesSelecionados]);
 
   // Carregar dados do DRE
   useEffect(() => {
@@ -252,16 +226,45 @@ export default function DRE() {
 
   const sumValues = (obj?: Record<string, number>) => Object.values(obj || {}).reduce((a, b) => a + b, 0);
 
-  const totalReceitas = dreData?.totals?.receitas || 0;
-  const totalCMV = dreData?.totals?.cmv || 0;
-  const totalDespesas = dreData?.totals?.despesas || 0;
-  const despesasOperacionais = Math.max(0, totalDespesas - totalCMV);
-  const deducoes = 0; // Placeholder até termos classificação de deduções
-  const receitaLiquida = Math.max(0, totalReceitas - deducoes);
-  const resultadoBruto = Math.max(0, receitaLiquida - totalCMV);
-  const ebitda = Math.max(0, resultadoBruto - despesasOperacionais);
+  // Inicializar categorias visíveis quando dreData é carregado
+  React.useEffect(() => {
+    if (dreData?.categorias) {
+      setCategoriasVisiveis(new Set(dreData.categorias.map(c => c.id)));
+    }
+  }, [dreData?.categorias]);
+
+  // Calcular despesas apenas das categorias visíveis
+  const despesasVisiveis = React.useMemo(() => {
+    if (!dreData) return 0;
+    let total = 0;
+    for (const catId of categoriasVisiveis) {
+      total += sumValues(dreData.valoresPorCategoriaMes[catId]);
+    }
+    return total;
+  }, [dreData, categoriasVisiveis]);
+
+  // Cálculos do DRE
+  const receitaBrutaMeli = dreData?.totals?.receitaBrutaMeli || 0;
+  const receitaBrutaShopee = dreData?.totals?.receitaBrutaShopee || 0;
+  const receitaBrutaTotal = dreData?.totals?.receitaBrutaTotal || 0;
+  const deducoesMeli = dreData?.totals?.deducoesMeli || 0;
+  const deducoesShopee = dreData?.totals?.deducoesShopee || 0;
+  const deducoesTotal = dreData?.totals?.deducoesTotal || 0;
+  const receitaLiquidaTotal = receitaBrutaTotal - deducoesTotal;
+  const taxasMeli = dreData?.totals?.taxasMeli || 0;
+  const taxasShopee = dreData?.totals?.taxasShopee || 0;
+  const taxasTotal = dreData?.totals?.taxasTotal || 0;
+  const freteMeli = dreData?.totals?.freteMeli || 0;
+  const freteShopee = dreData?.totals?.freteShopee || 0;
+  const freteTotal = dreData?.totals?.freteTotal || 0;
+  const receitaOperacionalLiquida = receitaLiquidaTotal - taxasTotal - freteTotal;
+  const cmvTotal = dreData?.totals?.cmv || 0;
+  const lucroBruto = receitaOperacionalLiquida - cmvTotal;
+  const margemContribuicao = lucroBruto;
+  const despesasOperacionais = despesasVisiveis;
+  const ebitda = lucroBruto - despesasOperacionais;
   const resultadoLiquido = ebitda; // sem deprec/juros/IR
-  const lucratividadePct = receitaLiquida > 0 ? (resultadoLiquido / receitaLiquida) : 0;
+  const lucratividadePct = receitaOperacionalLiquida > 0 ? (resultadoLiquido / receitaOperacionalLiquida) : 0;
 
   return (
     <div ref={containerRef} className="min-h-screen overflow-x-hidden">
@@ -284,12 +287,8 @@ export default function DRE() {
       <main className={`relative z-20 pt-16 p-6 ${mdMlVar}`}>
         <section className="p-6">
           <HeaderDRE
-            periodoAtivo={periodoAtivo}
-            onPeriodoChange={setPeriodoAtivo}
-            dataInicioPersonalizada={dataInicioPersonalizada}
-            dataFimPersonalizada={dataFimPersonalizada}
-            onDataInicioChange={setDataInicioPersonalizada}
-            onDataFimChange={setDataFimPersonalizada}
+            mesesSelecionados={mesesSelecionados}
+            onMesesChange={setMesesSelecionados}
             categorias={categorias}
             categoriasSelecionadas={categoriasSelecionadas}
             onCategoriasSelecionadasChange={setCategoriasSelecionadas}
@@ -300,7 +299,7 @@ export default function DRE() {
           {/* Demonstrativo */}
           <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-900">Demonstrativo</h3>
+              <h3 className="text-sm font-semibold text-gray-900">Demonstrativo de Resultado do Exercício</h3>
               {loading && (
                 <div className="flex items-center gap-2 text-xs text-orange-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-600 border-t-transparent"></div>
@@ -308,8 +307,8 @@ export default function DRE() {
                 </div>
               )}
               <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${
-                tipoVisualizacao === 'caixa' 
-                  ? 'bg-blue-100 text-blue-700' 
+                tipoVisualizacao === 'caixa'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'bg-green-100 text-green-700'
               }`}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -323,29 +322,90 @@ export default function DRE() {
               </div>
             </div>
             <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-700">(+) RECEITA OPERACIONAL BRUTA</span>
-                <span className="font-medium text-gray-900">{currency(totalReceitas)}</span>
+              {/* RECEITA BRUTA TOTAL */}
+              <div className="flex items-center justify-between font-semibold text-gray-900">
+                <span>(+) RECEITA BRUTA TOTAL</span>
+                <span>{currency(receitaBrutaTotal)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-700">(-) DEDUÇÕES DA RECEITA BRUTA</span>
-                <span className="font-medium text-gray-900">{currency(deducoes)}</span>
+              <div className="flex items-center justify-between pl-4 text-xs">
+                <span className="text-gray-600">→ Receita Bruta Mercado Livre</span>
+                <span className="text-gray-700">{currency(receitaBrutaMeli)}</span>
               </div>
-              <div className="flex items-center justify-between border-t border-gray-200 pt-2">
-                <span className="text-gray-700">(=) RECEITA OPERACIONAL LÍQUIDA</span>
-                <span className="font-semibold text-gray-900">{currency(receitaLiquida)}</span>
+              <div className="flex items-center justify-between pl-4 text-xs mb-2">
+                <span className="text-gray-600">→ Receita Bruta Shopee</span>
+                <span className="text-gray-700">{currency(receitaBrutaShopee)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-700">(-) CUSTO (CMV / CPV / CSP)</span>
-                <span className="font-medium text-gray-900">{currency(totalCMV)}</span>
+
+              {/* DEDUÇÕES */}
+              <div className="flex items-center justify-between font-semibold text-gray-900">
+                <span>(-) DEDUÇÕES DA RECEITA BRUTA TOTAL</span>
+                <span>{currency(deducoesTotal)}</span>
               </div>
-              <div className="flex items-center justify-between border-t border-gray-200 pt-2">
-                <span className="text-gray-700">(=) RESULTADO OPERACIONAL BRUTO</span>
-                <span className="font-semibold text-gray-900">{currency(resultadoBruto)}</span>
+              <div className="flex items-center justify-between pl-4 text-xs">
+                <span className="text-gray-600">→ Canceladas Mercado Livre</span>
+                <span className="text-gray-700">{currency(deducoesMeli)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-700">(-) DESPESAS OPERACIONAIS</span>
-                <span className="font-medium text-gray-900">{currency(despesasOperacionais)}</span>
+              <div className="flex items-center justify-between pl-4 text-xs mb-2">
+                <span className="text-gray-600">→ Canceladas Shopee</span>
+                <span className="text-gray-700">{currency(deducoesShopee)}</span>
+              </div>
+
+              {/* RECEITA LÍQUIDA TOTAL */}
+              <div className="flex items-center justify-between border-t border-gray-300 pt-2 font-bold text-gray-900">
+                <span>(=) RECEITA LÍQUIDA TOTAL</span>
+                <span>{currency(receitaLiquidaTotal)}</span>
+              </div>
+
+              {/* TAXAS E COMISSÕES */}
+              <div className="flex items-center justify-between font-semibold text-gray-900 mt-3">
+                <span>(-) TAXA E COMISSÕES DE MARKETPLACES</span>
+                <span>{currency(taxasTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between pl-4 text-xs">
+                <span className="text-gray-600">→ Taxas Mercado Livre</span>
+                <span className="text-gray-700">{currency(taxasMeli)}</span>
+              </div>
+              <div className="flex items-center justify-between pl-4 text-xs mb-2">
+                <span className="text-gray-600">→ Taxas Shopee</span>
+                <span className="text-gray-700">{currency(taxasShopee)}</span>
+              </div>
+
+              {/* CUSTO DE FRETE */}
+              <div className="flex items-center justify-between font-semibold text-gray-900">
+                <span>(-) CUSTO DE FRETE MARKETPLACE</span>
+                <span>{currency(freteTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between pl-4 text-xs">
+                <span className="text-gray-600">→ Frete Mercado Livre</span>
+                <span className="text-gray-700">{currency(freteMeli)}</span>
+              </div>
+              <div className="flex items-center justify-between pl-4 text-xs mb-2">
+                <span className="text-gray-600">→ Frete Shopee</span>
+                <span className="text-gray-700">{currency(freteShopee)}</span>
+              </div>
+
+              {/* RECEITA OPERACIONAL LÍQUIDA */}
+              <div className="flex items-center justify-between border-t border-gray-300 pt-2 font-bold text-gray-900">
+                <span>(=) RECEITA OPERACIONAL LÍQUIDA</span>
+                <span>{currency(receitaOperacionalLiquida)}</span>
+              </div>
+
+              {/* CMV */}
+              <div className="flex items-center justify-between font-semibold text-gray-900 mt-3">
+                <span>(-) CUSTO (CMV / CPV / CSP)</span>
+                <span>{currency(cmvTotal)}</span>
+              </div>
+
+              {/* LUCRO BRUTO */}
+              <div className="flex items-center justify-between border-t border-gray-300 pt-2 font-bold text-gray-900">
+                <span>(=) LUCRO BRUTO / MARGEM DE CONTRIBUIÇÃO</span>
+                <span>{currency(lucroBruto)}</span>
+              </div>
+
+              {/* DESPESAS OPERACIONAIS */}
+              <div className="flex items-center justify-between font-semibold text-gray-900 mt-3">
+                <span>(-) DESPESAS OPERACIONAIS</span>
+                <span>{currency(despesasOperacionais)}</span>
               </div>
             </div>
           </div>
@@ -421,13 +481,34 @@ export default function DRE() {
                 ) : (
                   dreData.categorias.map((c) => {
                     const row = dreData.valoresPorCategoriaMes[c.id] || {};
+                    const isVisible = categoriasVisiveis.has(c.id);
                     return (
                       <tr key={c.id} className="border-t border-gray-200">
-                        <td className="sticky left-0 z-10 bg-[#F3F3F3] py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200">{c.descricao || c.nome}</td>
+                        <td className="sticky left-0 z-10 bg-[#F3F3F3] py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isVisible}
+                              onChange={(e) => {
+                                const newSet = new Set(categoriasVisiveis);
+                                if (e.target.checked) {
+                                  newSet.add(c.id);
+                                } else {
+                                  newSet.delete(c.id);
+                                }
+                                setCategoriasVisiveis(newSet);
+                              }}
+                              className="w-3 h-3 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                            />
+                            <span className={!isVisible ? 'opacity-50' : ''}>{c.descricao || c.nome}</span>
+                          </div>
+                        </td>
                         {(dreData.months || []).map((m) => {
                           const v = row[m.key] || 0;
                           return (
-                            <td key={m.key} className="py-2 px-2 text-right text-gray-600">{v > 0 ? currency(v) : "—"}</td>
+                            <td key={m.key} className={`py-2 px-2 text-right ${!isVisible ? 'opacity-50 line-through' : 'text-gray-600'}`}>
+                              {v > 0 ? currency(v) : "—"}
+                            </td>
                           );
                         })}
                       </tr>
@@ -443,19 +524,19 @@ export default function DRE() {
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="text-xs text-gray-600 mb-1">(=) EBITDA</div>
-              <div className="text-lg font-semibold text-gray-900">{currency(ebitda)}</div>
+              <div className={`text-lg font-semibold ${ebitda >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(ebitda)}</div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="text-xs text-gray-600 mb-1">(=) RESULTADO LÍQUIDO DO EXERCÍCIO</div>
-              <div className="text-lg font-semibold text-gray-900">{currency(resultadoLiquido)}</div>
+              <div className={`text-lg font-semibold ${resultadoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(resultadoLiquido)}</div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="text-xs text-gray-600 mb-1">Margem de Contribuição</div>
-              <div className="text-lg font-semibold text-gray-900">{currency(resultadoBruto)}</div>
+              <div className={`text-lg font-semibold ${margemContribuicao >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(margemContribuicao)}</div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-xs text-gray-600 mb-1">Lucratividade</div>
-              <div className="text-lg font-semibold text-gray-900">{(lucratividadePct * 100).toFixed(1)}%</div>
+              <div className="text-xs text-gray-600 mb-1">Lucratividade (%)</div>
+              <div className={`text-lg font-semibold ${lucratividadePct >= 0 ? 'text-green-600' : 'text-red-600'}`}>{(lucratividadePct * 100).toFixed(1)}%</div>
             </div>
             <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="text-xs text-gray-600 mb-1">Ponto de Equilíbrio (Período)</div>

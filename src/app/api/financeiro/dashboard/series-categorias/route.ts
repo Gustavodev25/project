@@ -33,7 +33,8 @@ export async function GET(req: NextRequest) {
     const dataInicioParam = url.searchParams.get("dataInicio");
     const dataFimParam = url.searchParams.get("dataFim");
     const portadorIdParam = url.searchParams.get("portadorId");
-    const categoriaIdParam = url.searchParams.get("categoriaId");
+    const categoriaIdsParam = url.searchParams.get("categoriaIds");
+    const categoriaIds = categoriaIdsParam ? categoriaIdsParam.split(",").filter(Boolean) : [];
     const tipoParam = (url.searchParams.get("tipo") || "despesas").toLowerCase(); // despesas | receitas
 
     const now = new Date();
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
         ],
       };
       if (portadorIdParam) where.formaPagamentoId = String(portadorIdParam);
-      if (categoriaIdParam) where.categoriaId = String(categoriaIdParam);
+      if (categoriaIds.length > 0) where.categoriaId = { in: categoriaIds };
 
       const rows = await prisma.contaReceber.findMany({
         where,
@@ -109,7 +110,7 @@ export async function GET(req: NextRequest) {
       ],
     };
     if (portadorIdParam) where.formaPagamentoId = String(portadorIdParam);
-    if (categoriaIdParam) where.categoriaId = String(categoriaIdParam);
+    if (categoriaIds.length > 0) where.categoriaId = { in: categoriaIds };
 
     const rows = await prisma.contaPagar.findMany({
       where,

@@ -9,7 +9,7 @@ interface FinanceiroCategoriasAreaProps {
   dataInicioPersonalizada?: Date | null;
   dataFimPersonalizada?: Date | null;
   portadorId?: string | null;
-  categoriaId?: string | null; // se filtrar uma só, o gráfico mostra só ela
+  categoriasSelecionadas?: Set<string>; // Se filtrar categorias específicas, mostra apenas elas
   refreshKey?: number;
   tipo?: "despesas" | "receitas";
 }
@@ -33,7 +33,7 @@ export default function FinanceiroCategoriasArea({
   dataInicioPersonalizada = null,
   dataFimPersonalizada = null,
   portadorId = null,
-  categoriaId = null,
+  categoriasSelecionadas = new Set(),
   refreshKey = 0,
   tipo = "despesas",
 }: FinanceiroCategoriasAreaProps) {
@@ -53,7 +53,9 @@ export default function FinanceiroCategoriasArea({
           params.append('dataFim', dataFimPersonalizada.toISOString());
         }
         if (portadorId) params.append('portadorId', portadorId);
-        if (categoriaId) params.append('categoriaId', categoriaId);
+        if (categoriasSelecionadas.size > 0) {
+          params.append('categoriaIds', Array.from(categoriasSelecionadas).join(','));
+        }
         params.append('tipo', tipo);
         if (refreshKey) params.append('refresh', String(refreshKey));
 
@@ -70,7 +72,7 @@ export default function FinanceiroCategoriasArea({
     };
     load();
     return () => { aborted = true; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriaId, refreshKey, tipo]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, refreshKey, tipo]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
