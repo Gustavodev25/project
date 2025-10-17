@@ -76,36 +76,45 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('[Categorias GET] Iniciando requisição...');
+    
     const cookieStore = await cookies();
+    console.log('[Categorias GET] Cookies obtidos');
+    
     const sessionCookie = cookieStore.get("session");
 
     if (!sessionCookie?.value) {
+      console.log('[Categorias GET] Não autenticado - sem cookie de sessão');
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
+    console.log('[Categorias GET] Cookie de sessão encontrado');
+
     // Verificar o token JWT de sessão
     const session = await tryVerifySessionToken(sessionCookie.value);
+    console.log('[Categorias GET] Verificação de token concluída');
     
     if (!session) {
+      console.log('[Categorias GET] Sessão inválida');
       return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
     }
 
     const userId = session.sub;
-
-    console.log(`[Categorias GET] Buscando categorias para userId: ${userId}`);
+    console.log(`[Categorias GET] UserId: ${userId}`);
 
     // Buscar TODAS as categorias primeiro para debug
+    console.log('[Categorias GET] Buscando todas categorias...');
     const todasCategorias = await prisma.categoria.findMany({
       where: {
         userId: userId,
       },
     });
     
-    console.log(`[Categorias GET] Total de categorias no banco: ${todasCategorias.length}`);
-    console.log(`[Categorias GET] Categorias ativas: ${todasCategorias.filter(c => c.ativo).length}`);
-    console.log(`[Categorias GET] Categorias inativas: ${todasCategorias.filter(c => !c.ativo).length}`);
+    console.log(`[Categorias GET] Total no banco: ${todasCategorias.length}`);
+    console.log(`[Categorias GET] Ativas: ${todasCategorias.filter(c => c.ativo).length}`);
 
     // Buscar apenas categorias ativas com relacionamentos
+    console.log('[Categorias GET] Buscando categorias com relacionamentos...');
     const categorias = await prisma.categoria.findMany({
       where: {
         userId: userId,
@@ -134,9 +143,15 @@ export async function GET(request: NextRequest) {
       data: categorias,
     });
   } catch (error) {
-    console.error("Erro ao buscar categorias:", error);
+    console.error("[Categorias GET] ERRO CRÍTICO:", error);
+    console.error("[Categorias GET] Stack trace:", error instanceof Error ? error.stack : 'N/A');
+    console.error("[Categorias GET] Mensagem:", error instanceof Error ? error.message : String(error));
+    
     return NextResponse.json(
-      { error: "Erro ao buscar categorias" },
+      { 
+        error: "Erro ao buscar categorias",
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 }
     );
   }
