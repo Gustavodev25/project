@@ -4,6 +4,8 @@ import prisma from "@/lib/prisma";
 import { tryVerifySessionToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
+export const maxDuration = 60; // Timeout de 60s para Vercel
+export const dynamic = "force-dynamic"; // Evita cache estático
 
 export async function POST(request: NextRequest) {
   try {

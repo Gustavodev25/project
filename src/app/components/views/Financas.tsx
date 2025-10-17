@@ -207,6 +207,8 @@ export default function Financas() {
   const [contasReceber, setContasReceber] = useState<any[]>([]);
   const [pagePagar, setPagePagar] = useState(1);
   const [pageReceber, setPageReceber] = useState(1);
+  const [pageCategorias, setPageCategorias] = useState(1);
+  const [pageFormasPagamento, setPageFormasPagamento] = useState(1);
   const itemsPerPage = 15;
   const [isLoading, setIsLoading] = useState(false);
   
@@ -718,6 +720,26 @@ export default function Financas() {
   const paginatedContasPagar = contasPagarFiltradas.slice((pagePagar - 1) * itemsPerPage, pagePagar * itemsPerPage);
   const paginatedContasReceber = contasReceberFiltradas.slice((pageReceber - 1) * itemsPerPage, pageReceber * itemsPerPage);
 
+  // Paginação para categorias e formas de pagamento
+  const totalCategorias = categorias.length;
+  const totalFormasPagamento = formasPagamento.length;
+  const totalPagesCategorias = Math.max(1, Math.ceil(totalCategorias / itemsPerPage));
+  const totalPagesFormasPagamento = Math.max(1, Math.ceil(totalFormasPagamento / itemsPerPage));
+  
+  // Flatten categorias para paginação (incluindo subcategorias)
+  const flattenedCategorias: any[] = [];
+  categorias.filter(cat => !cat.categoriaPaiId).forEach(cat => {
+    flattenedCategorias.push(cat);
+    if (cat.subCategorias && cat.subCategorias.length > 0) {
+      cat.subCategorias.forEach((subCat: any) => flattenedCategorias.push(subCat));
+    }
+  });
+  const totalCategoriasFlatted = flattenedCategorias.length;
+  const totalPagesCategoriasFlatted = Math.max(1, Math.ceil(totalCategoriasFlatted / itemsPerPage));
+  
+  const paginatedCategorias = flattenedCategorias.slice((pageCategorias - 1) * itemsPerPage, pageCategorias * itemsPerPage);
+  const paginatedFormasPagamento = formasPagamento.slice((pageFormasPagamento - 1) * itemsPerPage, pageFormasPagamento * itemsPerPage);
+
   useEffect(() => {
     // Garantir que a página atual exista após alterações de dados
     if (pagePagar > totalPagesPagar) setPagePagar(totalPagesPagar);
@@ -725,6 +747,12 @@ export default function Financas() {
   useEffect(() => {
     if (pageReceber > totalPagesReceber) setPageReceber(totalPagesReceber);
   }, [totalPagesReceber]);
+  useEffect(() => {
+    if (pageCategorias > totalPagesCategoriasFlatted) setPageCategorias(totalPagesCategoriasFlatted);
+  }, [totalPagesCategoriasFlatted]);
+  useEffect(() => {
+    if (pageFormasPagamento > totalPagesFormasPagamento) setPageFormasPagamento(totalPagesFormasPagamento);
+  }, [totalPagesFormasPagamento]);
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
@@ -1475,7 +1503,7 @@ export default function Financas() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {formasPagamento.map((forma) => (
+                      {paginatedFormasPagamento.map((forma) => (
                         <tr key={forma.id}>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">
@@ -1528,6 +1556,13 @@ export default function Financas() {
                       ))}
                     </tbody>
                   </table>
+                  <VendasPagination
+                    currentPage={pageFormasPagamento}
+                    totalPages={Math.max(1, totalPagesFormasPagamento)}
+                    totalItems={totalFormasPagamento}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={(p) => setPageFormasPagamento(p)}
+                  />
                 </div>
               ) : (
                 <EmptyState
@@ -1561,21 +1596,20 @@ export default function Financas() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {categorias.filter(cat => !cat.categoriaPaiId).map((cat) => (
-                        <React.Fragment key={cat.id}>
-                          <tr className={cat.categoriaPaiId ? "bg-gray-50" : ""}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {cat.categoriaPaiId ? (
-                                <span className="flex items-center">
-                                  <svg className="w-4 h-4 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                  </svg>
-                                  {cat.descricao || cat.nome}
-                                </span>
-                              ) : (
-                                <span className="font-semibold">{cat.descricao || cat.nome}</span>
-                              )}
-                            </td>
+                      {paginatedCategorias.map((cat) => (
+                        <tr key={cat.id} className={cat.categoriaPaiId ? "bg-blue-50" : ""}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {cat.categoriaPaiId ? (
+                              <span className="flex items-center pl-8">
+                                <svg className="w-4 h-4 text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                </svg>
+                                {cat.descricao || cat.nome}
+                              </span>
+                            ) : (
+                              <span className="font-semibold">{cat.descricao || cat.nome}</span>
+                            )}
+                          </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cat.tipo}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${cat.ativo ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
@@ -1605,50 +1639,16 @@ export default function Financas() {
                               </div>
                             </td>
                           </tr>
-                          {cat.subCategorias && cat.subCategorias.map((subCat: any) => (
-                            <tr key={subCat.id} className="bg-blue-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                <span className="flex items-center pl-8">
-                                  <svg className="w-4 h-4 text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                                  </svg>
-                                  {subCat.descricao || subCat.nome}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{subCat.tipo}</td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${subCat.ativo ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                                  {subCat.ativo ? "Ativo" : "Inativo"}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                <div className="flex items-center space-x-2">
-                                  <button
-                                    onClick={() => handleEdit(subCat)}
-                                    className="text-orange-600 hover:text-orange-900 transition-colors"
-                                    title="Editar"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    onClick={() => handleDelete(subCat)}
-                                    className="text-red-600 hover:text-red-900 transition-colors"
-                                    title="Excluir"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
+                  <VendasPagination
+                    currentPage={pageCategorias}
+                    totalPages={Math.max(1, totalPagesCategoriasFlatted)}
+                    totalItems={totalCategoriasFlatted}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={(p) => setPageCategorias(p)}
+                  />
                 </div>
               ) : (
                 <EmptyState
