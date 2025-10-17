@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:https": "next dev --turbopack --experimental-https",
-    "build": "next build --turbopack",
+    "build": "prisma generate && next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "test:auto-sync": "npx ts-node scripts/test-auto-sync.ts"
+    "test:auto-sync": "npx ts-node scripts/test-auto-sync.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
