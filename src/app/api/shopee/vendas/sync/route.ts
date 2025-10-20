@@ -343,10 +343,19 @@ export async function POST(req: NextRequest) {
           select: { dataVenda: true },
         });
 
-        const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
-        const since = ultimaVenda ? new Date(ultimaVenda.dataVenda.getTime() - 24 * 60 * 60 * 1000) : sixMonthsAgo;
-
-        console.log(`[Shopee Sync] Conta ${conta.shop_id}: buscando desde ${since.toISOString()}`);
+        // Determinar período de busca
+        let since: Date;
+        const isFirstSync = !ultimaVenda;
+        
+        if (isFirstSync) {
+          // PRIMEIRA SINCRONIZAÇÃO: buscar TODO o histórico desde 2024-01-01
+          since = new Date("2024-01-01T00:00:00.000Z");
+          console.log(`[Shopee Sync] 🚀 PRIMEIRA SINCRONIZAÇÃO - Conta ${conta.shop_id}: buscando TODAS as vendas desde ${since.toISOString()}`);
+        } else {
+          // SINCRONIZAÇÃO INCREMENTAL: buscar desde 1 dia antes da última venda
+          since = new Date(ultimaVenda.dataVenda.getTime() - 24 * 60 * 60 * 1000);
+          console.log(`[Shopee Sync] 📊 Sincronização incremental - Conta ${conta.shop_id}: buscando desde ${since.toISOString()} (${existingIds.size} vendas já existem)`);
+        }
 
         const ordersFromAccount = await fetchAllShopeeOrdersSince(
           { 
@@ -532,7 +541,7 @@ export async function POST(req: NextRequest) {
         for (let i = 0; i < vendaRecords.length; i += SAVE_BATCH_SIZE) {
           const batch = vendaRecords.slice(i, i + SAVE_BATCH_SIZE);
           await Promise.all(
-            batch.map(async (record) => {
+            batch.map(async (record, batchIndex) => {
               await prisma.shopeeVenda.upsert({
                 where: { orderId: record.orderId },
                 update: {
@@ -560,19 +569,20 @@ export async function POST(req: NextRequest) {
                 },
                 create: record,
               });
+              
+              // Enviar progresso em tempo real após cada venda salva
+              const currentProgress = i + batchIndex + 1;
+              sendProgressToUser(userId, {
+                type: "sync_progress",
+                message: `Salvando vendas... ${currentProgress} de ${vendaRecords.length}`,
+                current: currentProgress,
+                total: vendaRecords.length,
+                fetched: currentProgress,
+                expected: vendaRecords.length
+              });
             })
           );
           totalSaved += batch.length;
-          
-          // Enviar progresso durante salvamento em lote
-          sendProgressToUser(userId, {
-            type: "sync_progress",
-            message: `Salvando vendas: ${totalSaved}/${vendaRecords.length}`,
-            current: accountIndex,
-            total: contasAtualizadas.length,
-            fetched: totalSaved,
-            expected: allOrdersPayload.length
-          });
         }
 
       } catch (error) {

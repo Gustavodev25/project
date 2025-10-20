@@ -113,6 +113,7 @@ function convertLogisticTypeName(logisticType: string | null): string | null {
 
   if (logisticType === "xd_drop_off") return "Agência";
   if (logisticType === "self_service") return "FLEX";
+  if (logisticType === "cross_docking") return "Coleta";
 
   return logisticType;
 }
@@ -397,9 +398,26 @@ async function fetchOrdersForAccount(
     return { orders: results, expectedTotal: specificOrderIds.length };
   }
 
-  // Caso contrário, buscar das últimas 48 horas (verificação rápida)
+  // Verificar se já existem vendas no banco para esta conta
+  const existingVendasCount = await prisma.meliVenda.count({
+    where: { meliAccountId: account.id }
+  });
+  
+  const isFirstSync = existingVendasCount === 0;
+  
+  // Determinar período de busca
   const now = new Date();
-  const last48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+  let dateFrom: Date;
+  
+  if (isFirstSync) {
+    // PRIMEIRA SINCRONIZAÇÃO: buscar TODO o histórico desde 2024-01-01
+    dateFrom = new Date("2024-01-01T00:00:00.000Z");
+    console.log(`[Sync] 🚀 PRIMEIRA SINCRONIZAÇÃO - Buscando TODAS as vendas desde ${dateFrom.toISOString()}`);
+  } else {
+    // SINCRONIZAÇÃO INCREMENTAL: buscar apenas últimas 48 horas
+    dateFrom = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+    console.log(`[Sync] 📊 Sincronização incremental - Buscando vendas das últimas 48h (${existingVendasCount} vendas já existem)`);
+  }
   
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
@@ -407,14 +425,14 @@ async function fetchOrdersForAccount(
 
   while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
-    // Usar endpoint /orders/search com filtro de data das últimas 48 horas
+    // Usar endpoint /orders/search com filtro de data
     const url = new URL(`${MELI_API_BASE}/orders/search`);
     url.searchParams.set("seller", account.ml_user_id.toString());
     url.searchParams.set("sort", "date_desc");
     url.searchParams.set("limit", limit.toString());
     url.searchParams.set("offset", offset.toString());
-    // Filtrar vendas das últimas 48 horas
-    url.searchParams.set("order.date_created.from", last48Hours.toISOString());
+    // Filtrar vendas do período determinado
+    url.searchParams.set("order.date_created.from", dateFrom.toISOString());
     url.searchParams.set("order.date_created.to", now.toISOString());
 
     const response = await fetch(url.toString(), { headers });
@@ -502,11 +520,12 @@ async function fetchOrdersForAccount(
     offset += fetched;
     
     // Debug: log para verificar paginação
-    console.log(`[meli][vendas] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (últimas 48h)`);
+    const periodLabel = isFirstSync ? "desde 2024-01-01" : "últimas 48h";
+    console.log(`[meli][vendas] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (${periodLabel})`);
     
     // Debug: verificar se as vendas estão sendo processadas
     if (fetched > 0) {
-      console.log(`[DEBUG] Processando ${fetched} pedidos da conta ${account.ml_user_id} das últimas 48 horas`);
+      console.log(`[DEBUG] Processando ${fetched} pedidos da conta ${account.ml_user_id} (${periodLabel})`);
     }
     
     // Enviar progresso em tempo real via SSE
@@ -614,21 +633,23 @@ async function saveVendasBatch(
   for (let i = 0; i < orders.length; i += batchSize) {
     const batch = orders.slice(i, i + batchSize);
     
-    // Enviar progresso do lote atual
-    sendProgressToUser(userId, {
-      type: "sync_progress",
-      message: `Salvando lote ${Math.floor(i / batchSize) + 1} de ${Math.ceil(orders.length / batchSize)} (${batch.length} vendas)`,
-      current: i + batch.length,
-      total: orders.length,
-      fetched: saved,
-      expected: orders.length
-    });
-    
     // Processar lote
-    const batchPromises = batch.map(async (order) => {
+    const batchPromises = batch.map(async (order, batchIndex) => {
       try {
         await saveVendaToDatabase(order, userId, skuCache);
         saved++;
+        
+        // Enviar progresso em tempo real após cada venda salva
+        const currentProgress = i + batchIndex + 1;
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Salvando vendas... ${currentProgress} de ${orders.length}`,
+          current: currentProgress,
+          total: orders.length,
+          fetched: currentProgress,
+          expected: orders.length
+        });
+        
         return { success: true, orderId: order.order.id };
       } catch (error) {
         errors++;
