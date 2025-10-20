@@ -13,6 +13,7 @@ import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutos de tempo de execução máximo (limite do plano hobby)
+const MAX_VENDAS_POR_CONTA = 5000; // Limite de 5.000 vendas por conta para melhor performance
 
 // Tipos auxiliares
 type SyncError = { accountId: string; shopId: string; message: string; };
@@ -172,7 +173,7 @@ async function fetchAndEnrichShopeeOrders(
   return enrichedOrders;
 }
 
-async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date }, since: Date) {
+async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string; access_token: string; refresh_token: string; expires_at: Date }, since: Date, userId: string) {
   const allOrders: any[] = [];
   const now = new Date();
   const MAX_WINDOW_DAYS = 15;
@@ -180,6 +181,19 @@ async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string;
   let windowStart = since;
 
   while (windowStart < now) {
+    // Verificar se atingiu o limite de 5.000 vendas
+    if (allOrders.length >= MAX_VENDAS_POR_CONTA) {
+      console.log(`[Shopee Sync] Limite de ${MAX_VENDAS_POR_CONTA} vendas atingido para conta ${account.shop_id}. Parando busca.`);
+
+      sendProgressToUser(userId, {
+        type: "sync_warning",
+        message: `Limite de 5.000 vendas por conta atingido para loja ${account.shop_id}. As vendas mais recentes foram priorizadas.`,
+        errorCode: "MAX_VENDAS_REACHED"
+      });
+
+      break;
+    }
+
     const windowEnd = new Date(Math.min(
       windowStart.getTime() + MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000,
       now.getTime()
@@ -189,8 +203,19 @@ async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string;
 
     try {
       const windowOrders = await fetchAndEnrichShopeeOrders(account, windowStart, windowEnd);
-      allOrders.push(...windowOrders);
-      console.log(`[Shopee Sync] ${windowOrders.length} pedidos encontrados na janela.`);
+
+      // Adicionar apenas até o limite
+      const remainingSlots = MAX_VENDAS_POR_CONTA - allOrders.length;
+      const ordersToAdd = windowOrders.slice(0, remainingSlots);
+      allOrders.push(...ordersToAdd);
+
+      console.log(`[Shopee Sync] ${ordersToAdd.length} pedidos adicionados (total: ${allOrders.length}/${MAX_VENDAS_POR_CONTA}).`);
+
+      // Se adicionou menos que o disponível, atingiu o limite
+      if (ordersToAdd.length < windowOrders.length) {
+        console.log(`[Shopee Sync] Limite atingido. ${windowOrders.length - ordersToAdd.length} pedidos não foram incluídos.`);
+        break;
+      }
     } catch (error) {
       console.error(`[Shopee Sync] Erro ao buscar janela para conta ${account.shop_id}:`, error);
     }
@@ -229,9 +254,9 @@ export async function POST(req: NextRequest) {
     // Enviar evento de início da sincronização
     sendProgressToUser(userId, {
       type: "sync_start",
-      message: accountIds && accountIds.length > 0 
-        ? `Iniciando sincronização de ${accountIds.length} conta(s) do Shopee...`
-        : "Iniciando sincronização de vendas do Shopee...",
+      message: accountIds && accountIds.length > 0
+        ? `Conectando ao Shopee (${accountIds.length} conta(s))...`
+        : "Conectando ao Shopee...",
       current: 0,
       total: 0,
       fetched: 0,
@@ -358,14 +383,15 @@ export async function POST(req: NextRequest) {
         }
 
         const ordersFromAccount = await fetchAllShopeeOrdersSince(
-          { 
-            id: conta.id, 
-            shop_id: conta.shop_id, 
+          {
+            id: conta.id,
+            shop_id: conta.shop_id,
             access_token: conta.access_token,
             refresh_token: conta.refresh_token,
             expires_at: conta.expires_at
           },
-          since
+          since,
+          userId
         );
 
         // Filtrar vendas que já existem no banco
@@ -574,7 +600,7 @@ export async function POST(req: NextRequest) {
               const currentProgress = i + batchIndex + 1;
               sendProgressToUser(userId, {
                 type: "sync_progress",
-                message: `Salvando vendas... ${currentProgress} de ${vendaRecords.length}`,
+                message: `Salvando no banco de dados: ${currentProgress} de ${vendaRecords.length} vendas`,
                 current: currentProgress,
                 total: vendaRecords.length,
                 fetched: currentProgress,

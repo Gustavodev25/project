@@ -448,10 +448,16 @@ export default function TabelaVendas({
     return (
       <button
         onClick={() => {
-          if (platform === "Mercado Livre") {
-            connect(); // Conectar SSE antes de sincronizar
+          // Conectar SSE antes de sincronizar para TODAS as plataformas
+          if (platform === "Mercado Livre" || platform === "Shopee") {
+            connect();
+            // Aguardar um pouco para SSE conectar antes de iniciar sincronização
+            setTimeout(() => {
+              handleSyncOrders();
+            }, 500);
+          } else {
+            handleSyncOrders();
           }
-          handleSyncOrders();
         }}
         disabled={isSyncing}
         className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

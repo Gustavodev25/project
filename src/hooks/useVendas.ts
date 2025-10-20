@@ -159,17 +159,26 @@ export function useVendas(platform: string = "Mercado Livre") {
 
   const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>) => {
     try {
+      console.log(`[useVendas] 🚀 Iniciando sincronização de vendas para ${platform}`);
       setIsSyncing(true);
       setIsTableLoading(true);
       setSyncProgress({ fetched: 0, expected: 0 });
       setSyncErrors([]);
 
-      // Conectar ao SSE para progresso em tempo real (Mercado Livre e Shopee)
+      // SSE já deve estar conectado pelo botão (com delay de 500ms)
+      // Apenas garantir que está conectado
       if (platform === "Mercado Livre" || platform === "Shopee") {
-        try {
-          connect();
-        } catch (error) {
-          console.warn('[Sync] SSE não disponível, continuando sem progresso em tempo real:', error);
+        if (!isConnected) {
+          console.log('[Sync] SSE não está conectado, conectando agora...');
+          try {
+            connect();
+            // Aguardar conexão estabelecer
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (error) {
+            console.warn('[Sync] SSE não disponível, continuando sem progresso em tempo real:', error);
+          }
+        } else {
+          console.log('[Sync] SSE já está conectado ✓');
         }
       }
 

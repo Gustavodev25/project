@@ -6,6 +6,7 @@ import { useSmartDropdown } from "@/hooks/useSmartDropdown";
 import FiltrosDashboard, { FiltroPeriodo } from "./FiltrosDashboard";
 import FiltrosDashboardExtra, { type FiltroCanal, type FiltroStatus, type FiltroTipoAnuncio, type FiltroModalidadeEnvio } from "./FiltrosDashboardExtra";
 import FiltroSKU, { type FiltroAgrupamentoSKU } from "./FiltroSKU";
+import ModalSyncVendasDashboard from "./ModalSyncVendasDashboard";
 
 interface HeaderDashboardProps {
   periodoAtivo: FiltroPeriodo;
@@ -45,9 +46,8 @@ export default function HeaderDashboard({
   onAccountChange,
 }: HeaderDashboardProps) {
   const router = useRouter();
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [showSyncDropdown, setShowSyncDropdown] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [checkMessage, setCheckMessage] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<'todos' | 'mercado_livre' | 'shopee'>('todos');
   const syncDropdown = useSmartDropdown<HTMLButtonElement>({
     isOpen: showSyncDropdown,
@@ -102,73 +102,9 @@ export default function HeaderDashboard({
     return () => { aborted = true; };
   }, [showContasDropdown]);
 
-  const handleCheckNew = async () => {
-    try {
-      setCheckMessage(null);
-      setIsSyncing(true);
-
-      let message = '';
-      let totalNew = 0;
-
-      // Verificar Mercado Livre
-      if (selectedPlatform === 'todos' || selectedPlatform === 'mercado_livre') {
-        const resMeli = await fetch('/api/meli/vendas/check', { cache: 'no-store', credentials: 'include' });
-        if (resMeli.ok) {
-          const dataMeli = await resMeli.json();
-          const countMeli = dataMeli?.totals?.new || 0;
-          totalNew += countMeli;
-          if (countMeli > 0) {
-            message += `Mercado Livre: ${countMeli} nova(s)\n`;
-          }
-        }
-      }
-
-      // Verificar Shopee
-      if (selectedPlatform === 'todos' || selectedPlatform === 'shopee') {
-        const resShopee = await fetch('/api/shopee/vendas/check', { cache: 'no-store', credentials: 'include' });
-        if (resShopee.ok) {
-          const dataShopee = await resShopee.json();
-          const countShopee = dataShopee?.totals?.new || 0;
-          totalNew += countShopee;
-          if (countShopee > 0) {
-            message += `Shopee: ${countShopee} nova(s)\n`;
-          }
-        }
-      }
-
-      setCheckMessage(totalNew === 0 ? 'Nenhuma venda nova encontrada' : message.trim());
-    } catch (e) {
-      setCheckMessage('Erro ao verificar novas vendas');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleSyncNow = async () => {
-    try {
-      setIsSyncing(true);
-
-      // Sincronizar Mercado Livre
-      if (selectedPlatform === 'todos' || selectedPlatform === 'mercado_livre') {
-        const resMeli = await fetch('/api/meli/vendas/sync', { method: 'POST', cache: 'no-store', credentials: 'include' });
-        if (!resMeli.ok) throw new Error(`HTTP ${resMeli.status}`);
-        await resMeli.json();
-      }
-
-      // Sincronizar Shopee
-      if (selectedPlatform === 'todos' || selectedPlatform === 'shopee') {
-        const resShopee = await fetch('/api/shopee/vendas/sync', { method: 'POST', cache: 'no-store', credentials: 'include' });
-        if (!resShopee.ok) throw new Error(`HTTP ${resShopee.status}`);
-        await resShopee.json();
-      }
-
-      onForceRefresh();
-      setShowSyncDropdown(false);
-    } catch (e) {
-      // ignore
-    } finally {
-      setIsSyncing(false);
-    }
+  const handleSyncComplete = () => {
+    // Recarregar dados do dashboard após sincronização
+    onForceRefresh();
   };
 
   return (
@@ -186,35 +122,35 @@ export default function HeaderDashboard({
           <div className="relative">
             <button
               ref={syncDropdown.triggerRef}
-              onClick={() => setShowSyncDropdown(!showSyncDropdown)}
-              className={`inline-flex items-center gap-3 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+              onClick={() => {
+                setShowSyncDropdown(!showSyncDropdown);
+                if (!showSyncDropdown) {
+                  setShowSyncModal(false);
+                }
+              }}
+              className={`inline-flex items-center gap-3 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm ${
                 showSyncDropdown 
                   ? "bg-orange-600 border-orange-600 text-white ring-2 ring-orange-200" 
                   : "bg-orange-500 border-orange-500 text-white hover:bg-orange-600 hover:border-orange-600"
               }`}
-              disabled={isSyncing}
             >
-              {isSyncing ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-              ) : (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
-                >
-                  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-                  <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
-                  <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
-                </svg>
-              )}
-              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar vendas'}</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
+              >
+                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
+                <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
+              </svg>
+              <span>Sincronizar vendas</span>
             </button>
             {syncDropdown.isVisible && (
               <div 
@@ -260,37 +196,32 @@ export default function HeaderDashboard({
                     </div>
                   </div>
 
-                  {/* Botões de Ação */}
-                  <div className="space-y-2">
-                    <button
-                      onClick={handleCheckNew}
-                      className="w-full inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                      </svg>
-                      <span>Verificar novas vendas</span>
-                    </button>
-                    <button
-                      onClick={handleSyncNow}
-                      className="w-full inline-flex items-center gap-2 rounded-md border border-orange-500 bg-orange-500 px-3 py-2 text-xs font-medium text-white hover:bg-orange-600 transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20,6 9,17 4,12"/>
-                      </svg>
-                      <span>Sincronizar novas vendas</span>
-                    </button>
-                  </div>
-
-                  {/* Mensagem de Resultado */}
-                  {checkMessage && (
-                    <div className="text-[11px] text-gray-600 bg-gray-50 p-2 rounded-md whitespace-pre-line">{checkMessage}</div>
-                  )}
+                  {/* Botão de Sincronizar */}
+                  <button
+                    onClick={() => {
+                      setShowSyncDropdown(false);
+                      setShowSyncModal(true);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-orange-500 bg-orange-500 px-3 py-2 text-xs font-medium text-white hover:bg-orange-600 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20,6 9,17 4,12"/>
+                    </svg>
+                    <span>Iniciar Sincronização</span>
+                  </button>
                 </div>
               </div>
             )}
           </div>
         </div>
+
+        {/* Modal de Sincronização */}
+        <ModalSyncVendasDashboard
+          isOpen={showSyncModal}
+          onClose={() => setShowSyncModal(false)}
+          selectedPlatform={selectedPlatform}
+          onSyncComplete={handleSyncComplete}
+        />
       </div>
 
       {/* Filtros e Contas */}

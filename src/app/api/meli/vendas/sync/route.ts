@@ -14,7 +14,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
-const MAX_OFFSET = 10000; // Limite máximo da API do Mercado Livre
+const MAX_OFFSET = 5000; // Limite de 5.000 vendas por conta para melhor performance
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -343,6 +343,91 @@ type SkuCacheEntry = {
   tipo: string | null;
 };
 
+/**
+ * Verifica se um erro HTTP é temporário e pode ser retentado
+ */
+function isRetryableError(status: number): boolean {
+  return [429, 500, 502, 503, 504].includes(status);
+}
+
+/**
+ * Aguarda um tempo específico (exponential backoff)
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Faz uma requisição HTTP com retry automático para erros temporários
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries: number = 3,
+  userId?: string
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      // Se sucesso ou erro não-retryable, retorna imediatamente
+      if (response.ok || !isRetryableError(response.status)) {
+        return response;
+      }
+
+      // Erro retryable - tentar novamente
+      lastError = new Error(`HTTP ${response.status}`);
+
+      // Calcular delay com exponential backoff
+      const baseDelay = 1000; // 1 segundo
+      const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+      const jitter = Math.random() * 1000; // até 1s de jitter
+      const totalDelay = delay + jitter;
+
+      console.warn(
+        `[Retry] Erro ${response.status} em ${url.substring(0, 100)}... ` +
+        `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
+      );
+
+      // Enviar aviso via SSE
+      if (userId) {
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro temporário ${response.status} da API do Mercado Livre. Tentando novamente (${attempt + 1}/${maxRetries})...`,
+          errorCode: response.status.toString()
+        });
+      }
+
+      // Aguardar antes de tentar novamente
+      await sleep(totalDelay);
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Se não for erro de rede, não tenta novamente
+      if (attempt === maxRetries - 1) {
+        throw lastError;
+      }
+
+      const baseDelay = 1000;
+      const delay = baseDelay * Math.pow(2, attempt);
+      const jitter = Math.random() * 1000;
+      const totalDelay = delay + jitter;
+
+      console.warn(
+        `[Retry] Erro de rede em ${url.substring(0, 100)}... ` +
+        `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
+      );
+
+      await sleep(totalDelay);
+    }
+  }
+
+  throw lastError || new Error('Falha após múltiplas tentativas');
+}
+
 async function fetchOrdersForAccount(
   account: MeliAccount,
   userId: string,
@@ -354,14 +439,15 @@ async function fetchOrdersForAccount(
   // Se houver IDs específicos, buscar apenas esses pedidos
   if (specificOrderIds && specificOrderIds.length > 0) {
     console.log(`[Sync] Buscando ${specificOrderIds.length} pedidos específicos para conta ${account.ml_user_id}`);
-    
+
     const detailedOrders = await Promise.all(
       specificOrderIds.map(async (orderId) => {
         try {
-          const res = await fetch(`${MELI_API_BASE}/orders/${orderId}`, { headers });
+          const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${orderId}`, { headers }, 3, userId);
           if (!res.ok) return null;
           return await res.json();
-        } catch {
+        } catch (error) {
+          console.error(`[Sync] Erro ao buscar pedido específico ${orderId}:`, error);
           return null;
         }
       })
@@ -372,10 +458,11 @@ async function fetchOrdersForAccount(
         const shippingId = order?.shipping?.id;
         if (!shippingId) return null;
         try {
-          const res = await fetch(`${MELI_API_BASE}/shipments/${shippingId}`, { headers });
+          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
           if (!res.ok) return null;
           return await res.json();
-        } catch {
+        } catch (error) {
+          console.error(`[Sync] Erro ao buscar envio ${shippingId}:`, error);
           return null;
         }
       })
@@ -423,6 +510,9 @@ async function fetchOrdersForAccount(
   let total = Number.POSITIVE_INFINITY;
   let expectedTotal = 0;
 
+  // Contador de tipos de logística para debug
+  const logisticStats = new Map<string, number>();
+
   while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
     // Usar endpoint /orders/search com filtro de data
@@ -435,7 +525,7 @@ async function fetchOrdersForAccount(
     url.searchParams.set("order.date_created.from", dateFrom.toISOString());
     url.searchParams.set("order.date_created.to", now.toISOString());
 
-    const response = await fetch(url.toString(), { headers });
+    const response = await fetchWithRetry(url.toString(), { headers }, 3, userId);
     let payload: any = null;
     try {
       payload = await response.json();
@@ -463,19 +553,15 @@ async function fetchOrdersForAccount(
           const id = order?.id;
           if (!id) return order;
           try {
-            const res = await fetch(`${MELI_API_BASE}/orders/${id}`, { headers });
+            const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${id}`, { headers }, 3, userId);
             if (!res.ok) {
-              // Enviar aviso de erro HTTP via SSE
-              sendProgressToUser(userId, {
-                type: "sync_warning",
-                message: `Erro ${res.status} ao buscar detalhes do pedido ${id}`,
-                errorCode: res.status.toString()
-              });
+              // Aviso já foi enviado pelo fetchWithRetry
               return order;
             }
             const det = await res.json();
             return { ...order, ...det };
-          } catch {
+          } catch (error) {
+            console.error(`[Sync] Erro ao buscar detalhes do pedido ${id}:`, error);
             return order;
           }
         }),
@@ -485,18 +571,14 @@ async function fetchOrdersForAccount(
           const shippingId = order?.shipping?.id;
           if (!shippingId) return null;
           try {
-            const res = await fetch(`${MELI_API_BASE}/shipments/${shippingId}`, { headers });
+            const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
             if (!res.ok) {
-              // Enviar aviso de erro HTTP via SSE
-              sendProgressToUser(userId, {
-                type: "sync_warning",
-                message: `Erro ${res.status} ao buscar detalhes do envio ${shippingId}`,
-                errorCode: res.status.toString()
-              });
+              // Aviso já foi enviado pelo fetchWithRetry
               return null;
             }
             return await res.json();
-          } catch {
+          } catch (error) {
+            console.error(`[Sync] Erro ao buscar detalhes do envio ${shippingId}:`, error);
             return null;
           }
         }),
@@ -506,6 +588,20 @@ async function fetchOrdersForAccount(
     detailedOrders.forEach((order: any, idx: number) => {
       const shipment = shipments[idx] ?? undefined;
       const freight = calculateFreight(order, shipment);
+
+      // Debug: Log vendas com cross_docking e contar tipos de logística
+      const logisticTypeRaw = shipment?.logistic_type || order?.shipping?.mode || 'sem_tipo';
+      const count = logisticStats.get(logisticTypeRaw) || 0;
+      logisticStats.set(logisticTypeRaw, count + 1);
+
+      if (logisticTypeRaw === 'cross_docking') {
+        console.log(`[DEBUG CROSS_DOCKING] Encontrada venda com cross_docking!`);
+        console.log(`  Order ID: ${order?.id}`);
+        console.log(`  logistic_type (shipment): ${shipment?.logistic_type}`);
+        console.log(`  shipping.mode (order): ${order?.shipping?.mode}`);
+        console.log(`  Convertido para: ${freight.logisticType}`);
+      }
+
       results.push({
         accountId: account.id,
         accountNickname: account.nickname,
@@ -551,13 +647,24 @@ async function fetchOrdersForAccount(
   // Avisar se atingiu o limite máximo de offset
   if (offset >= MAX_OFFSET && total > MAX_OFFSET) {
     const vendasRestantes = total - MAX_OFFSET;
-    console.log(`[meli][vendas] AVISO: Limite de ${MAX_OFFSET} vendas atingido. ${vendasRestantes} vendas não foram sincronizadas.`);
-    
+    console.log(`[meli][vendas] AVISO: Limite de ${MAX_OFFSET} vendas por conta atingido. ${vendasRestantes} vendas não foram sincronizadas.`);
+
     sendProgressToUser(userId, {
       type: "sync_warning",
-      message: `Limite da API atingido: sincronizadas ${MAX_OFFSET} das ${total} vendas. Para sincronizar todas, use filtros de data mais específicos.`,
+      message: `Limite de 5.000 vendas por conta atingido. Sincronizadas ${MAX_OFFSET} de ${total} vendas disponíveis. As vendas mais recentes foram priorizadas.`,
       errorCode: "MAX_OFFSET_REACHED"
     });
+  }
+
+  // Log de estatísticas de tipos de logística
+  console.log(`[SYNC STATS] Conta ${account.ml_user_id} - Tipos de logística encontrados:`);
+  const sortedStats = Array.from(logisticStats.entries()).sort((a, b) => b[1] - a[1]);
+  sortedStats.forEach(([type, count]) => {
+    console.log(`  ${type}: ${count} vendas`);
+  });
+
+  if (!logisticStats.has('cross_docking')) {
+    console.log(`[SYNC INFO] ⚠️ Nenhuma venda com cross_docking (Coleta) foi encontrada na API do Mercado Livre para esta conta.`);
   }
 
   return { orders: results, expectedTotal };
@@ -643,7 +750,7 @@ async function saveVendasBatch(
         const currentProgress = i + batchIndex + 1;
         sendProgressToUser(userId, {
           type: "sync_progress",
-          message: `Salvando vendas... ${currentProgress} de ${orders.length}`,
+          message: `Salvando no banco de dados: ${currentProgress} de ${orders.length} vendas`,
           current: currentProgress,
           total: orders.length,
           fetched: currentProgress,
@@ -733,7 +840,12 @@ async function saveVendaToDatabase(
     const latitude = toFiniteNumber((receiverAddress as any)?.latitude ?? (receiverAddress as any)?.geo?.latitude);
     const longitude = toFiniteNumber((receiverAddress as any)?.longitude ?? (receiverAddress as any)?.geo?.longitude);
 
-    const saleFee = orderItems.reduce((acc, item) => acc + (toFiniteNumber(item?.sale_fee) ?? 0), 0);
+    // CORREÇÃO: sale_fee vem POR UNIDADE da API, então precisa multiplicar pela quantidade
+    const saleFee = orderItems.reduce((acc, item) => {
+      const fee = toFiniteNumber(item?.sale_fee) ?? 0;
+      const qty = toFiniteNumber(item?.quantity) ?? 1;
+      return acc + (fee * qty);
+    }, 0);
 
     const unitario = toFiniteNumber(orderItem?.unit_price) ??
       (quantity > 0 && totalAmount !== null ? roundCurrency(totalAmount / quantity) : 0);
@@ -1052,7 +1164,7 @@ export async function POST(req: NextRequest) {
   // Enviar evento de início da sincronização
   sendProgressToUser(userId, {
     type: "sync_start",
-    message: "Iniciando sincronização de vendas do MercadoLivre...",
+    message: "Conectando ao Mercado Livre...",
     current: 0,
     total: 0,
     fetched: 0,

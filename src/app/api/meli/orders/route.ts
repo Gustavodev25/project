@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
 import { refreshMeliAccountToken } from "@/lib/meli";
+import { calcularFreteAdjust } from "@/lib/frete";
 import type { MeliAccount } from "@prisma/client";
 
 export const runtime = "nodejs";

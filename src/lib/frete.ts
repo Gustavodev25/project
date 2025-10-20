@@ -26,19 +26,20 @@ function normalizeLogisticType(lt: string | null): string {
 }
 
 /**
- * Réplica fiel do SQL:
- * - self_service:
+ * Cálculo de ajuste de frete:
+ * - self_service / flex:
  *    - se round(base_cost - shipment_list_cost,2) == 0:
  *         unitário < 79 → 15.90 ; caso contrário → 1.59
  *      senão: diff (base_cost - shipment_list_cost)
- * - não self_service e unitário >= 79 e tipo ∈ {drop_off, xd_drop_off, fulfillment, cross_docking}:
- *      (shipment_list_cost - shipment_cost)
- * - unitário < 79:
- *      0
- * - caso contrário:
- *      999
- * Depois multiplica por:
- *   +1 se self_service; -1 caso contrário.
+ * - cross_docking (Coleta):
+ *    - unitário < 79: retorna 0 (não mostra frete)
+ *    - unitário >= 79: aplica (shipment_list_cost - shipment_cost) * -1 (NEGATIVO)
+ * - outros tipos elegíveis {drop_off, xd_drop_off, fulfillment}:
+ *    - unitário >= 79: (shipment_list_cost - shipment_cost) * -1
+ *    - unitário < 79: (shipment_list_cost - shipment_cost) * -1
+ * - unitário < 79 (tipos não elegíveis): 0
+ * - caso contrário: 999
+ * Multiplier: +1 se self_service; -1 caso contrário.
  */
 export function calcularFreteAdjust(params: FreteAdjustParams): number {
   const lt = normalizeLogisticType(params.shipment_logistic_type || "");
@@ -51,6 +52,20 @@ export function calcularFreteAdjust(params: FreteAdjustParams): number {
   const denom = qtyRaw && qtyRaw !== 0 ? qtyRaw : null;
   const numer = toNum(params.order_cost) ?? 0;
   const unitario = denom ? numer / denom : null; // se denom null → null (igual ao SQL)
+
+  // DEBUG: Log para verificar valores
+  if (lt === "cross_docking" || params.shipment_logistic_type?.toLowerCase() === "cross_docking") {
+    console.log('[FRETE DEBUG] cross_docking detectado:', {
+      original: params.shipment_logistic_type,
+      normalized: lt,
+      unitario,
+      baseCost,
+      listCost,
+      shipCost,
+      orderCost: params.order_cost,
+      quantity: params.quantity
+    });
+  }
 
   const isSelfServiceOrFlex = lt === "self_service" || lt === "flex";
   const multiplier = isSelfServiceOrFlex ? 1 : -1;
@@ -67,16 +82,26 @@ export function calcularFreteAdjust(params: FreteAdjustParams): number {
     return round2(base * multiplier);
   }
 
-  // 2) NÃO SELF_SERVICE, tipos elegíveis
-  const tiposElegiveis = new Set(["drop_off", "xd_drop_off", "fulfillment", "cross_docking"]);
+  // 2) CROSS_DOCKING (Coleta)
+  if (lt === "cross_docking") {
+    // Se unitário < 79: retorna 0 (não mostra frete)
+    if (unitario !== null && unitario < 79) {
+      return 0;
+    }
+    // Se unitário >= 79: aplica (shipment_list_cost - shipment_cost) * -1
+    const base = listCost - shipCost;
+    return round2(base * -1);
+  }
+
+  // 3) Outros tipos elegíveis (drop_off, xd_drop_off, fulfillment)
+  const tiposElegiveis = new Set(["drop_off", "xd_drop_off", "fulfillment"]);
   if (tiposElegiveis.has(lt)) {
     const base = listCost - shipCost;
-    
     if (unitario !== null && unitario > 79) {
       // For items > 79, it must always be negative.
       return round2(Math.abs(base) * -1);
     } else {
-      // For items <= 79, use the standard calculation.
+      // For other types <= 79, use the standard calculation.
       return round2(base * multiplier);
     }
   }

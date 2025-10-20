@@ -1,6 +1,6 @@
     "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 interface ContaInfo {
@@ -120,38 +120,41 @@ export default function ModalSyncVendas({
     }
   }, [isSyncing, step]);
 
-  // Atualizar para step de sucesso ao completar (mas NÃO fechar automaticamente)
+  // Estratégia secundária: detectar quando sincronização termina pelo estado isSyncing (fallback para Shopee)
+  const wasSyncingRef = useRef(false);
   useEffect(() => {
-    if (progress?.type === "sync_complete" && !isSyncing) {
+    if (platform === "Shopee" && step === "syncing") {
+      if (isSyncing) {
+        wasSyncingRef.current = true;
+        console.log('[ModalSyncVendas] Shopee sincronizando...');
+      } else if (wasSyncingRef.current && !isSyncing) {
+        // Estava sincronizando e agora parou
+        console.log('[ModalSyncVendas] Shopee: Sincronização terminou (detectado via isSyncing). Fechando em 2s...');
+        wasSyncingRef.current = false;
+        setTimeout(() => {
+          console.log('[ModalSyncVendas] Fechando modal do Shopee (fallback)');
+          onClose();
+        }, 2000);
+      }
+    }
+  }, [isSyncing, platform, step, onClose]);
+
+  // Atualizar para step de sucesso ao completar e fechar automaticamente após 2s
+  useEffect(() => {
+    if (progress?.type === "sync_complete") {
+      console.log('[ModalSyncVendas] sync_complete detectado, platform:', platform);
+
       // Chamar callback de conclusão
       onSyncComplete?.();
-      
-      // Remover contas já sincronizadas da lista
+
+      // Fechar modal automaticamente após 2 segundos para ambas plataformas
+      console.log('[ModalSyncVendas] Fechando modal em 2 segundos...');
       setTimeout(() => {
-        const syncedAccountIds = progress?.steps?.filter(s => s.currentStep === 'completed').map(s => s.accountId) || [];
-        
-        // Atualizar contasInfo removendo contas sincronizadas
-        setContasInfo(prev => prev.filter(c => !syncedAccountIds.includes(c.id)));
-        
-        // Atualizar orderIdsByAccount removendo contas sincronizadas
-        setOrderIdsByAccount(prev => {
-          const updated = { ...prev };
-          syncedAccountIds.forEach(id => delete updated[id]);
-          return updated;
-        });
-        
-        // Se ainda há contas, volta para select. Se não, vai para verify
-        setContasInfo(prev => {
-          if (prev.length > 0) {
-            setStep("select");
-          } else {
-            setStep("verify");
-          }
-          return prev;
-        });
-      }, 500);
+        console.log('[ModalSyncVendas] Fechando modal agora');
+        onClose();
+      }, 2000);
     }
-  }, [progress, isSyncing, onSyncComplete]);
+  }, [progress, onSyncComplete, platform, onClose]);
 
   const handleVerify = async () => {
     setIsChecking(true);
@@ -732,25 +735,12 @@ export default function ModalSyncVendas({
                     <h3 className="text-base font-semibold text-green-900 mb-1">
                       Sincronização Concluída!
                     </h3>
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-gray-600 mb-2">
                       {progress?.message || "Vendas sincronizadas com sucesso"}
                     </p>
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={onClose}
-                        className="px-4 py-2 rounded-md bg-green-500 text-white font-medium hover:bg-green-600 transition-colors"
-                      >
-                        Fechar
-                      </button>
-                      {contasInfo.length > 0 && (
-                        <button
-                          onClick={() => setStep("select")}
-                          className="px-4 py-2 rounded-md border border-green-500 text-green-700 font-medium hover:bg-green-50 transition-colors"
-                        >
-                          Sincronizar Outras Contas
-                        </button>
-                      )}
-                    </div>
+                    <p className="text-xs text-gray-500 italic">
+                      Fechando automaticamente...
+                    </p>
                   </div>
                 ) : progress?.type === "sync_error" ? (
                   <div className="text-center">
