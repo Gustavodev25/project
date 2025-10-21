@@ -83,7 +83,7 @@ export default function ModalSyncVendasDashboard({
   const handleVerify = async () => {
     setIsVerifying(true);
     setError(null);
-    setVerificationLog('🔍 Buscando contas conectadas...');
+    setVerificationLog('Buscando contas conectadas...');
 
     try {
       const contasCarregadas: ContaInfo[] = [];
@@ -128,11 +128,11 @@ export default function ModalSyncVendasDashboard({
         return;
       }
 
-      setVerificationLog(`✓ ${contasCarregadas.length} conta(s) encontrada(s)`);
+      setVerificationLog(`${contasCarregadas.length} conta(s) encontrada(s)`);
       await new Promise(resolve => setTimeout(resolve, 300));
 
       // Verificar vendas novas para cada conta
-      setVerificationLog('🔄 Verificando vendas das últimas 48 horas...');
+      setVerificationLog('Verificando novas vendas...');
       
       for (const conta of contasCarregadas) {
         if (conta.platform === 'meli') {
@@ -167,11 +167,11 @@ export default function ModalSyncVendasDashboard({
       await new Promise(resolve => setTimeout(resolve, 300));
       
       if (totalNew > 0) {
-        setVerificationLog(`✅ ${totalNew} venda(s) nova(s) encontrada(s)!`);
+        setVerificationLog(`${totalNew} venda(s) nova(s) encontrada(s)!`);
         await new Promise(resolve => setTimeout(resolve, 500));
         setStep("select");
       } else {
-        setVerificationLog('ℹ️ Nenhuma venda nova encontrada');
+        setVerificationLog('Nenhuma venda nova encontrada');
         await new Promise(resolve => setTimeout(resolve, 1500));
         onClose();
       }
@@ -478,14 +478,23 @@ export default function ModalSyncVendasDashboard({
                       </button>
 
                       {isVerifying && verificationLog && (
-                        <div className="rounded-md bg-blue-50 border border-blue-200 p-3">
-                          <div className="flex items-center gap-2">
-                            <div className="animate-pulse">
-                              <div className="h-2 w-2 rounded-full bg-blue-600"></div>
+                        <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-r from-gray-50 to-white p-4 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0">
+                              <div className="relative h-5 w-5">
+                                <div className="absolute inset-0 rounded-full bg-blue-500 opacity-20 animate-ping"></div>
+                                <div className="relative flex h-5 w-5 items-center justify-center rounded-full bg-blue-500">
+                                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-sm font-medium text-blue-900">
-                              {verificationLog}
-                            </p>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900">
+                                {verificationLog}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -579,8 +588,8 @@ export default function ModalSyncVendasDashboard({
                             <p className="text-xs text-gray-600">
                               {syncStep.status === 'pending' && 'Aguardando...'}
                               {syncStep.status === 'syncing' && 'Sincronizando...'}
-                              {syncStep.status === 'completed' && `✓ ${syncStep.count || 0} vendas sincronizadas`}
-                              {syncStep.status === 'error' && `✗ ${syncStep.error || 'Erro'}`}
+                              {syncStep.status === 'completed' && `${syncStep.count || 0} vendas sincronizadas`}
+                              {syncStep.status === 'error' && `${syncStep.error || 'Erro'}`}
                             </p>
                           </div>
                         </div>
@@ -607,7 +616,7 @@ export default function ModalSyncVendasDashboard({
                   {!isSyncing && (
                     <div className="text-center pt-2">
                       <p className="text-sm text-green-600 font-medium mb-2">
-                        ✓ Sincronização concluída!
+                        Sincronização concluída!
                       </p>
                       <p className="text-xs text-gray-500">
                         Fechando automaticamente...
