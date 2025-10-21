@@ -97,6 +97,16 @@ export function useVendas(platform: string = "Mercado Livre") {
   // Hook para progresso em tempo real
   const { isConnected, progress, connect, disconnect } = useVendasSyncProgress();
 
+  // Ref para rastrear se sync_complete já foi processado
+  const syncCompleteProcessedRef = useRef(false);
+
+  // Resetar flag quando começar nova sincronização
+  useEffect(() => {
+    if (isSyncing) {
+      syncCompleteProcessedRef.current = false;
+    }
+  }, [isSyncing]);
+
   // Atualizar progresso quando receber eventos SSE (Mercado Livre e Shopee)
   useEffect(() => {
     if (progress && (platform === "Mercado Livre" || platform === "Shopee")) {
@@ -112,8 +122,9 @@ export function useVendas(platform: string = "Mercado Livre") {
           expected
         });
         console.log(`[useVendas] Progresso atualizado: ${fetched}/${expected}`);
-      } else if (progress.type === "sync_complete") {
-        console.log('[useVendas] Sincronização completa - limpando estados e recarregando vendas');
+      } else if (progress.type === "sync_complete" && !syncCompleteProcessedRef.current) {
+        console.log('[useVendas] Sincronização completa - processando apenas uma vez');
+        syncCompleteProcessedRef.current = true; // Marcar como processado
         
         // Recarregar vendas do banco após sincronização completa
         loadVendasFromDatabase().catch(err => {

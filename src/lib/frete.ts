@@ -1,11 +1,9 @@
-// lib/frete.ts
-
 export type FreteAdjustParams = {
   shipment_logistic_type: string | null;
   base_cost?: number | null;
   shipment_list_cost?: number | null;
   shipment_cost?: number | null;
-  order_cost?: number | null; // total do pedido (ou unit * qty)
+  order_cost?: number | null; 
   quantity?: number | null;
 };
 
@@ -14,108 +12,54 @@ function toNum(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
 function round2(v: number): number {
   const r = Math.round((v + Number.EPSILON) * 100) / 100;
   return Object.is(r, -0) ? 0 : r;
 }
-function normalizeLogisticType(lt: string | null): string {
-  if (!lt) return "";
-  const t = lt.toLowerCase();
-  if (t === "agência" || t === "agencia") return "xd_drop_off";
-  return t;
-}
 
-/**
- * Cálculo de ajuste de frete:
- * - self_service / flex:
- *    - se round(base_cost - shipment_list_cost,2) == 0:
- *         unitário < 79 → 15.90 ; caso contrário → 1.59
- *      senão: diff (base_cost - shipment_list_cost)
- * - cross_docking (Coleta):
- *    - unitário < 79: retorna 0 (não mostra frete)
- *    - unitário >= 79: aplica (shipment_list_cost - shipment_cost) * -1 (NEGATIVO)
- * - outros tipos elegíveis {drop_off, xd_drop_off, fulfillment}:
- *    - unitário >= 79: (shipment_list_cost - shipment_cost) * -1
- *    - unitário < 79: (shipment_list_cost - shipment_cost) * -1
- * - unitário < 79 (tipos não elegíveis): 0
- * - caso contrário: 999
- * Multiplier: +1 se self_service; -1 caso contrário.
- */
 export function calcularFreteAdjust(params: FreteAdjustParams): number {
-  const lt = normalizeLogisticType(params.shipment_logistic_type || "");
+  const lt = params.shipment_logistic_type ?? null; 
   const baseCost = toNum(params.base_cost) ?? 0;
   const listCost = toNum(params.shipment_list_cost) ?? 0;
   const shipCost = toNum(params.shipment_cost) ?? 0;
 
-  // unitário = COALESCE(order_cost, 0) / NULLIF(quantity, 0)
-  const qtyRaw = toNum(params.quantity);
-  const denom = qtyRaw && qtyRaw !== 0 ? qtyRaw : null;
+  const qty = toNum(params.quantity);
   const numer = toNum(params.order_cost) ?? 0;
-  const unitario = denom ? numer / denom : null; // se denom null → null (igual ao SQL)
+  const unitario = qty && qty !== 0 ? numer / qty : null; 
 
-  // DEBUG: Log para verificar valores
-  if (lt === "cross_docking" || params.shipment_logistic_type?.toLowerCase() === "cross_docking") {
-    console.log('[FRETE DEBUG] cross_docking detectado:', {
-      original: params.shipment_logistic_type,
-      normalized: lt,
-      unitario,
-      baseCost,
-      listCost,
-      shipCost,
-      orderCost: params.order_cost,
-      quantity: params.quantity
-    });
-  }
+  let raw: number;
 
-  const isSelfServiceOrFlex = lt === "self_service" || lt === "flex";
-  const multiplier = isSelfServiceOrFlex ? 1 : -1;
-
-  // 1) SELF_SERVICE (now also FLEX)
-  if (isSelfServiceOrFlex) {
+  if (lt === 'self_service') {
     const diffRoundedEqZero = round2(baseCost - listCost) === 0;
-    let base: number;
     if (diffRoundedEqZero) {
-      base = unitario !== null && unitario < 79 ? 15.9 : 1.59;
+      if (unitario !== null && unitario < 79) {
+        raw = 15.9;
+      } else {
+        raw = 1.59;
+      }
     } else {
-      base = baseCost - listCost;
-    }
-    return round2(base * multiplier);
-  }
-
-  // 2) CROSS_DOCKING (Coleta)
-  if (lt === "cross_docking") {
-    // Se unitário < 79: retorna 0 (não mostra frete)
-    if (unitario !== null && unitario < 79) {
-      return 0;
-    }
-    // Se unitário >= 79: aplica (shipment_list_cost - shipment_cost) * -1
-    const base = listCost - shipCost;
-    return round2(base * -1);
-  }
-
-  // 3) Outros tipos elegíveis (drop_off, xd_drop_off, fulfillment)
-  const tiposElegiveis = new Set(["drop_off", "xd_drop_off", "fulfillment"]);
-  if (tiposElegiveis.has(lt)) {
-    const base = listCost - shipCost;
-    if (unitario !== null && unitario > 79) {
-      // For items > 79, it must always be negative.
-      return round2(Math.abs(base) * -1);
-    } else {
-      // For other types <= 79, use the standard calculation.
-      return round2(base * multiplier);
+      raw = baseCost - listCost;
     }
   }
-
-  // 3) unitário < 79 (agora apenas para tipos não elegíveis)
-  if (unitario !== null && unitario < 79) {
-    return round2(0 * multiplier); // fica 0
+  else if (
+    unitario !== null &&
+    unitario >= 79 &&
+    (lt === 'drop_off' || lt === 'xd_drop_off' || lt === 'fulfillment' || lt === 'cross_docking')
+  ) {
+    raw = listCost - shipCost;
   }
+  else if (unitario !== null && unitario < 79) {
+    raw = 0;
+  }
+  else {
+    raw = 999;
+  }
+  const multiplier = lt === 'self_service' ? 1 : -1;
 
-  // 4) ELSE 999
-  return round2(999 * multiplier); // sentinel igual ao SQL
+  return round2(raw * multiplier);
 }
 
-/* utilidades já existentes... */
 export function formatCurrency(value: number): string {
   try {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -123,6 +67,7 @@ export function formatCurrency(value: number): string {
     return `R$ ${Number(value || 0).toFixed(2)}`;
   }
 }
+
 export function classifyFrete(value: number): { className: string; displayValue: string } {
   const displayValue = formatCurrency(value || 0);
   if (value > 0) return { className: "frete-positivo", displayValue };
@@ -130,7 +75,6 @@ export function classifyFrete(value: number): { className: string; displayValue:
   return { className: "frete-neutro", displayValue };
 }
 
-// Tipos para dados de frete do Shopee
 export interface ShopeeFreteData {
   actual_shipping_fee?: number;
   shopee_shipping_rebate?: number;
@@ -142,9 +86,6 @@ export interface ShopeeFreteData {
   rendaLiquida?: number;
 }
 
-/**
- * Detecta automaticamente se o frete está subsidiado baseado na lógica do Shopee
- */
 export function detectarSubsidioFrete(freteData: ShopeeFreteData): {
   isSubsidized: boolean;
   subsidioDetectado: number;
@@ -162,38 +103,27 @@ export function detectarSubsidioFrete(freteData: ShopeeFreteData): {
     rendaLiquida = 0
   } = freteData;
 
-  // Calcular custo implícito do frete
   const impliedCustoFrete = productSubtotal - totalTaxas - rendaLiquida;
-  
-  // Detecção automática de subsídio
-  // Se não há shopee_shipping_rebate explícito mas o custo implícito é ~0,
-  // significa que a Shopee subsidiou a diferença entre o custo real e o que o comprador pagou
+
   let subsidioDetectado = shopee_shipping_rebate;
   if (actual_shipping_fee && !shopee_shipping_rebate && Math.abs(impliedCustoFrete) < 0.01) {
-    // Subsídio = custo real - o que o comprador pagou
     subsidioDetectado = actual_shipping_fee - buyer_paid_shipping_fee;
   }
 
-  // Calcular custo líquido do frete
-  // Convenção: POSITIVO = receita de frete, NEGATIVO = custo de frete
-  // - actual_shipping_fee: custo real que o vendedor paga (positivo = custo, então invertemos)
-  // - buyer_paid_shipping_fee: valor que o comprador pagou (positivo = receita, mantemos positivo)
-  // - subsidioDetectado: subsídio da Shopee (reduz o custo, então somamos)
-  // Fórmula invertida: Pago pelo Comprador + Subsídio + Desconto 3PL - Custo Real
-  const custoLiquidoFrete = (buyer_paid_shipping_fee + subsidioDetectado + shipping_fee_discount_from_3pl) - 
+  const custoLiquidoFrete =
+    (buyer_paid_shipping_fee + subsidioDetectado + shipping_fee_discount_from_3pl) -
     (actual_shipping_fee + reverse_shipping_fee);
-
-  // Determinar tipo de subsídio
   let tipoSubsidio = "Nenhum";
   if (subsidioDetectado > 0) {
     tipoSubsidio = "Shopee";
-  } else if (buyer_paid_shipping_fee > 0) {
+  } else if (buyerPaidPositive(buyer_paid_shipping_fee)) {
     tipoSubsidio = "Comprador";
   } else if (shipping_fee_discount_from_3pl > 0) {
     tipoSubsidio = "3PL";
   }
 
-  const isSubsidized = subsidioDetectado > 0 || buyer_paid_shipping_fee > 0 || shipping_fee_discount_from_3pl > 0;
+  const isSubsidized =
+    subsidioDetectado > 0 || buyerPaidPositive(buyer_paid_shipping_fee) || shipping_fee_discount_from_3pl > 0;
 
   return {
     isSubsidized,
@@ -201,11 +131,12 @@ export function detectarSubsidioFrete(freteData: ShopeeFreteData): {
     custoLiquidoFrete,
     tipoSubsidio
   };
+
+  function buyerPaidPositive(v: number) {
+    return (v ?? 0) > 0;
+  }
 }
 
-/**
- * Formata dados de frete para exibição na interface
- */
 export function formatarFreteShopee(freteData: ShopeeFreteData): {
   valorPrincipal: string;
   className: string;
@@ -217,12 +148,13 @@ export function formatarFreteShopee(freteData: ShopeeFreteData): {
     custoLiquido: number;
   };
 } {
-  const { isSubsidized, subsidioDetectado, custoLiquidoFrete, tipoSubsidio } = detectarSubsidioFrete(freteData);
-  
+  const { isSubsidized, subsidioDetectado, custoLiquidoFrete } = detectarSubsidioFrete(freteData);
+
   const valorPrincipal = formatCurrency(custoLiquidoFrete);
-  const className = custoLiquidoFrete > 0 ? "frete-positivo" : 
-                   custoLiquidoFrete < 0 ? "frete-negativo" : "frete-neutro";
-  
+  const className =
+    custoLiquidoFrete > 0 ? "frete-positivo" :
+    custoLiquidoFrete < 0 ? "frete-negativo" : "frete-neutro";
+
   let mensagemEspecial: string | undefined;
   if (isSubsidized && Math.abs(custoLiquidoFrete) < 0.01) {
     mensagemEspecial = "O frete foi zerado ou totalmente subsidiado pela Shopee/Comprador.";

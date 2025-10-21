@@ -28,7 +28,10 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(Select-String -Pattern \"DRE|dre\" -Context 2,2)",
-      "Bash(Select-String -Pattern \"ModalSyncVendas\" -Context 2,2)"
+      "Bash(Select-String -Pattern \"ModalSyncVendas\" -Context 2,2)",
+      "Bash(Select-String -Pattern \"error|Error|generated|success\" -Context 0,2)",
+      "Bash(Select-String -Pattern \"error\" -Context 2,2)",
+      "Bash(Select-String -Pattern \"PROBLEMA|OK|RESUMO|Total|Com\" -Context 0,2)"
     ],
     "deny": [],
     "ask": []

@@ -139,10 +139,21 @@ export default function ModalSyncVendas({
     }
   }, [isSyncing, platform, step, onClose]);
 
+  // Ref para rastrear se sync_complete já foi processado
+  const syncCompleteProcessedRef = useRef(false);
+
+  // Resetar flag quando modal abrir ou sincronização começar
+  useEffect(() => {
+    if (isOpen && isSyncing) {
+      syncCompleteProcessedRef.current = false;
+    }
+  }, [isOpen, isSyncing]);
+
   // Atualizar para step de sucesso ao completar e fechar automaticamente após 2s
   useEffect(() => {
-    if (progress?.type === "sync_complete") {
-      console.log('[ModalSyncVendas] sync_complete detectado, platform:', platform);
+    if (progress?.type === "sync_complete" && !syncCompleteProcessedRef.current) {
+      console.log('[ModalSyncVendas] sync_complete detectado (processando apenas uma vez), platform:', platform);
+      syncCompleteProcessedRef.current = true; // Marcar como processado
 
       // Chamar callback de conclusão
       onSyncComplete?.();
@@ -164,36 +175,36 @@ export default function ModalSyncVendas({
     try {
       // 1. Buscar contas da API se as props contas estiverem vazias
       let contasDisponiveis = contas;
-      
+
       if (!contasDisponiveis || contasDisponiveis.length === 0) {
-        setVerificationLog('🔍 Buscando contas conectadas...');
+        setVerificationLog('Buscando contas conectadas...');
         console.log('[ModalSync] Contas vazias nas props, buscando da API...');
         const accountsApiUrl =
           platform === "Mercado Livre"
             ? "/api/meli/accounts"
             : "/api/shopee/accounts";
-        
+
         const accountsRes = await fetch(accountsApiUrl, {
           cache: "no-store",
           credentials: "include",
         });
-        
+
         if (accountsRes.ok) {
           const accountsData = await accountsRes.json();
           contasDisponiveis = Array.isArray(accountsData) ? accountsData : [];
           console.log('[ModalSync] Contas carregadas da API:', contasDisponiveis);
-          setVerificationLog(`✓ ${contasDisponiveis.length} conta(s) encontrada(s)`);
+          setVerificationLog(`${contasDisponiveis.length} conta(s) encontrada(s)`);
         }
       } else {
-        setVerificationLog(`✓ ${contasDisponiveis.length} conta(s) conectada(s)`);
+        setVerificationLog(`${contasDisponiveis.length} conta(s) conectada(s)`);
       }
 
       // Aguardar 300ms para mostrar a mensagem
       await new Promise(resolve => setTimeout(resolve, 300));
 
       // 2. Verificar vendas novas
-      setVerificationLog('🔄 Verificando vendas das últimas 48 horas...');
-      
+      setVerificationLog('Verificando novas vendas...');
+
       const apiUrl =
         platform === "Mercado Livre"
           ? "/api/meli/vendas/check"
@@ -208,14 +219,14 @@ export default function ModalSyncVendas({
         throw new Error(`Erro ${res.status}`);
       }
 
-      setVerificationLog('📊 Processando resultados...');
+      setVerificationLog('Processando resultados...');
       const result = await res.json();
       const newCount = result.totals?.new || 0;
       const newOrdersByAccount = result.newOrdersByAccount || {};
       const newOrders = result.newOrders || [];
 
       // 3. Extrair IDs das vendas novas por conta
-      setVerificationLog('🗂️ Organizando vendas por conta...');
+      setVerificationLog('Organizando vendas por conta...');
       const ordersByAccount: Record<string, string[]> = {};
       newOrders.forEach((order: any) => {
         const accountId = order.accountId || order.shopId;
@@ -226,7 +237,7 @@ export default function ModalSyncVendas({
           ordersByAccount[accountId].push(order.orderId);
         }
       });
-      
+
       console.log('[ModalSync] Order IDs por conta:', ordersByAccount);
       setOrderIdsByAccount(ordersByAccount);
 
@@ -237,15 +248,15 @@ export default function ModalSyncVendas({
       }));
 
       console.log('[ModalSync] Contas com info:', contasComInfo);
-      
+
       // Mostrar resumo final
       if (newCount > 0) {
         const contasComVendas = contasComInfo.filter(c => (c.newOrdersCount || 0) > 0);
-        setVerificationLog(`✅ ${newCount} venda(s) nova(s) encontrada(s) em ${contasComVendas.length} conta(s)!`);
+        setVerificationLog(`${newCount} venda(s) nova(s) encontrada(s) em ${contasComVendas.length} conta(s)`);
       } else {
-        setVerificationLog('ℹ️ Nenhuma venda nova encontrada');
+        setVerificationLog('Nenhuma venda nova encontrada');
       }
-      
+
       // Aguardar 500ms para mostrar o resultado
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -518,14 +529,23 @@ export default function ModalSyncVendas({
 
                     {/* Log de verificação em tempo real */}
                     {isChecking && verificationLog && (
-                      <div className="rounded-md bg-blue-50 border border-blue-200 p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="animate-pulse">
-                            <div className="h-2 w-2 rounded-full bg-blue-600"></div>
+                      <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-r from-gray-50 to-white p-4 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-shrink-0">
+                            <div className="relative h-5 w-5">
+                              <div className="absolute inset-0 rounded-full bg-blue-500 opacity-20 animate-ping"></div>
+                              <div className="relative flex h-5 w-5 items-center justify-center rounded-full bg-blue-500">
+                                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            </div>
                           </div>
-                          <p className="text-sm font-medium text-blue-900">
-                            {verificationLog}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">
+                              {verificationLog}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -677,8 +697,7 @@ export default function ModalSyncVendas({
                     </p>
                   ) : (
                     <p className="text-xs text-orange-600 font-medium">
-                      ⚠️ Nenhuma conta selecionada - todas serão
-                      sincronizadas
+                      Nenhuma conta selecionada - todas serão sincronizadas
                     </p>
                   )}
                 </div>
@@ -705,7 +724,7 @@ export default function ModalSyncVendas({
                     disabled={isChecking}
                     className="w-full rounded-md border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    🔄 Verificar Novamente
+                    Verificar Novamente
                   </button>
                 </div>
               </div>

@@ -14,7 +14,6 @@ import {
   FiltroModalidadeEnvio,
   ColunasVisiveis 
 } from "./FiltrosVendas";
-import { calcularFreteAdjust } from "@/lib/frete";
 import { isStatusCancelado, isStatusPago } from "@/lib/vendasStatus";
 import { useToast } from "./toaster";
 import { useVendas } from "@/hooks/useVendas";
@@ -246,19 +245,32 @@ export default function TabelaVendas({
     }
 
     // Processar todas as vendas de uma vez
+    // IMPORTANTE: Não recalcular o frete aqui - ele já foi calculado corretamente 
+    // durante a sincronização e salvo no banco. Recalcular causa problemas porque
+    // logisticType está como "Coleta" (convertido) ao invés de "cross_docking" (original)
     const processedVendas = vendas.map(venda => {
-      // Não aplicar calcularFreteAdjust para vendas do Shopee
-      const freteCorrigido = venda.plataforma === "Shopee" 
-        ? venda.frete // Usar o valor original do frete para Shopee
-        : calcularFreteAdjust({
-            shipment_logistic_type: venda.logisticType || null,
-            base_cost: (venda as any).freteBaseCost || null,
-            shipment_list_cost: (venda as any).freteListCost || null,
-            shipment_cost: (venda as any).freteFinalCost || null,
-            order_cost: venda.valorTotal,
-            quantity: venda.quantidade,
-          });
-
+      let freteCorrigido = venda.frete;
+      
+      // Fallback para vendas antigas com frete incorreto (-999 ou 999)
+      // Tentar extrair o valor correto do rawData ou shipping direto
+      if (Math.abs(Number(venda.frete)) === 999) {
+        // Tentar múltiplas fontes de dados
+        const shipping = (venda as any).shipping;
+        const rawData = (venda as any).raw || (venda as any).rawData;
+        const rawShipping = rawData?.shipping;
+        const freight = rawData?.freight;
+        
+        // Tentar usar adjustedCost de várias fontes possíveis
+        const adjustedCost = 
+          shipping?.adjustedCost ?? 
+          rawShipping?.adjustedCost ?? 
+          freight?.adjustedCost;
+          
+        if (adjustedCost !== null && adjustedCost !== undefined && Math.abs(Number(adjustedCost)) !== 999) {
+          freteCorrigido = adjustedCost;
+        }
+      }
+      
       return {
         venda: { ...venda, frete: freteCorrigido } as any,
         isCalculating: false,
