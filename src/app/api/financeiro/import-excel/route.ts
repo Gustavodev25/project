@@ -1,10 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { tryVerifySessionToken } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import * as XLSX from 'xlsx';
 import { Prisma } from '@prisma/client';
-import { sendImportProgress } from '../import-progress/route';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,136 +12,185 @@ export const maxDuration = 60; // 60s para Pro/Enterprise, 10s para Free
 export async function POST(request: NextRequest) {
   console.log('[Import Excel] Iniciando importação...');
   
-  // Obter sessionId para SSE
-  const sessionId = request.headers.get('x-session-id') || 'default';
-  console.log('[Import Excel] SessionId recebido:', sessionId);
-  
-  try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get("session");
+  // Validação inicial rápida
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("session");
 
-    if (!sessionCookie?.value) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
-
-    // Verificar o token JWT de sessão
-    const session = await tryVerifySessionToken(sessionCookie.value);
-    
-    if (!session) {
-      return NextResponse.json({ error: "Sessão inválida ou expirada" }, { status: 401 });
-    }
-
-    const userId = session.sub;
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const type = formData.get('type') as string;
-    
-    console.log(`[Import Excel] Tipo: ${type}, Arquivo: ${file?.name}, Tamanho: ${file?.size} bytes`);
-
-    if (!file) {
-      return NextResponse.json(
-        { error: "Arquivo não fornecido" },
-        { status: 400 }
-      );
-    }
-
-    // Validar tipo de arquivo
-    const validTypes = [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'text/csv'
-    ];
-
-    if (!validTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: "Tipo de arquivo não suportado. Use .xlsx, .xls ou .csv" },
-        { status: 400 }
-      );
-    }
-
-    // Ler arquivo
-    console.log('[Import Excel] Lendo arquivo...');
-    const ab = await file.arrayBuffer();
-    // arrayBuffer -> use type 'array' (SheetJS)
-    const workbook = XLSX.read(ab, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    console.log(`[Import Excel] ${data.length} linhas encontradas (incluindo header)`);
-
-    if (data.length < 2) {
-      return NextResponse.json(
-        { error: "Arquivo deve ter pelo menos uma linha de cabeçalho e uma linha de dados" },
-        { status: 400 }
-      );
-    }
-
-    const headers = data[0] as string[];
-    const rows = data.slice(1) as unknown[][];
-    const totalRows = rows.length;
-    
-    // Enviar evento de início
-    sendImportProgress(sessionId, {
-      type: 'import_start',
-      totalRows,
-      processedRows: 0,
-      importedRows: 0,
-      errorRows: 0,
-      message: `Iniciando importação de ${totalRows} linhas...`
+  if (!sessionCookie?.value) {
+    return new Response(JSON.stringify({ error: "Não autenticado" }), { 
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
     });
+  }
 
-    // Mapear campos para colunas do banco
-    const fieldMapping = getFieldMappingNormalized(headers, type);
-    
-    let imported = 0;
-    let errors = 0;
-    const errorDetails: string[] = [];
+  const session = await tryVerifySessionToken(sessionCookie.value);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Sessão inválida" }), { 
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 
-    // Pré-carregar referências para resolver nomes -> IDs
-    console.log('[Import Excel] Carregando categorias e formas de pagamento...');
-    const [categorias, formas] = await Promise.all([
-      prisma.categoria.findMany({ where: { userId } }),
-      prisma.formaPagamento.findMany({ where: { userId } })
-    ]);
-    console.log(`[Import Excel] ${categorias.length} categorias e ${formas.length} formas carregadas`);
+  const userId = session.sub;
+  const formData = await request.formData();
+  const file = formData.get('file') as File;
+  const type = formData.get('type') as string;
+  
+  console.log(`[Import Excel] Tipo: ${type}, Arquivo: ${file?.name}`);
 
-    const categoriaById = new Map<string, string>(categorias.map(c => [c.id, c.id]));
-    const categoriaByName = new Map<string, string>(
-      categorias
-        .map(c => ({
-          key: ((c.descricao || c.nome || '').trim().toLowerCase()),
-          id: c.id,
-        }))
-        .filter(c => c.key)
-        .map(c => [c.key, c.id])
-    );
-    const formaById = new Map<string, string>(formas.map(f => [f.id, f.id]));
-    const formaByName = new Map<string, string>(
-      formas
-        .map(f => ({ key: (f.nome || '').trim().toLowerCase(), id: f.id }))
-        .filter(f => f.key)
-        .map(f => [f.key, f.id])
-    );
+  if (!file) {
+    return new Response(JSON.stringify({ error: "Arquivo não fornecido" }), { 
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 
-    // Helpers para extrair valores crus da linha
-    const getRawCellValue = (rowArr: unknown[], field: string) => {
-      const idxStr = (fieldMapping as Record<string,string>)[field];
-      if (idxStr == null) return null;
-      const idx = Number.parseInt(idxStr);
-      if (!Number.isFinite(idx)) return null;
-      return idx < rowArr.length ? rowArr[idx] : null;
-    };
+  // Criar stream de resposta SSE
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sendEvent = (data: any) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
 
-    // Processar cada linha
+      try {
+
+        // Validar tipo de arquivo
+        const validTypes = [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv'
+        ];
+
+        if (!validTypes.includes(file.type)) {
+          sendEvent({ 
+            type: 'import_error',
+            message: 'Tipo de arquivo não suportado. Use .xlsx, .xls ou .csv'
+          });
+          controller.close();
+          return;
+        }
+
+        // Ler arquivo
+        console.log('[Import Excel] Lendo arquivo...');
+        const ab = await file.arrayBuffer();
+        const workbook = XLSX.read(ab, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        console.log(`[Import Excel] ${data.length} linhas encontradas`);
+
+        if (data.length < 2) {
+          sendEvent({ 
+            type: 'import_error',
+            message: 'Arquivo deve ter pelo menos uma linha de cabeçalho e uma linha de dados'
+          });
+          controller.close();
+          return;
+        }
+
+        const headers = data[0] as string[];
+        const rows = data.slice(1) as unknown[][];
+        const totalRows = rows.length;
+        
+        // Enviar evento de início via stream
+        sendEvent({
+          type: 'import_start',
+          totalRows,
+          processedRows: 0,
+          importedRows: 0,
+          errorRows: 0,
+          message: `Iniciando importação de ${totalRows} linhas...`
+        });
+
+        // Mapear campos para colunas do banco
+        const fieldMapping = getFieldMappingNormalized(headers, type);
+        
+        let imported = 0;
+        let errors = 0;
+        const errorDetails: string[] = [];
+
+        // Pré-carregar referências
+        console.log('[Import Excel] Carregando categorias e formas...');
+        const [categorias, formas] = await Promise.all([
+          prisma.categoria.findMany({ where: { userId } }),
+          prisma.formaPagamento.findMany({ where: { userId } })
+        ]);
+        console.log(`[Import Excel] ${categorias.length} categorias carregadas`);
+
+        const categoriaById = new Map<string, string>(categorias.map(c => [c.id, c.id]));
+        const categoriaByName = new Map<string, string>(
+          categorias
+            .map(c => ({
+              key: ((c.descricao || c.nome || '').trim().toLowerCase()),
+              id: c.id,
+            }))
+            .filter(c => c.key)
+            .map(c => [c.key, c.id])
+        );
+        const formaById = new Map<string, string>(formas.map(f => [f.id, f.id]));
+        const formaByName = new Map<string, string>(
+          formas
+            .map(f => ({ key: (f.nome || '').trim().toLowerCase(), id: f.id }))
+            .filter(f => f.key)
+            .map(f => [f.key, f.id])
+        );
+
+        // Helper para extrair valores
+        const getRawCellValue = (rowArr: unknown[], field: string) => {
+          const idxStr = (fieldMapping as Record<string,string>)[field];
+          if (idxStr == null) return null;
+          const idx = Number.parseInt(idxStr);
+          if (!Number.isFinite(idx)) return null;
+          return idx < rowArr.length ? rowArr[idx] : null;
+        };
+
+    // PRÉ-PROCESSAR: Criar todas as categorias e formas de pagamento necessárias ANTES do loop principal
+    console.log('[Import Excel] Pré-processando categorias e formas de pagamento necessárias...');
+    if (type === 'contas_pagar' || type === 'contas_receber') {
+      const novasCategoriasSet = new Set<string>();
+      const novasFormasSet = new Set<string>();
+      const tipoDefault = type === 'contas_pagar' ? 'DESPESA' : 'RECEITA';
+      
+      // Coletar todas as categorias/formas únicas que não existem
+      rows.forEach(row => {
+        const rawCategoria = getRawCellValue(row, 'categoria');
+        const rawForma = getRawCellValue(row, 'formaPagamento');
+        
+        if (rawCategoria && typeof rawCategoria === 'string') {
+          const k = rawCategoria.trim().toLowerCase();
+          if (k && !categoriaByName.has(k)) {
+            const created = await prisma.categoria.create({
+              data: { userId, nome: rawCategoria.trim(), descricao: rawCategoria.trim(), tipo: tipoDefault, ativo: true },
+            });
+            categoriaById.set(created.id, created.id);
+            categoriaByName.set(k, created.id);
+          }
+        }
+        
+        if (rawForma && typeof rawForma === 'string') {
+          const kf = rawForma.trim().toLowerCase();
+          if (kf && !formaByName.has(kf)) {
+            const createdFP = await prisma.formaPagamento.create({
+              data: { userId, nome: rawForma.trim(), ativo: true },
+            });
+            formaById.set(createdFP.id, createdFP.id);
+            formaByName.set(kf, createdFP.id);
+          }
+        }
+      });
+    }
+
+    // Processar cada linha e preparar dados para inserção em lote
     console.log(`[Import Excel] Processando ${totalRows} linhas...`);
     const startTime = Date.now();
-    const BATCH_SIZE = 50; // Processar 50 linhas por batch
+    const BATCH_SIZE = 50;
     
     for (let batchStart = 0; batchStart < totalRows; batchStart += BATCH_SIZE) {
       const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
       const batch = rows.slice(batchStart, batchEnd);
       
-      console.log(`[Import Excel] Batch ${Math.floor(batchStart/BATCH_SIZE) + 1}: processando linhas ${batchStart + 1} a ${batchEnd}`);
+      console.log(`[Import Excel] Batch: linhas ${batchStart + 1} a ${batchEnd}`);
       
       // Processar batch em paralelo
       await Promise.allSettled(
@@ -150,40 +198,10 @@ export async function POST(request: NextRequest) {
           const i = batchStart + batchIndex;
           
           if (!row || row.every(cell => !cell)) {
-            return; // Pular linhas vazias
+            return;
           }
 
           try {
-            // Se a categoria/forma vier por nome que não existe ainda, cria automaticamente
-            if (type === 'contas_pagar' || type === 'contas_receber') {
-              const rawCategoria = getRawCellValue(row, 'categoria');
-              const rawForma = getRawCellValue(row, 'formaPagamento');
-              // Categoria
-              if (rawCategoria && typeof rawCategoria === 'string') {
-                const k = rawCategoria.trim().toLowerCase();
-                if (k && !categoriaByName.has(k)) {
-                  // tipo padrão: DESPESA para contas_pagar, RECEITA para contas_receber
-                  const tipoDefault = type === 'contas_pagar' ? 'DESPESA' : 'RECEITA';
-                  const created = await prisma.categoria.create({
-                    data: { userId, nome: rawCategoria.trim(), descricao: rawCategoria.trim(), tipo: tipoDefault, ativo: true },
-                  });
-                  categoriaById.set(created.id, created.id);
-                  categoriaByName.set(k, created.id);
-                }
-              }
-              // Forma de pagamento
-              if (rawForma && typeof rawForma === 'string') {
-                const kf = rawForma.trim().toLowerCase();
-                if (kf && !formaByName.has(kf)) {
-                  const createdFP = await prisma.formaPagamento.create({
-                    data: { userId, nome: rawForma.trim(), ativo: true },
-                  });
-                  formaById.set(createdFP.id, createdFP.id);
-                  formaByName.set(kf, createdFP.id);
-                }
-              }
-            }
-
             const itemData = parseRowData(row, fieldMapping, type, userId, {
               categoriaById,
               categoriaByName,
@@ -193,43 +211,37 @@ export async function POST(request: NextRequest) {
             
             switch (type) {
               case 'contas_pagar':
-                await prisma.contaPagar.create({
-                  data: itemData
-                });
+                await prisma.contaPagar.create({ data: itemData });
                 break;
               case 'contas_receber':
-                await prisma.contaReceber.create({
-                  data: itemData
-                });
+                await prisma.contaReceber.create({ data: itemData });
                 break;
               case 'categorias': {
-                // Evitar duplicar por nome para o mesmo usuário: se existir com mesmo nome/descrição, ignora
-              const dataCat = itemData as Prisma.CategoriaCreateInput;
-              const exists = await prisma.categoria.findFirst({
-                where: {
-                  userId,
-                  OR: [
+                const dataCat = itemData as Prisma.CategoriaCreateInput;
+                const exists = await prisma.categoria.findFirst({
+                  where: {
+                    userId,
+                    OR: [
                       { nome: dataCat.nome as string },
                       { descricao: dataCat.descricao as string },
-                  ],
-                },
-              });
+                    ],
+                  },
+                });
                 if (!exists) {
                   await prisma.categoria.create({ data: dataCat });
                 }
                 break;
               }
-              case 'formas_pagamento':
-                {
-                  const dataFP = itemData as Prisma.FormaPagamentoCreateInput;
-                  const exists = await prisma.formaPagamento.findFirst({
-                    where: { userId, nome: dataFP.nome as string },
-                  });
-                  if (!exists) {
-                    await prisma.formaPagamento.create({ data: dataFP });
-                  }
+              case 'formas_pagamento': {
+                const dataFP = itemData as Prisma.FormaPagamentoCreateInput;
+                const exists = await prisma.formaPagamento.findFirst({
+                  where: { userId, nome: dataFP.nome as string },
+                });
+                if (!exists) {
+                  await prisma.formaPagamento.create({ data: dataFP });
                 }
                 break;
+              }
             }
             
             imported++;
@@ -243,10 +255,10 @@ export async function POST(request: NextRequest) {
       );
       
       const progress = ((batchEnd / totalRows) * 100).toFixed(1);
-      console.log(`[Import Excel] Progresso: ${progress}% (${imported}/${totalRows} importados, ${errors} erros)`);
+      console.log(`[Import Excel] Progresso: ${progress}%`);
       
-      // Enviar progresso via SSE
-      sendImportProgress(sessionId, {
+      // Enviar progresso via stream
+      sendEvent({
         type: 'import_progress',
         totalRows,
         processedRows: batchEnd,
@@ -257,47 +269,50 @@ export async function POST(request: NextRequest) {
     }
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`[Import Excel] Concluído: ${imported} importados, ${errors} erros, ${duration}s`);
+    console.log(`[Import Excel] Concluído: ${imported} importados, ${errors} erros`);
     
-    // Enviar evento de conclusão
-    sendImportProgress(sessionId, {
+    // Enviar evento de conclusão via stream
+    sendEvent({
       type: 'import_complete',
       totalRows,
       processedRows: totalRows,
       importedRows: imported,
       errorRows: errors,
-      message: `Importação concluída: ${imported} registros importados em ${duration}s`
+      message: `Importação concluída: ${imported} registros importados em ${duration}s`,
+      success: true,
+      errorDetails: errorDetails.slice(0, 10)
     });
     
-    // Aguardar um pouco para garantir que o evento foi enviado
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    return NextResponse.json({
-      success: true,
-      imported,
-      errors,
-      errorDetails: errorDetails.slice(0, 10) // Limitar a 10 erros para não sobrecarregar
-    });
-
+    // Fechar stream
+    controller.close();
+    
   } catch (error) {
-    console.error("[Import Excel] Erro fatal:", error);
+    console.error("[Import Excel] Erro:", error);
     const errorMessage = error instanceof Error ? error.message : "Erro ao processar arquivo";
     
-    // Enviar evento de erro
-    sendImportProgress(sessionId, {
+    sendEvent({
       type: 'import_error',
       totalRows: 0,
       processedRows: 0,
       importedRows: 0,
       errorRows: 0,
-      message: `Erro: ${errorMessage}`
+      message: `Erro: ${errorMessage}`,
+      success: false
     });
     
-    return NextResponse.json(
-      { error: errorMessage, details: error instanceof Error ? error.stack : undefined },
-      { status: 500 }
-    );
+    controller.close();
   }
+}
+});
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }
 
 function getFieldMapping(headers: string[], type: string) {

@@ -27,72 +27,14 @@ export function ImportFinanceModal({
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
   const toast = useToast();
-  
-  // Conectar ao SSE quando o modal abrir e estiver fazendo upload
-  useEffect(() => {
-    if (isOpen && isUploading) {
-      const sessionId = sessionIdRef.current;
-      const eventSource = new EventSource(`/api/financeiro/import-progress?sessionId=${sessionId}`, {
-        withCredentials: true
-      });
-      
-      console.log(`[Import SSE] Conectando com sessionId: ${sessionId}`);
-      
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === 'connected') {
-            console.log('[Import SSE] Conectado');
-            return;
-          }
-          
-          if (data.type && ['import_start', 'import_progress', 'import_complete', 'import_error'].includes(data.type)) {
-            console.log('[Import SSE] Progresso recebido:', data);
-            setProgress({
-              totalRows: data.totalRows,
-              processedRows: data.processedRows,
-              importedRows: data.importedRows,
-              errorRows: data.errorRows,
-              message: data.message
-            });
-          }
-        } catch (error) {
-          console.error('[Import SSE] Erro ao processar:', error);
-        }
-      };
-      
-      eventSource.onerror = () => {
-        console.warn('[Import SSE] Erro na conexão');
-      };
-      
-      eventSourceRef.current = eventSource;
-      
-      return () => {
-        eventSource.close();
-        eventSourceRef.current = null;
-      };
-    }
-  }, [isOpen, isUploading]);
   
   // Limpar progresso ao fechar modal
   useEffect(() => {
     if (!isOpen) {
       setProgress(null);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
     }
   }, [isOpen]);
-  
-  // Debug: Logar mudanças no progresso
-  useEffect(() => {
-    console.log('[Import Modal] Estado atualizado - progress:', progress, 'isUploading:', isUploading);
-  }, [progress, isUploading]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -151,10 +93,7 @@ export function ImportFinanceModal({
     setProgress(null);
 
     try {
-      // Aguardar para garantir que o SSE foi conectado via useEffect
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      console.log('[Import] Iniciando upload com sessionId:', sessionIdRef.current);
+      console.log('[Import] Iniciando upload');
 
       const formData = new FormData();
       formData.append('file', file);
@@ -163,31 +102,85 @@ export function ImportFinanceModal({
       const response = await fetch('/api/financeiro/import-excel', {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          'x-session-id': sessionIdRef.current
-        },
         body: formData,
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro ao importar arquivo');
+        if (response.status === 504) {
+          throw new Error('A importação demorou muito tempo. Tente com um arquivo menor ou dividido em partes.');
+        }
+        
+        const text = await response.text();
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || 'Erro ao importar arquivo');
+        } catch {
+          throw new Error(`Erro no servidor (${response.status}). Tente novamente.`);
+        }
       }
 
-      const result = await response.json();
+      // Ler stream SSE
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
       
-      toast.toast({
-        variant: "success",
-        title: "Importação concluída!",
-        description: `${result.imported} registros importados com sucesso. ${result.errors > 0 ? `${result.errors} erros encontrados.` : ''}`,
-      });
+      if (!reader) {
+        throw new Error('Stream não disponível');
+      }
 
-      onImportSuccess?.();
+      let buffer = '';
+      let finalData: any = null;
       
-      // Aguardar um pouco antes de fechar para mostrar o sucesso
-      setTimeout(() => {
-        onClose();
-      }, 2000);
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              console.log('[Import SSE] Evento recebido:', data);
+              
+              if (data.type && ['import_start', 'import_progress', 'import_complete', 'import_error'].includes(data.type)) {
+                setProgress({
+                  totalRows: data.totalRows,
+                  processedRows: data.processedRows,
+                  importedRows: data.importedRows,
+                  errorRows: data.errorRows,
+                  message: data.message
+                });
+                
+                if (data.type === 'import_complete') {
+                  finalData = data;
+                } else if (data.type === 'import_error') {
+                  throw new Error(data.message || 'Erro na importação');
+                }
+              }
+            } catch (error) {
+              console.error('[Import SSE] Erro ao processar evento:', error);
+            }
+          }
+        }
+      }
+      
+      if (finalData) {
+        toast.toast({
+          variant: "success",
+          title: "Importação concluída!",
+          description: `${finalData.importedRows} registros importados. ${finalData.errorRows > 0 ? `${finalData.errorRows} erros encontrados.` : ''}`,
+        });
+
+        onImportSuccess?.();
+        
+        setTimeout(() => {
+          setIsUploading(false);
+          onClose();
+        }, 2000);
+      }
     } catch (error) {
       console.error('Erro ao importar:', error);
       toast.toast({
