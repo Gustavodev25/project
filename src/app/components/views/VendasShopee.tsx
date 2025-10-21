@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import Sidebar from "../views/ui/Sidebar";
@@ -32,6 +32,7 @@ interface HeaderVendasShopeeProps {
   onSyncOrders: (accountIds?: string[]) => void;
   contasConectadas?: any[];
   progress?: any;
+  reloadVendas?: () => Promise<void>;
 }
 
 const HeaderVendasShopee = ({
@@ -40,7 +41,8 @@ const HeaderVendasShopee = ({
   isSyncing = false,
   onSyncOrders,
   contasConectadas = [],
-  progress
+  progress,
+  reloadVendas
 }: HeaderVendasShopeeProps) => {
   const router = useRouter();
   const toast = useToast();
@@ -167,8 +169,13 @@ const HeaderVendasShopee = ({
     setNewOrdersCount(0);
   };
 
-  const handleSyncComplete = () => {
-    console.log("SincronizaÃ§Ã£o concluÃ­da com sucesso");
+  const handleSyncComplete = async () => {
+    console.log("Sincronização concluída com sucesso - recarregando vendas...");
+    // Recarregar vendas para atualizar a tabela
+    if (reloadVendas) {
+      await reloadVendas();
+    }
+    // Fechar modal (já acontece automaticamente no ModalSyncVendas)
   };
 
   useEffect(() => {
@@ -391,16 +398,17 @@ export default function VendasShopee() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const { 
-    vendas, 
-    lastSyncedAt, 
-    isSyncing, 
-    handleSyncOrders, 
+  const {
+    vendas,
+    lastSyncedAt,
+    isSyncing,
+    handleSyncOrders,
     contasConectadas,
     isConnected,
     progress,
     connect,
-    disconnect
+    disconnect,
+    reloadVendas
   } = useVendas("Shopee");
 
   const handlePeriodoPersonalizadoChange = (
@@ -516,6 +524,18 @@ export default function VendasShopee() {
     return () => clearTimeout(timer);
   }, []);
 
+  const handleMobileClose = useCallback(() => {
+    setIsSidebarMobileOpen(false);
+  }, []);
+
+  const handleToggleCollapse = useCallback(() => {
+    setIsSidebarCollapsed((v) => !v);
+  }, []);
+
+  const handleMobileMenu = useCallback(() => {
+    setIsSidebarMobileOpen((v) => !v);
+  }, []);
+
   const mdLeftVar = "md:left-[var(--sidebar-w,16rem)]";
   const mdMlVar = "md:ml-[var(--sidebar-w,16rem)]";
 
@@ -524,13 +544,13 @@ export default function VendasShopee() {
       <Sidebar
         collapsed={isSidebarCollapsed}
         mobileOpen={isSidebarMobileOpen}
-        onMobileClose={() => setIsSidebarMobileOpen(false)}
+        onMobileClose={handleMobileClose}
       />
 
       <Topbar
         collapsed={isSidebarCollapsed}
-        onToggleCollapse={() => setIsSidebarCollapsed((v) => !v)}
-        onMobileMenu={() => setIsSidebarMobileOpen((v) => !v)}
+        onToggleCollapse={handleToggleCollapse}
+        onMobileMenu={handleMobileMenu}
       />
 
       <main className={`relative z-20 pt-16 p-6 ${mdMlVar}`}>
@@ -542,6 +562,7 @@ export default function VendasShopee() {
             onSyncOrders={handleSyncOrders}
             contasConectadas={contasConectadas || []}
             progress={progress}
+            reloadVendas={reloadVendas}
           />
 
           <FiltrosVendas

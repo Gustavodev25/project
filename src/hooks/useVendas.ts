@@ -457,6 +457,7 @@ export function useVendas(platform: string = "Mercado Livre") {
     isLoadingFromCache: isLoadingFromCache || false,
     handleSyncOrders,
     handleConnectAccount,
+    reloadVendas: loadVendasFromDatabase, // Exportar função de reload
     // Novas propriedades para progresso em tempo real
     isConnected,
     progress,

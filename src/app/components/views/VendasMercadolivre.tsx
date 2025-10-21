@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import Sidebar from "../views/ui/Sidebar";
@@ -36,15 +36,17 @@ interface HeaderVendasMercadolivreProps {
   onSyncOrders: (accountIds?: string[]) => void;
   contasConectadas?: any[];
   progress?: any;
+  reloadVendas?: () => Promise<void>;
 }
 
-const HeaderVendasMercadolivre = ({ 
-  vendas = [], 
-  lastSyncedAt = null, 
-  isSyncing = false, 
+const HeaderVendasMercadolivre = ({
+  vendas = [],
+  lastSyncedAt = null,
+  isSyncing = false,
   onSyncOrders,
   contasConectadas = [],
-  progress
+  progress,
+  reloadVendas
 }: HeaderVendasMercadolivreProps) => {
   const router = useRouter();
   const toast = useToast();
@@ -186,9 +188,14 @@ const HeaderVendasMercadolivre = ({
     setNewOrdersCount(0);
   };
 
-  const handleSyncComplete = () => {
+  const handleSyncComplete = async () => {
     // Callback quando sincronização completa com sucesso
-    console.log("Sincronização concluída com sucesso");
+    console.log("Sincronização concluída com sucesso - recarregando vendas...");
+    // Recarregar vendas para atualizar a tabela
+    if (reloadVendas) {
+      await reloadVendas();
+    }
+    // Fechar modal (já acontece automaticamente no ModalSyncVendas)
   };
 
   // Effect para sincronização automática
@@ -433,16 +440,17 @@ export default function VendasMercadolivre() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   
   // Usar o hook de vendas
-  const { 
-    vendas, 
-    lastSyncedAt, 
-    isSyncing, 
-    handleSyncOrders, 
+  const {
+    vendas,
+    lastSyncedAt,
+    isSyncing,
+    handleSyncOrders,
     contasConectadas,
     isConnected,
     progress,
     connect,
-    disconnect
+    disconnect,
+    reloadVendas
   } = useVendas("Mercado Livre");
 
   // Função para lidar com mudanças no período personalizado
@@ -550,6 +558,18 @@ export default function VendasMercadolivre() {
     return () => clearTimeout(timer);
   }, []);
 
+  const handleMobileClose = useCallback(() => {
+    setIsSidebarMobileOpen(false);
+  }, []);
+
+  const handleToggleCollapse = useCallback(() => {
+    setIsSidebarCollapsed((v) => !v);
+  }, []);
+
+  const handleMobileMenu = useCallback(() => {
+    setIsSidebarMobileOpen((v) => !v);
+  }, []);
+
   // Fallbacks de var + evita scroll horizontal
   const mdLeftVar = "md:left-[var(--sidebar-w,16rem)]";
   const mdMlVar = "md:ml-[var(--sidebar-w,16rem)]";
@@ -559,13 +579,13 @@ export default function VendasMercadolivre() {
       <Sidebar
         collapsed={isSidebarCollapsed}
         mobileOpen={isSidebarMobileOpen}
-        onMobileClose={() => setIsSidebarMobileOpen(false)}
+        onMobileClose={handleMobileClose}
       />
 
       <Topbar
         collapsed={isSidebarCollapsed}
-        onToggleCollapse={() => setIsSidebarCollapsed((v) => !v)}
-        onMobileMenu={() => setIsSidebarMobileOpen((v) => !v)}
+        onToggleCollapse={handleToggleCollapse}
+        onMobileMenu={handleMobileMenu}
       />
 
       {/* Plano de fundo da área de conteúdo */}
@@ -578,13 +598,14 @@ export default function VendasMercadolivre() {
       {/* Conteúdo */}
       <main className={`relative z-20 pt-16 p-6 ${mdMlVar}`}>
         <section className="p-6">
-          <HeaderVendasMercadolivre 
+          <HeaderVendasMercadolivre
             vendas={vendas || []}
             lastSyncedAt={lastSyncedAt || null}
             isSyncing={isSyncing || false}
             onSyncOrders={handleSyncOrders}
             contasConectadas={contasConectadas || []}
             progress={progress}
+            reloadVendas={reloadVendas}
           />
           
           {/* Componente de Filtros */}
