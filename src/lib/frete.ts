@@ -3,7 +3,8 @@ export type FreteAdjustParams = {
   base_cost?: number | null;
   shipment_list_cost?: number | null;
   shipment_cost?: number | null;
-  order_cost?: number | null; 
+  shipping_option_cost?: number | null; // <-- novo fallback
+  order_cost?: number | null;
   quantity?: number | null;
 };
 
@@ -19,18 +20,24 @@ function round2(v: number): number {
 }
 
 export function calcularFreteAdjust(params: FreteAdjustParams): number {
-  const lt = params.shipment_logistic_type ?? null; 
+  const lt = params.shipment_logistic_type ?? null;
   const baseCost = toNum(params.base_cost) ?? 0;
   const listCost = toNum(params.shipment_list_cost) ?? 0;
-  const shipCost = toNum(params.shipment_cost) ?? 0;
+
+  // 👉 PRIORIDADE: shipping_option_cost PRIMEIRO (valor que comprador pagou)
+  // Se não existir, usa shipment_cost como fallback
+  let shipCost = toNum(params.shipping_option_cost);
+  if (!shipCost || shipCost === 0) {
+    shipCost = toNum(params.shipment_cost) ?? 0;
+  }
 
   const qty = toNum(params.quantity);
   const numer = toNum(params.order_cost) ?? 0;
-  const unitario = qty && qty !== 0 ? numer / qty : null; 
+  const unitario = qty && qty !== 0 ? numer / qty : null;
 
   let raw: number;
 
-  if (lt === 'self_service') {
+  if (lt === "self_service") {
     const diffRoundedEqZero = round2(baseCost - listCost) === 0;
     if (diffRoundedEqZero) {
       if (unitario !== null && unitario < 79) {
@@ -45,9 +52,9 @@ export function calcularFreteAdjust(params: FreteAdjustParams): number {
   else if (
     unitario !== null &&
     unitario >= 79 &&
-    (lt === 'drop_off' || lt === 'xd_drop_off' || lt === 'fulfillment' || lt === 'cross_docking')
+    (lt === "drop_off" || lt === "xd_drop_off" || lt === "fulfillment" || lt === "cross_docking")
   ) {
-    raw = listCost - shipCost;
+    raw = listCost - (shipCost ?? 0);  // usa o fallback
   }
   else if (unitario !== null && unitario < 79) {
     raw = 0;
@@ -55,8 +62,8 @@ export function calcularFreteAdjust(params: FreteAdjustParams): number {
   else {
     raw = 999;
   }
-  const multiplier = lt === 'self_service' ? 1 : -1;
 
+  const multiplier = lt === "self_service" ? 1 : -1;
   return round2(raw * multiplier);
 }
 

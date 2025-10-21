@@ -4,10 +4,19 @@ import { tryVerifySessionToken } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import * as XLSX from 'xlsx';
 import { Prisma } from '@prisma/client';
+import { sendImportProgress } from '../import-progress/route';
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60; // 60s para Pro/Enterprise, 10s para Free
 
 export async function POST(request: NextRequest) {
+  console.log('[Import Excel] Iniciando importação...');
+  
+  // Obter sessionId para SSE
+  const sessionId = request.headers.get('x-session-id') || 'default';
+  console.log('[Import Excel] SessionId recebido:', sessionId);
+  
   try {
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get("session");
@@ -27,6 +36,8 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const type = formData.get('type') as string;
+    
+    console.log(`[Import Excel] Tipo: ${type}, Arquivo: ${file?.name}, Tamanho: ${file?.size} bytes`);
 
     if (!file) {
       return NextResponse.json(
@@ -50,12 +61,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Ler arquivo
+    console.log('[Import Excel] Lendo arquivo...');
     const ab = await file.arrayBuffer();
     // arrayBuffer -> use type 'array' (SheetJS)
     const workbook = XLSX.read(ab, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    console.log(`[Import Excel] ${data.length} linhas encontradas (incluindo header)`);
 
     if (data.length < 2) {
       return NextResponse.json(
@@ -66,6 +79,17 @@ export async function POST(request: NextRequest) {
 
     const headers = data[0] as string[];
     const rows = data.slice(1) as unknown[][];
+    const totalRows = rows.length;
+    
+    // Enviar evento de início
+    sendImportProgress(sessionId, {
+      type: 'import_start',
+      totalRows,
+      processedRows: 0,
+      importedRows: 0,
+      errorRows: 0,
+      message: `Iniciando importação de ${totalRows} linhas...`
+    });
 
     // Mapear campos para colunas do banco
     const fieldMapping = getFieldMappingNormalized(headers, type);
@@ -75,10 +99,12 @@ export async function POST(request: NextRequest) {
     const errorDetails: string[] = [];
 
     // Pré-carregar referências para resolver nomes -> IDs
+    console.log('[Import Excel] Carregando categorias e formas de pagamento...');
     const [categorias, formas] = await Promise.all([
       prisma.categoria.findMany({ where: { userId } }),
       prisma.formaPagamento.findMany({ where: { userId } })
     ]);
+    console.log(`[Import Excel] ${categorias.length} categorias e ${formas.length} formas carregadas`);
 
     const categoriaById = new Map<string, string>(categorias.map(c => [c.id, c.id]));
     const categoriaByName = new Map<string, string>(
@@ -108,98 +134,143 @@ export async function POST(request: NextRequest) {
     };
 
     // Processar cada linha
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+    console.log(`[Import Excel] Processando ${totalRows} linhas...`);
+    const startTime = Date.now();
+    const BATCH_SIZE = 50; // Processar 50 linhas por batch
+    
+    for (let batchStart = 0; batchStart < totalRows; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
+      const batch = rows.slice(batchStart, batchEnd);
       
-      if (!row || row.every(cell => !cell)) {
-        continue; // Pular linhas vazias
-      }
+      console.log(`[Import Excel] Batch ${Math.floor(batchStart/BATCH_SIZE) + 1}: processando linhas ${batchStart + 1} a ${batchEnd}`);
+      
+      // Processar batch em paralelo
+      await Promise.allSettled(
+        batch.map(async (row, batchIndex) => {
+          const i = batchStart + batchIndex;
+          
+          if (!row || row.every(cell => !cell)) {
+            return; // Pular linhas vazias
+          }
 
-      try {
-        // Se a categoria/forma vier por nome que não existe ainda, cria automaticamente
-        if (type === 'contas_pagar' || type === 'contas_receber') {
-          const rawCategoria = getRawCellValue(row, 'categoria');
-          const rawForma = getRawCellValue(row, 'formaPagamento');
-          // Categoria
-          if (rawCategoria && typeof rawCategoria === 'string') {
-            const k = rawCategoria.trim().toLowerCase();
-            if (k && !categoriaByName.has(k)) {
-              // tipo padrão: DESPESA para contas_pagar, RECEITA para contas_receber
-              const tipoDefault = type === 'contas_pagar' ? 'DESPESA' : 'RECEITA';
-              const created = await prisma.categoria.create({
-                data: { userId, nome: rawCategoria.trim(), descricao: rawCategoria.trim(), tipo: tipoDefault, ativo: true },
-              });
-              categoriaById.set(created.id, created.id);
-              categoriaByName.set(k, created.id);
-            }
-          }
-          // Forma de pagamento
-          if (rawForma && typeof rawForma === 'string') {
-            const kf = rawForma.trim().toLowerCase();
-            if (kf && !formaByName.has(kf)) {
-              const createdFP = await prisma.formaPagamento.create({
-                data: { userId, nome: rawForma.trim(), ativo: true },
-              });
-              formaById.set(createdFP.id, createdFP.id);
-              formaByName.set(kf, createdFP.id);
-            }
-          }
-        }
-
-        const itemData = parseRowData(row, fieldMapping, type, userId, {
-          categoriaById,
-          categoriaByName,
-          formaById,
-          formaByName,
-        });
-        
-        switch (type) {
-          case 'contas_pagar':
-            await prisma.contaPagar.create({
-              data: itemData
-            });
-            break;
-          case 'contas_receber':
-            await prisma.contaReceber.create({
-              data: itemData
-            });
-            break;
-          case 'categorias': {
-            // Evitar duplicar por nome para o mesmo usuário: se existir com mesmo nome/descrição, ignora
-          const dataCat = itemData as Prisma.CategoriaCreateInput;
-          const exists = await prisma.categoria.findFirst({
-            where: {
-              userId,
-              OR: [
-                  { nome: dataCat.nome as string },
-                  { descricao: dataCat.descricao as string },
-              ],
-            },
-          });
-            if (!exists) {
-              await prisma.categoria.create({ data: dataCat });
-            }
-            break;
-          }
-          case 'formas_pagamento':
-            {
-              const dataFP = itemData as Prisma.FormaPagamentoCreateInput;
-              const exists = await prisma.formaPagamento.findFirst({
-                where: { userId, nome: dataFP.nome as string },
-              });
-              if (!exists) {
-                await prisma.formaPagamento.create({ data: dataFP });
+          try {
+            // Se a categoria/forma vier por nome que não existe ainda, cria automaticamente
+            if (type === 'contas_pagar' || type === 'contas_receber') {
+              const rawCategoria = getRawCellValue(row, 'categoria');
+              const rawForma = getRawCellValue(row, 'formaPagamento');
+              // Categoria
+              if (rawCategoria && typeof rawCategoria === 'string') {
+                const k = rawCategoria.trim().toLowerCase();
+                if (k && !categoriaByName.has(k)) {
+                  // tipo padrão: DESPESA para contas_pagar, RECEITA para contas_receber
+                  const tipoDefault = type === 'contas_pagar' ? 'DESPESA' : 'RECEITA';
+                  const created = await prisma.categoria.create({
+                    data: { userId, nome: rawCategoria.trim(), descricao: rawCategoria.trim(), tipo: tipoDefault, ativo: true },
+                  });
+                  categoriaById.set(created.id, created.id);
+                  categoriaByName.set(k, created.id);
+                }
+              }
+              // Forma de pagamento
+              if (rawForma && typeof rawForma === 'string') {
+                const kf = rawForma.trim().toLowerCase();
+                if (kf && !formaByName.has(kf)) {
+                  const createdFP = await prisma.formaPagamento.create({
+                    data: { userId, nome: rawForma.trim(), ativo: true },
+                  });
+                  formaById.set(createdFP.id, createdFP.id);
+                  formaByName.set(kf, createdFP.id);
+                }
               }
             }
-            break;
-        }
-        
-        imported++;
-      } catch (error) {
-        errors++;
-        errorDetails.push(`Linha ${i + 2}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-      }
+
+            const itemData = parseRowData(row, fieldMapping, type, userId, {
+              categoriaById,
+              categoriaByName,
+              formaById,
+              formaByName,
+            });
+            
+            switch (type) {
+              case 'contas_pagar':
+                await prisma.contaPagar.create({
+                  data: itemData
+                });
+                break;
+              case 'contas_receber':
+                await prisma.contaReceber.create({
+                  data: itemData
+                });
+                break;
+              case 'categorias': {
+                // Evitar duplicar por nome para o mesmo usuário: se existir com mesmo nome/descrição, ignora
+              const dataCat = itemData as Prisma.CategoriaCreateInput;
+              const exists = await prisma.categoria.findFirst({
+                where: {
+                  userId,
+                  OR: [
+                      { nome: dataCat.nome as string },
+                      { descricao: dataCat.descricao as string },
+                  ],
+                },
+              });
+                if (!exists) {
+                  await prisma.categoria.create({ data: dataCat });
+                }
+                break;
+              }
+              case 'formas_pagamento':
+                {
+                  const dataFP = itemData as Prisma.FormaPagamentoCreateInput;
+                  const exists = await prisma.formaPagamento.findFirst({
+                    where: { userId, nome: dataFP.nome as string },
+                  });
+                  if (!exists) {
+                    await prisma.formaPagamento.create({ data: dataFP });
+                  }
+                }
+                break;
+            }
+            
+            imported++;
+          } catch (error) {
+            errors++;
+            const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+            console.error(`[Import Excel] Erro na linha ${i + 2}: ${errorMsg}`);
+            errorDetails.push(`Linha ${i + 2}: ${errorMsg}`);
+          }
+        })
+      );
+      
+      const progress = ((batchEnd / totalRows) * 100).toFixed(1);
+      console.log(`[Import Excel] Progresso: ${progress}% (${imported}/${totalRows} importados, ${errors} erros)`);
+      
+      // Enviar progresso via SSE
+      sendImportProgress(sessionId, {
+        type: 'import_progress',
+        totalRows,
+        processedRows: batchEnd,
+        importedRows: imported,
+        errorRows: errors,
+        message: `Processando: ${imported} importados, ${errors} erros`
+      });
     }
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[Import Excel] Concluído: ${imported} importados, ${errors} erros, ${duration}s`);
+    
+    // Enviar evento de conclusão
+    sendImportProgress(sessionId, {
+      type: 'import_complete',
+      totalRows,
+      processedRows: totalRows,
+      importedRows: imported,
+      errorRows: errors,
+      message: `Importação concluída: ${imported} registros importados em ${duration}s`
+    });
+    
+    // Aguardar um pouco para garantir que o evento foi enviado
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     return NextResponse.json({
       success: true,
@@ -209,9 +280,21 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("Erro ao processar importação:", error);
+    console.error("[Import Excel] Erro fatal:", error);
+    const errorMessage = error instanceof Error ? error.message : "Erro ao processar arquivo";
+    
+    // Enviar evento de erro
+    sendImportProgress(sessionId, {
+      type: 'import_error',
+      totalRows: 0,
+      processedRows: 0,
+      importedRows: 0,
+      errorRows: 0,
+      message: `Erro: ${errorMessage}`
+    });
+    
     return NextResponse.json(
-      { error: "Erro ao processar arquivo" },
+      { error: errorMessage, details: error instanceof Error ? error.stack : undefined },
       { status: 500 }
     );
   }

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Modal from './Modal';
 import { useToast } from './toaster';
 
@@ -9,6 +9,14 @@ interface ImportFinanceModalProps {
   onImportSuccess?: () => void;
 }
 
+interface ImportProgress {
+  totalRows: number;
+  processedRows: number;
+  importedRows: number;
+  errorRows: number;
+  message?: string;
+}
+
 export function ImportFinanceModal({ 
   isOpen, 
   onClose, 
@@ -17,8 +25,74 @@ export function ImportFinanceModal({
 }: ImportFinanceModalProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [progress, setProgress] = useState<ImportProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
   const toast = useToast();
+  
+  // Conectar ao SSE quando o modal abrir e estiver fazendo upload
+  useEffect(() => {
+    if (isOpen && isUploading) {
+      const sessionId = sessionIdRef.current;
+      const eventSource = new EventSource(`/api/financeiro/import-progress?sessionId=${sessionId}`, {
+        withCredentials: true
+      });
+      
+      console.log(`[Import SSE] Conectando com sessionId: ${sessionId}`);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'connected') {
+            console.log('[Import SSE] Conectado');
+            return;
+          }
+          
+          if (data.type && ['import_start', 'import_progress', 'import_complete', 'import_error'].includes(data.type)) {
+            console.log('[Import SSE] Progresso recebido:', data);
+            setProgress({
+              totalRows: data.totalRows,
+              processedRows: data.processedRows,
+              importedRows: data.importedRows,
+              errorRows: data.errorRows,
+              message: data.message
+            });
+          }
+        } catch (error) {
+          console.error('[Import SSE] Erro ao processar:', error);
+        }
+      };
+      
+      eventSource.onerror = () => {
+        console.warn('[Import SSE] Erro na conexão');
+      };
+      
+      eventSourceRef.current = eventSource;
+      
+      return () => {
+        eventSource.close();
+        eventSourceRef.current = null;
+      };
+    }
+  }, [isOpen, isUploading]);
+  
+  // Limpar progresso ao fechar modal
+  useEffect(() => {
+    if (!isOpen) {
+      setProgress(null);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    }
+  }, [isOpen]);
+  
+  // Debug: Logar mudanças no progresso
+  useEffect(() => {
+    console.log('[Import Modal] Estado atualizado - progress:', progress, 'isUploading:', isUploading);
+  }, [progress, isUploading]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -74,8 +148,14 @@ export function ImportFinanceModal({
     }
 
     setIsUploading(true);
+    setProgress(null);
 
     try {
+      // Aguardar para garantir que o SSE foi conectado via useEffect
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      console.log('[Import] Iniciando upload com sessionId:', sessionIdRef.current);
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('type', activeTab);
@@ -83,6 +163,9 @@ export function ImportFinanceModal({
       const response = await fetch('/api/financeiro/import-excel', {
         method: 'POST',
         credentials: 'include',
+        headers: {
+          'x-session-id': sessionIdRef.current
+        },
         body: formData,
       });
 
@@ -100,7 +183,11 @@ export function ImportFinanceModal({
       });
 
       onImportSuccess?.();
-      onClose();
+      
+      // Aguardar um pouco antes de fechar para mostrar o sucesso
+      setTimeout(() => {
+        onClose();
+      }, 2000);
     } catch (error) {
       console.error('Erro ao importar:', error);
       toast.toast({
@@ -108,8 +195,8 @@ export function ImportFinanceModal({
         title: "Erro na importação",
         description: error instanceof Error ? error.message : "Erro ao processar arquivo. Tente novamente.",
       });
-    } finally {
       setIsUploading(false);
+      setProgress(null);
     }
   };
 
@@ -260,9 +347,54 @@ export function ImportFinanceModal({
               />
               
               {isUploading ? (
-                <div className="space-y-2">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                  <p className="text-sm text-gray-600">Processando arquivo...</p>
+                <div className="space-y-3">
+                  {progress ? (
+                    <>
+                      {/* Barra de Progresso */}
+                      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-orange-500 to-orange-600 transition-all duration-300 ease-out"
+                          style={{ 
+                            width: `${progress.totalRows > 0 ? (progress.processedRows / progress.totalRows) * 100 : 0}%` 
+                          }}
+                        ></div>
+                      </div>
+                      
+                      {/* Estatísticas */}
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-blue-50 rounded-lg p-2">
+                          <div className="text-xs text-blue-600 font-medium">Total</div>
+                          <div className="text-lg font-bold text-blue-900">{progress.totalRows}</div>
+                        </div>
+                        <div className="bg-green-50 rounded-lg p-2">
+                          <div className="text-xs text-green-600 font-medium">Importados</div>
+                          <div className="text-lg font-bold text-green-900">{progress.importedRows}</div>
+                        </div>
+                        <div className="bg-red-50 rounded-lg p-2">
+                          <div className="text-xs text-red-600 font-medium">Erros</div>
+                          <div className="text-lg font-bold text-red-900">{progress.errorRows}</div>
+                        </div>
+                      </div>
+                      
+                      {/* Mensagem de Status */}
+                      <div className="text-sm text-gray-700 font-medium">
+                        {progress.message || 'Processando...'}
+                      </div>
+                      
+                      {/* Percentual */}
+                      <div className="text-xs text-gray-500">
+                        {progress.totalRows > 0 
+                          ? `${Math.round((progress.processedRows / progress.totalRows) * 100)}% concluído`
+                          : 'Iniciando...'
+                        }
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600 mx-auto"></div>
+                      <p className="text-sm text-gray-600">Preparando importação...</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2">

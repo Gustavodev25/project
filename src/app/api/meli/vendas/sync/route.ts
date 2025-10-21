@@ -138,9 +138,10 @@ function mapListingTypeToExposure(listingType: string | null): string | null {
 function calculateFreightAdjustment(
   logisticType: string | null,
   unitPrice: number | null,
-  quantity: number | null,           // << novo parâmetro
+  quantity: number | null,
   baseCost: number | null,
   listCost: number | null,
+  shippingOptionCost: number | null,
   shipmentCost: number | null
 ): { adjustedCost: number | null; adjustmentSource: string | null } {
   if (!logisticType) return { adjustedCost: null, adjustmentSource: null };
@@ -152,6 +153,7 @@ function calculateFreightAdjustment(
     shipment_logistic_type: logisticType,
     base_cost: baseCost,
     shipment_list_cost: listCost,
+    shipping_option_cost: shippingOptionCost,
     shipment_cost: shipmentCost,
     order_cost: orderCost,
     quantity: quantity ?? 0,
@@ -244,9 +246,10 @@ function calculateFreight(order: any, shipment: any): MeliOrderFreight {
   const { adjustedCost, adjustmentSource } = calculateFreightAdjustment(
     logisticType,
     unitPrice,
-    quantity,   // << antes estava fixo 1
+    quantity,
     baseCost,
     listCost,
+    optCost,
     shipCost
   );
 
