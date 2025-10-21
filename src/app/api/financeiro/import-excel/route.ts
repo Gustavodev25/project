@@ -160,31 +160,61 @@ export async function POST(request: NextRequest) {
         if (rawCategoria && typeof rawCategoria === 'string') {
           const k = rawCategoria.trim().toLowerCase();
           if (k && !categoriaByName.has(k)) {
-            const created = await prisma.categoria.create({
-              data: { userId, nome: rawCategoria.trim(), descricao: rawCategoria.trim(), tipo: tipoDefault, ativo: true },
-            });
-            categoriaById.set(created.id, created.id);
-            categoriaByName.set(k, created.id);
+            novasCategoriasSet.add(rawCategoria.trim());
           }
         }
         
         if (rawForma && typeof rawForma === 'string') {
           const kf = rawForma.trim().toLowerCase();
           if (kf && !formaByName.has(kf)) {
-            const createdFP = await prisma.formaPagamento.create({
-              data: { userId, nome: rawForma.trim(), ativo: true },
-            });
-            formaById.set(createdFP.id, createdFP.id);
-            formaByName.set(kf, createdFP.id);
+            novasFormasSet.add(rawForma.trim());
           }
         }
       });
+      
+      // Criar categorias em lote
+      if (novasCategoriasSet.size > 0) {
+        console.log(`[Import Excel] Criando ${novasCategoriasSet.size} novas categorias...`);
+        const novasCategorias = await prisma.categoria.createManyAndReturn({
+          data: Array.from(novasCategoriasSet).map(nome => ({
+            userId,
+            nome,
+            descricao: nome,
+            tipo: tipoDefault,
+            ativo: true,
+          })),
+        });
+        
+        // Atualizar maps
+        novasCategorias.forEach(cat => {
+          categoriaById.set(cat.id, cat.id);
+          categoriaByName.set(cat.nome.toLowerCase(), cat.id);
+        });
+      }
+      
+      // Criar formas em lote
+      if (novasFormasSet.size > 0) {
+        console.log(`[Import Excel] Criando ${novasFormasSet.size} novas formas de pagamento...`);
+        const novasFormas = await prisma.formaPagamento.createManyAndReturn({
+          data: Array.from(novasFormasSet).map(nome => ({
+            userId,
+            nome,
+            ativo: true,
+          })),
+        });
+        
+        // Atualizar maps
+        novasFormas.forEach(forma => {
+          formaById.set(forma.id, forma.id);
+          formaByName.set(forma.nome.toLowerCase(), forma.id);
+        });
+      }
     }
 
     // Processar cada linha e preparar dados para inserção em lote
     console.log(`[Import Excel] Processando ${totalRows} linhas...`);
     const startTime = Date.now();
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = 100; // Processar 100 linhas por batch
     
     for (let batchStart = 0; batchStart < totalRows; batchStart += BATCH_SIZE) {
       const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
@@ -192,8 +222,11 @@ export async function POST(request: NextRequest) {
       
       console.log(`[Import Excel] Batch: linhas ${batchStart + 1} a ${batchEnd}`);
       
-      // Processar batch em paralelo
-      await Promise.allSettled(
+      // Preparar dados em paralelo
+      const batchData: any[] = [];
+      const batchErrors: string[] = [];
+      
+      await Promise.all(
         batch.map(async (row, batchIndex) => {
           const i = batchStart + batchIndex;
           
@@ -209,53 +242,101 @@ export async function POST(request: NextRequest) {
               formaByName,
             });
             
-            switch (type) {
-              case 'contas_pagar':
-                await prisma.contaPagar.create({ data: itemData });
-                break;
-              case 'contas_receber':
-                await prisma.contaReceber.create({ data: itemData });
-                break;
-              case 'categorias': {
-                const dataCat = itemData as Prisma.CategoriaCreateInput;
-                const exists = await prisma.categoria.findFirst({
-                  where: {
-                    userId,
-                    OR: [
-                      { nome: dataCat.nome as string },
-                      { descricao: dataCat.descricao as string },
-                    ],
-                  },
-                });
-                if (!exists) {
-                  await prisma.categoria.create({ data: dataCat });
-                }
-                break;
-              }
-              case 'formas_pagamento': {
-                const dataFP = itemData as Prisma.FormaPagamentoCreateInput;
-                const exists = await prisma.formaPagamento.findFirst({
-                  where: { userId, nome: dataFP.nome as string },
-                });
-                if (!exists) {
-                  await prisma.formaPagamento.create({ data: dataFP });
-                }
-                break;
-              }
-            }
-            
-            imported++;
+            batchData.push(itemData);
           } catch (error) {
-            errors++;
             const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
             console.error(`[Import Excel] Erro na linha ${i + 2}: ${errorMsg}`);
-            errorDetails.push(`Linha ${i + 2}: ${errorMsg}`);
+            batchErrors.push(`Linha ${i + 2}: ${errorMsg}`);
           }
         })
       );
       
+      // Inserir todos os dados do batch de uma vez
+      if (batchData.length > 0) {
+        try {
+          switch (type) {
+            case 'contas_pagar':
+              await prisma.contaPagar.createMany({
+                data: batchData,
+                skipDuplicates: true,
+              });
+              imported += batchData.length;
+              break;
+            case 'contas_receber':
+              await prisma.contaReceber.createMany({
+                data: batchData,
+                skipDuplicates: true,
+              });
+              imported += batchData.length;
+              break;
+            case 'categorias': {
+              // Para categorias, filtrar duplicadas antes de inserir
+              const nomesExistentes = await prisma.categoria.findMany({
+                where: {
+                  userId,
+                  OR: batchData.map(d => ({
+                    OR: [
+                      { nome: d.nome },
+                      { descricao: d.descricao },
+                    ],
+                  })),
+                },
+                select: { nome: true, descricao: true },
+              });
+              
+              const existingSet = new Set(
+                nomesExistentes.flatMap(c => [c.nome, c.descricao])
+              );
+              
+              const dataToInsert = batchData.filter(
+                d => !existingSet.has(d.nome) && !existingSet.has(d.descricao)
+              );
+              
+              if (dataToInsert.length > 0) {
+                await prisma.categoria.createMany({
+                  data: dataToInsert,
+                  skipDuplicates: true,
+                });
+                imported += dataToInsert.length;
+              }
+              break;
+            }
+            case 'formas_pagamento': {
+              // Para formas, filtrar duplicadas antes de inserir
+              const nomesExistentes = await prisma.formaPagamento.findMany({
+                where: {
+                  userId,
+                  nome: { in: batchData.map(d => d.nome) },
+                },
+                select: { nome: true },
+              });
+              
+              const existingSet = new Set(nomesExistentes.map(f => f.nome));
+              const dataToInsert = batchData.filter(d => !existingSet.has(d.nome));
+              
+              if (dataToInsert.length > 0) {
+                await prisma.formaPagamento.createMany({
+                  data: dataToInsert,
+                  skipDuplicates: true,
+                });
+                imported += dataToInsert.length;
+              }
+              break;
+            }
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+          console.error(`[Import Excel] Erro ao inserir batch: ${errorMsg}`);
+          batchErrors.push(`Erro ao inserir lote: ${errorMsg}`);
+        }
+      }
+      
+      // Acumular erros
+      errors += batchErrors.length;
+      errorDetails.push(...batchErrors);
+      
       const progress = ((batchEnd / totalRows) * 100).toFixed(1);
-      console.log(`[Import Excel] Progresso: ${progress}%`);
+      console.log(`[Import Excel] Progresso: ${progress}% (${imported}/${totalRows})`);
       
       // Enviar progresso via stream
       sendEvent({
@@ -405,7 +486,14 @@ function parseRowData(
       }
     }
     
-    return new Date(dateStr);
+    // Tentar converter para string e criar Date, ou retornar data atual se falhar
+    try {
+      const dateString = String(dateStr);
+      const parsedDate = new Date(dateString);
+      return !isNaN(parsedDate.getTime()) ? parsedDate : new Date();
+    } catch {
+      return new Date();
+    }
   };
 
   const parseDecimal = (value: unknown) => {
