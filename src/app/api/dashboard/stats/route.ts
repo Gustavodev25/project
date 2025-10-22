@@ -76,6 +76,20 @@ export async function GET(req: NextRequest) {
           start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
           end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
           useRange = true;
+          
+          // Log detalhado para debug de timezone
+          console.log('[Dashboard Stats] 📅 Calculando ONTEM:', {
+            serverNow: now.toISOString(),
+            serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timezoneOffset: now.getTimezoneOffset(),
+            periodo: {
+              start: start.toISOString(),
+              end: end.toISOString(),
+            },
+            isVercel: process.env.VERCEL === '1',
+            nodeEnv: process.env.NODE_ENV,
+          });
+          
           break;
         }
         case "ultimos_7d": {
@@ -197,6 +211,12 @@ export async function GET(req: NextRequest) {
     console.log('[Dashboard Stats] ✅ Vendas carregadas:', {
       mercadoLivre: vendasMeli.length,
       shopee: vendasShopee.length,
+      filtros: {
+        periodo: periodoParam || 'não especificado',
+        canal: canalParam || 'todos',
+        status: statusParam || 'pagos (padrão)',
+        accountId: accountIdParam || 'todas',
+      },
     });
 
     // Consolidar vendas baseado no filtro de canal
@@ -301,6 +321,24 @@ export async function GET(req: NextRequest) {
         (fretePorPlataforma.get(plataforma) || 0) + freteAbs,
       );
     }
+
+    // 🔍 LOG DETALHADO: Resultado do cálculo
+    console.log('[Dashboard Stats] 💰 Valores calculados:', {
+      vendasProcessadas: vendas.length,
+      faturamentoTotal: faturamentoTotal.toFixed(2),
+      receitaLiquida: receitaLiquida.toFixed(2),
+      vendasRealizadas,
+      ambiente: {
+        isVercel: process.env.VERCEL === '1',
+        nodeEnv: process.env.NODE_ENV,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      amostraVendas: vendas.slice(0, 3).map((v: any) => ({
+        orderId: v.orderId,
+        valorTotal: v.valorTotal,
+        dataVenda: v.dataVenda,
+      })),
+    });
 
     const lucroBruto = receitaLiquida - cmvTotal;
 
