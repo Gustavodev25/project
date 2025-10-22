@@ -21,6 +21,20 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// 🌍 Função para obter a data/hora atual no timezone do Brasil
+function getNowInBrazil(): { year: number; month: number; day: number } {
+  const now = new Date();
+  const brazilDateString = now.toLocaleString('en-US', { 
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  
+  const [month, day, year] = brazilDateString.split('/').map(Number);
+  return { year, month, day };
+}
+
 export async function GET(req: NextRequest) {
   console.log('[Dashboard Stats] 📊 Requisição recebida');
   
@@ -65,68 +79,84 @@ export async function GET(req: NextRequest) {
       // Período pré-definido
       switch (periodoParam) {
         case "hoje": {
-          start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          // 🌍 Usar data ATUAL do Brasil, não do servidor
+          const brazilToday = getNowInBrazil();
+          // Criar datas UTC que representam meia-noite e fim do dia no Brasil
+          start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day, 3, 0, 0, 0)); // +3h para UTC
+          end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999)); // +3h para UTC
           useRange = true;
           break;
         }
         case "ontem": {
-          const ontem = new Date(now);
-          ontem.setDate(ontem.getDate() - 1);
-          start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
-          end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+          // 🌍 Usar data ATUAL do Brasil para calcular ontem
+          const brazilToday = getNowInBrazil();
+          const brazilYesterday = { ...brazilToday, day: brazilToday.day - 1 };
+          
+          // Criar datas UTC que representam ontem no horário do Brasil
+          // Brasil 00:00 = UTC 03:00 (adicionar 3h)
+          // Brasil 23:59 = UTC 02:59 do dia seguinte (adicionar 3h)
+          start = new Date(Date.UTC(brazilYesterday.year, brazilYesterday.month - 1, brazilYesterday.day, 3, 0, 0, 0));
+          end = new Date(Date.UTC(brazilYesterday.year, brazilYesterday.month - 1, brazilYesterday.day + 1, 2, 59, 59, 999));
           useRange = true;
           
           // Log detalhado para debug de timezone
-          console.log('[Dashboard Stats] 📅 Calculando ONTEM:', {
-            serverNow: now.toISOString(),
-            serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            timezoneOffset: now.getTimezoneOffset(),
-            periodo: {
+          console.log('[Dashboard Stats] 📅 Calculando ONTEM (Brasil):', {
+            serverNowUTC: now.toISOString(),
+            brazilNow: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+            brazilYesterday: `${brazilYesterday.day}/${brazilYesterday.month}/${brazilYesterday.year}`,
+            periodoUTC: {
               start: start.toISOString(),
               end: end.toISOString(),
             },
+            explicacao: 'Ontem no Brasil, buscando em UTC com offset +3h',
             isVercel: process.env.VERCEL === '1',
-            nodeEnv: process.env.NODE_ENV,
           });
           
           break;
         }
         case "ultimos_7d": {
-          const seteAtras = new Date(now);
-          seteAtras.setDate(seteAtras.getDate() - 6); // Hoje + 6 dias atrás = 7 dias
-          start = new Date(seteAtras.getFullYear(), seteAtras.getMonth(), seteAtras.getDate(), 0, 0, 0, 0);
-          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          // 🌍 Usar data do Brasil
+          const brazilToday = getNowInBrazil();
+          const sevenDaysAgo = new Date(brazilToday.year, brazilToday.month - 1, brazilToday.day - 6);
+          start = new Date(Date.UTC(sevenDaysAgo.getFullYear(), sevenDaysAgo.getMonth(), sevenDaysAgo.getDate(), 3, 0, 0, 0));
+          end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
           useRange = true;
           break;
         }
         case "ultimos_30d": {
-          const trintaAtras = new Date(now);
-          trintaAtras.setDate(trintaAtras.getDate() - 29); // Hoje + 29 dias atrás = 30 dias
-          start = new Date(trintaAtras.getFullYear(), trintaAtras.getMonth(), trintaAtras.getDate(), 0, 0, 0, 0);
-          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          // 🌍 Usar data do Brasil
+          const brazilToday = getNowInBrazil();
+          const thirtyDaysAgo = new Date(brazilToday.year, brazilToday.month - 1, brazilToday.day - 29);
+          start = new Date(Date.UTC(thirtyDaysAgo.getFullYear(), thirtyDaysAgo.getMonth(), thirtyDaysAgo.getDate(), 3, 0, 0, 0));
+          end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
           useRange = true;
           break;
         }
         case "ultimos_12m": {
-          const dozeAtras = new Date(now);
-          dozeAtras.setMonth(dozeAtras.getMonth() - 12);
-          start = new Date(dozeAtras.getFullYear(), dozeAtras.getMonth(), dozeAtras.getDate(), 0, 0, 0, 0);
-          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          // 🌍 Usar data do Brasil
+          const brazilToday = getNowInBrazil();
+          const twelveMonthsAgo = new Date(brazilToday.year, brazilToday.month - 13, brazilToday.day);
+          start = new Date(Date.UTC(twelveMonthsAgo.getFullYear(), twelveMonthsAgo.getMonth(), twelveMonthsAgo.getDate(), 3, 0, 0, 0));
+          end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
           useRange = true;
           break;
         }
         case "mes_passado": {
-          const primeiroDiaMesPassado = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const ultimoDiaMesPassado = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-          start = primeiroDiaMesPassado;
-          end = ultimoDiaMesPassado;
+          // 🌍 Usar data do Brasil
+          const brazilToday = getNowInBrazil();
+          const lastMonthDate = new Date(brazilToday.year, brazilToday.month - 2, 1); // Mês passado
+          const lastDayOfLastMonth = new Date(brazilToday.year, brazilToday.month - 1, 0).getDate();
+          start = new Date(Date.UTC(lastMonthDate.getFullYear(), lastMonthDate.getMonth(), 1, 3, 0, 0, 0));
+          end = new Date(Date.UTC(lastMonthDate.getFullYear(), lastMonthDate.getMonth(), lastDayOfLastMonth + 1, 2, 59, 59, 999));
           useRange = true;
           break;
         }
         case "este_mes": {
-          start = startOfMonth(now);
-          end = endOfMonth(now);
+          // 🌍 Usar data do Brasil
+          const brazilToday = getNowInBrazil();
+          const lastDayOfMonth = new Date(brazilToday.year, brazilToday.month, 0).getDate();
+          start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, 1, 3, 0, 0, 0));
+          end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, lastDayOfMonth + 1, 2, 59, 59, 999));
           useRange = true;
           break;
         }
