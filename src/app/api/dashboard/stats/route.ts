@@ -163,6 +163,7 @@ export async function GET(req: NextRequest) {
           ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere }
           : { userId: session.sub, ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}), ...statusWhere, ...tipoWhere, ...modalidadeWhere },
         select: {
+          orderId: true, // ⚠️ IMPORTANTE: Necessário para distinct e deduplicação
           valorTotal: true,
           taxaPlataforma: true,
           frete: true,
@@ -179,6 +180,7 @@ export async function GET(req: NextRequest) {
           ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere }
           : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere },
         select: {
+          orderId: true, // ⚠️ IMPORTANTE: Necessário para distinct e deduplicação
           valorTotal: true,
           taxaPlataforma: true,
           frete: true,
@@ -208,7 +210,40 @@ export async function GET(req: NextRequest) {
       vendas = [...vendasMeli, ...vendasShopee];
     }
 
-    console.log('[Dashboard Stats] 📊 Processando', vendas.length, 'vendas');
+    // ⚠️ DEDUPLICAÇÃO ADICIONAL: Garantir que nenhum orderId seja contado duas vezes
+    // O distinct do Prisma pode não funcionar perfeitamente em todos os casos
+    const vendasDeduplicadas: typeof vendas = [];
+    const orderIdsVistos = new Set<string>();
+    
+    for (const venda of vendas) {
+      const orderId = (venda as any).orderId;
+      
+      if (!orderId) {
+        // Se não tiver orderId, incluir sempre (caso raro)
+        vendasDeduplicadas.push(venda);
+        console.warn('[Dashboard Stats] ⚠️ Venda sem orderId detectada');
+        continue;
+      }
+      
+      if (!orderIdsVistos.has(orderId)) {
+        orderIdsVistos.add(orderId);
+        vendasDeduplicadas.push(venda);
+      } else {
+        console.warn('[Dashboard Stats] ⚠️ Venda duplicada detectada e removida:', {
+          orderId,
+          valorTotal: venda.valorTotal,
+          dataVenda: venda.dataVenda,
+        });
+      }
+    }
+
+    const vendasRemovidas = vendas.length - vendasDeduplicadas.length;
+    if (vendasRemovidas > 0) {
+      console.warn(`[Dashboard Stats] 🚨 ${vendasRemovidas} venda(s) duplicada(s) removida(s) manualmente`);
+    }
+
+    vendas = vendasDeduplicadas;
+    console.log('[Dashboard Stats] 📊 Processando', vendas.length, 'vendas (após deduplicação)');
 
     // Unique SKUs for CMV calculation
     const skusUnicos = Array.from(
