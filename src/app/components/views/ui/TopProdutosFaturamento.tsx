@@ -17,6 +17,7 @@ interface TopProdutosFaturamentoProps {
   modalidadeEnvioAtiva?: FiltroModalidadeEnvio;
   agrupamentoSKUAtivo?: FiltroAgrupamentoSKU;
   refreshKey?: number;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string; label?: string };
 }
 
 type ProdutoFaturamento = {
@@ -37,6 +38,7 @@ export default function TopProdutosFaturamento({
   modalidadeEnvioAtiva = "todos",
   agrupamentoSKUAtivo = "mlb",
   refreshKey = 0,
+  selectedAccount,
 }: TopProdutosFaturamentoProps) {
   const [dados, setDados] = useState<ProdutoFaturamento[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -63,6 +65,7 @@ export default function TopProdutosFaturamento({
         if (tipoAnuncioAtivo && tipoAnuncioAtivo !== 'todos') params.append('tipoAnuncio', tipoAnuncioAtivo);
         if (modalidadeEnvioAtiva && modalidadeEnvioAtiva !== 'todos') params.append('modalidade', modalidadeEnvioAtiva);
         if (agrupamentoSKUAtivo && agrupamentoSKUAtivo !== 'mlb') params.append('agrupamentoSKU', agrupamentoSKUAtivo);
+        if (selectedAccount && selectedAccount.platform !== 'todos' && selectedAccount.id) params.append('accountId', selectedAccount.id);
         if (refreshKey) params.append('refresh', String(refreshKey));
         
         // Chamar API para dados do top produtos faturamento
@@ -98,7 +101,7 @@ export default function TopProdutosFaturamento({
     return () => {
       isMounted = false;
     };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey, selectedAccount]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { 

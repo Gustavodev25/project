@@ -17,6 +17,7 @@ interface TopProdutosMargemProps {
   modalidadeEnvioAtiva?: FiltroModalidadeEnvio;
   agrupamentoSKUAtivo?: FiltroAgrupamentoSKU;
   refreshKey?: number;
+  selectedAccount?: { platform: 'meli' | 'shopee' | 'todos'; id?: string; label?: string };
 }
 
 type ProdutoMargem = {
@@ -39,6 +40,7 @@ export default function TopProdutosMargem({
   modalidadeEnvioAtiva = "todos",
   agrupamentoSKUAtivo = "mlb",
   refreshKey = 0,
+  selectedAccount,
 }: TopProdutosMargemProps) {
   const [dados, setDados] = useState<ProdutoMargem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -65,6 +67,7 @@ export default function TopProdutosMargem({
         if (tipoAnuncioAtivo && tipoAnuncioAtivo !== 'todos') params.append('tipoAnuncio', tipoAnuncioAtivo);
         if (modalidadeEnvioAtiva && modalidadeEnvioAtiva !== 'todos') params.append('modalidade', modalidadeEnvioAtiva);
         if (agrupamentoSKUAtivo && agrupamentoSKUAtivo !== 'mlb') params.append('agrupamentoSKU', agrupamentoSKUAtivo);
+        if (selectedAccount && selectedAccount.platform !== 'todos' && selectedAccount.id) params.append('accountId', selectedAccount.id);
         if (refreshKey) params.append('refresh', String(refreshKey));
         
         // Chamar API para dados do top produtos margem
@@ -100,7 +103,7 @@ export default function TopProdutosMargem({
     return () => {
       isMounted = false;
     };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, canalAtivo, statusAtivo, tipoAnuncioAtivo, modalidadeEnvioAtiva, agrupamentoSKUAtivo, refreshKey, selectedAccount]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { 

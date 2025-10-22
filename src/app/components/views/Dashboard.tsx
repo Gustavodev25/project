@@ -269,6 +269,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
             <Suspense fallback={<div className="h-96 bg-gray-50 rounded-lg animate-pulse" />}>
@@ -282,6 +283,7 @@ export default function Dashboard() {
                 modalidadeEnvioAtiva={modalidadeEnvioAtiva}
                 agrupamentoSKUAtivo={agrupamentoSKUAtivo}
                 refreshKey={refreshKey}
+                selectedAccount={selectedAccount}
               />
             </Suspense>
           </div>

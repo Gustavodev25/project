@@ -94,6 +94,7 @@ export async function GET(req: NextRequest) {
     const tipoAnuncioParam = url.searchParams.get("tipoAnuncio");
     const modalidadeParam = url.searchParams.get("modalidade");
     const agrupamentoSKUParam = url.searchParams.get("agrupamentoSKU") || "mlb";
+    const accountIdParam = url.searchParams.get("accountId");
 
     let start: Date;
     let end: Date;
@@ -122,15 +123,19 @@ export async function GET(req: NextRequest) {
     const tipoWhere = getTipoAnuncioWhere(tipoAnuncioParam);
     const modalidadeWhere = getModalidadeWhere(modalidadeParam);
 
+    // Adicionar filtro de conta específica se fornecido
+    const accountWhere = accountIdParam ? { meliAccountId: accountIdParam } : {};
+    const accountWhereShopee = accountIdParam ? { shopeeAccountId: accountIdParam } : {};
+
     // WhereClause para Mercado Livre (com tipoAnuncio e modalidade)
     const whereClauseMeli = usarTodasVendas
-      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere }
-      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere };
+      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere, ...accountWhere }
+      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...tipoWhere, ...modalidadeWhere, ...accountWhere };
 
     // WhereClause para Shopee (sem tipoAnuncio e modalidade)
     const whereClauseShopee = usarTodasVendas
-      ? { userId: session.sub, ...statusWhere, ...canalWhere }
-      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere };
+      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...accountWhereShopee }
+      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...accountWhereShopee };
 
     // Buscar vendas do Mercado Livre
     const vendasMeli = await prisma.meliVenda.findMany({
@@ -175,6 +180,7 @@ export async function GET(req: NextRequest) {
 
     console.log(`[TopProdutosFaturamento] Encontradas ${vendas.length} vendas no período`);
     console.log(`[TopProdutosFaturamento] Período: ${usarTodasVendas ? 'todos' : `${start.toISOString()} - ${end.toISOString()}`}`);
+    console.log(`[TopProdutosFaturamento] Filtro de conta: ${accountIdParam || 'todas'}`);
     if (vendas.length > 0) {
       console.log(`[TopProdutosFaturamento] Primeira venda: ${vendas[0].titulo} - R$ ${vendas[0].valorTotal} - Plataforma: ${vendas[0].plataforma}`);
       console.log(`[TopProdutosFaturamento] Últimas 3 vendas:`, vendas.slice(0, 3).map(v => ({
