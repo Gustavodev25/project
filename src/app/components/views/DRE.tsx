@@ -474,6 +474,122 @@ export default function DRE() {
                 <span>(-) DESPESAS OPERACIONAIS</span>
                 <span>{currency(despesasOperacionais)}</span>
               </div>
+
+              {/* Mês a mês: Receitas e deduções */}
+              {dreData && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                      <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
+                        <svg
+                          className="w-3 h-3 text-gray-600"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 6h16M4 12h16M4 18h16"
+                          />
+                        </svg>
+                      </div>
+                      <h4 className="text-xs font-medium text-gray-700">Receitas e Deducoes por Mes</h4>
+                    </div>
+                  </div>
+                  <div className="overflow-auto rounded-lg border border-gray-200 bg-white">
+                    <table className="w-full min-w-[600px] text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="sticky left-0 z-10 bg-gray-50 py-2 px-3 text-left text-xs font-medium text-gray-700 border-r border-gray-200">
+                            Indicador
+                          </th>
+                          {(dreData.months || []).map((m) => (
+                            <th key={m.key} className="py-2 px-2 text-right text-xs font-medium text-gray-700">
+                              {m.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* (+) RECEITA BRUTA */}
+                        <tr className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-white py-2 px-3 font-medium text-gray-900 border-r border-gray-200">
+                            (+) Receita Bruta
+                          </td>
+                          {dreData.months.map((m) => {
+                            const v = (dreData.receitaBrutaMeliPorMes[m.key] || 0) + (dreData.receitaBrutaShopeePorMes[m.key] || 0);
+                            return (
+                              <td key={m.key} className="py-2 px-2 text-right text-gray-700">
+                                {v !== 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {/* (-) DEDUÇÕES */}
+                        <tr className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-white py-2 px-3 font-medium text-gray-900 border-r border-gray-200">
+                            (-) Deducoes da Receita Bruta
+                          </td>
+                          {dreData.months.map((m) => {
+                            const v = (dreData.deducoesMeliPorMes[m.key] || 0) + (dreData.deducoesShopeePorMes[m.key] || 0);
+                            return (
+                              <td key={m.key} className="py-2 px-2 text-right text-gray-700">
+                                {v !== 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {/* (=) RECEITA LÍQUIDA */}
+                        <tr className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-white py-2 px-3 font-semibold text-gray-900 border-r border-gray-200">
+                            (=) Receita Liquida
+                          </td>
+                          {dreData.months.map((m) => {
+                            const receitaBruta = (dreData.receitaBrutaMeliPorMes[m.key] || 0) + (dreData.receitaBrutaShopeePorMes[m.key] || 0);
+                            const deducoes = (dreData.deducoesMeliPorMes[m.key] || 0) + (dreData.deducoesShopeePorMes[m.key] || 0);
+                            const v = receitaBruta - deducoes;
+                            return (
+                              <td key={m.key} className="py-2 px-2 text-right font-semibold text-gray-900">
+                                {v !== 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {/* (-) TAXAS/COMISSÕES */}
+                        <tr className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-white py-2 px-3 font-medium text-gray-900 border-r border-gray-200">
+                            (-) Taxas e Comissoes de Marketplaces
+                          </td>
+                          {dreData.months.map((m) => {
+                            const v = (dreData.taxasMeliPorMes[m.key] || 0) + (dreData.taxasShopeePorMes[m.key] || 0);
+                            return (
+                              <td key={m.key} className="py-2 px-2 text-right text-gray-700">
+                                {v !== 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {/* (-) FRETES */}
+                        <tr className="border-t border-gray-200">
+                          <td className="sticky left-0 z-10 bg-white py-2 px-3 font-medium text-gray-900 border-r border-gray-200">
+                            (-) Custo de Frete Marketplace
+                          </td>
+                          {dreData.months.map((m) => {
+                            const v = (dreData.freteMeliPorMes[m.key] || 0) + (dreData.freteShopeePorMes[m.key] || 0);
+                            return (
+                              <td key={m.key} className="py-2 px-2 text-right text-gray-700">
+                                {v !== 0 ? currency(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -576,6 +692,22 @@ export default function DRE() {
                   </tr>
                 </thead>
                 <tbody>
+                  {/* Total de Despesas (todas as categorias do mês) */}
+                  {dreData && (
+                    <tr className="border-t border-gray-300 bg-white/70">
+                      <td className="sticky left-0 z-10 bg-white/70 py-2 pr-4 text-gray-900 whitespace-nowrap border-r border-gray-200 font-semibold">
+                        Total de Despesas
+                      </td>
+                      {dreData.months.map((m) => {
+                        const v = dreData.despesasPorMes[m.key] || 0;
+                        return (
+                          <td key={m.key} className="py-2 px-2 text-right text-gray-800 font-medium">
+                            {v !== 0 ? currency(v) : "—"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  )}
                   {!dreData || dreData.categorias.length === 0 ? (
                     <tr>
                       <td
