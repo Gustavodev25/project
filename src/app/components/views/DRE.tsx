@@ -490,6 +490,7 @@ export default function DRE() {
                 <span>{currency(despesasOperacionais)}</span>
               </div>
 
+            </div>
             )}
             {/* Tabela mensal do demonstrativo */}
               {/* M├¬s a m├¬s: Receitas e dedu├º├Áes */}
@@ -539,7 +540,7 @@ export default function DRE() {
                             const v = (dreData.receitaBrutaMeliPorMes[m.key] || 0) + (dreData.receitaBrutaShopeePorMes[m.key] || 0);
                             return (
                               <td key={m.key} className="py-2 px-2 text-right text-gray-700">
-                                {v !== 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
@@ -553,7 +554,7 @@ export default function DRE() {
                             const v = (dreData.deducoesMeliPorMes[m.key] || 0) + (dreData.deducoesShopeePorMes[m.key] || 0);
                             return (
                               <td key={m.key} className="py-2 px-2 text-right text-gray-700">
-                                {v !== 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
@@ -569,7 +570,7 @@ export default function DRE() {
                             const v = receitaBruta - deducoes;
                             return (
                               <td key={m.key} className="py-2 px-2 text-right font-semibold text-gray-900">
-                                {v !== 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
@@ -583,7 +584,7 @@ export default function DRE() {
                             const v = (dreData.taxasMeliPorMes[m.key] || 0) + (dreData.taxasShopeePorMes[m.key] || 0);
                             return (
                               <td key={m.key} className="py-2 px-2 text-right text-gray-700">
-                                {v !== 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
@@ -597,7 +598,7 @@ export default function DRE() {
                             const v = (dreData.freteMeliPorMes[m.key] || 0) + (dreData.freteShopeePorMes[m.key] || 0);
                             return (
                               <td key={m.key} className="py-2 px-2 text-right text-gray-700">
-                                {v !== 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
@@ -607,7 +608,6 @@ export default function DRE() {
                   </div>
                 </div>
               )}
-            </div>
           </div>
 
           {/* Categorias listadas por meses */}
@@ -719,7 +719,7 @@ export default function DRE() {
                         const v = despesasPorMesVisiveis[m.key] || 0;
                         return (
                           <td key={m.key} className="py-2 px-2 text-right text-gray-800 font-medium">
-                            {v !== 0 ? currency(v) : "ÔÇö"}
+                            {currency(v)}
                           </td>
                         );
                       })}
@@ -768,7 +768,7 @@ export default function DRE() {
                                 key={m.key}
                                 className={`py-2 px-2 text-right ${!isVisible ? "opacity-50 line-through" : "text-gray-600"}`}
                               >
-                                {v > 0 ? currency(v) : "ÔÇö"}
+                                {currency(v)}
                               </td>
                             );
                           })}
