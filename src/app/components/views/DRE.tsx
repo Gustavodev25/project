@@ -388,7 +388,7 @@ export default function DRE() {
                 </span>
               </div>
             </div>
-            <div className="space-y-2 text-sm">
+            {false && (<div className="space-y-2 text-sm">
               {/* RECEITA BRUTA TOTAL */}
               <div className="flex items-center justify-between font-semibold text-gray-900">
                 <span>(+) RECEITA BRUTA TOTAL</span>
@@ -490,10 +490,12 @@ export default function DRE() {
                 <span>{currency(despesasOperacionais)}</span>
               </div>
 
+            )}
+            {/* Tabela mensal do demonstrativo */}
               {/* M├¬s a m├¬s: Receitas e dedu├º├Áes */}
               {dreData && (
                 <div className="mt-4">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="hidden">
                     <div className="flex items-center">
                       <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
                         <svg
@@ -831,5 +833,6 @@ export default function DRE() {
     </div>
   );
 }
+
 
 
