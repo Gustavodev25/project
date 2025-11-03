@@ -10,6 +10,7 @@ interface FinanceiroCategoriasAreaProps {
   dataFimPersonalizada?: Date | null;
   portadorId?: string | null;
   categoriasSelecionadas?: Set<string>; // Se filtrar categorias específicas, mostra apenas elas
+  tipoVisualizacao?: 'caixa' | 'competencia';
   refreshKey?: number;
   tipo?: "despesas" | "receitas";
 }
@@ -34,6 +35,7 @@ export default function FinanceiroCategoriasArea({
   dataFimPersonalizada = null,
   portadorId = null,
   categoriasSelecionadas = new Set(),
+  tipoVisualizacao = 'caixa',
   refreshKey = 0,
   tipo = "despesas",
 }: FinanceiroCategoriasAreaProps) {
@@ -57,6 +59,7 @@ export default function FinanceiroCategoriasArea({
           params.append('categoriaIds', Array.from(categoriasSelecionadas).join(','));
         }
         params.append('tipo', tipo);
+        params.append('tipoData', tipoVisualizacao);
         if (refreshKey) params.append('refresh', String(refreshKey));
 
         const url = `/api/financeiro/dashboard/series-categorias?${params.toString()}`;
@@ -72,7 +75,7 @@ export default function FinanceiroCategoriasArea({
     };
     load();
     return () => { aborted = true; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, refreshKey, tipo]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, tipoVisualizacao, refreshKey, tipo]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 

@@ -105,6 +105,28 @@ export async function POST(request: Request) {
         .replace(/[^a-z0-9]+/g, " ")
         .trim();
 
+    // Helpers simples + fila controlada para detalhes (evita 429)
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let activeDetail = 0;
+    const maxConcurrentDetail = 2;
+    const fetchDetalheContaReceberCategoriaId = async (id: number): Promise<{ catId: string | null; competencia: Date | null } | null> => {
+      while (activeDetail >= maxConcurrentDetail) {
+        await sleep(40);
+      }
+      activeDetail++;
+      try {
+        const conta = await getBlingContaReceberById(refreshedAccount.access_token, id);
+        const catId = conta?.categoria?.id ? String(conta.categoria.id) : null;
+        const competencia = parseDate((conta as any)?.competencia || (conta as any)?.dataCompetencia || null);
+        return { catId, competencia };
+      } catch {
+        return null;
+      } finally {
+        activeDetail--;
+        await sleep(150);
+      }
+    };
+
     // Enviar progresso inicial
     sendProgressToUser(userId, {
       type: "sync_start",
@@ -196,7 +218,7 @@ export async function POST(request: Request) {
       progressLabel: `Processando ${totalContas} contas`
     });
 
-    const batchSize = 5; // reduzir concorrência para diminuir risco de 429
+    const batchSize = 12; // aumenta concorrência de processamento principal
     for (let start = 0; start < contasBling.length; start += batchSize) {
       const end = Math.min(start + batchSize, contasBling.length);
       const batch = contasBling.slice(start, end);
@@ -230,6 +252,18 @@ export async function POST(request: Request) {
         const dataRecebimento = parseDate(
           item?.dataRecebimento || item?.dataLiquidacao || item?.recebimento,
         );
+        let competenciaFromDetail: Date | null = null;
+
+        // Data de competência (quando disponível no Bling) com fallback para vencimento
+        const dataCompetencia =
+          parseDate(
+            (item as any)?.dataCompetencia ||
+            (item as any)?.competencia ||
+            (item as any)?.competenceDate ||
+            (item as any)?.competenciaData ||
+            (item as any)?.competencia_inicio ||
+            (item as any)?.competenciaInicio
+          ) || dataVencimento;
 
         let categoriaBlingId =
           item?.categoria?.id?.toString?.() ||
@@ -244,9 +278,10 @@ export async function POST(request: Request) {
           if (!categoriaBlingId && item?.id && (globalThis as any).__cz_cr_detailCount__ < detailLimit) {
             (globalThis as any).__cz_cr_detailCount__ = ((globalThis as any).__cz_cr_detailCount__ || 0) + 1;
             try {
-              const contaIndividual = await getBlingContaReceberById(refreshedAccount.access_token, item.id);
-              if (contaIndividual?.categoria?.id) {
-                categoriaBlingId = contaIndividual.categoria.id.toString();
+              const det = await fetchDetalheContaReceberCategoriaId(Number(item.id));
+              if (det) {
+                if (det.catId) categoriaBlingId = det.catId;
+                if (det.competencia) competenciaFromDetail = det.competencia;
               }
             } catch {}
           }
@@ -353,33 +388,93 @@ export async function POST(request: Request) {
           status = "vencido";
 
         console.log(`[Sync CR] Salvando conta ${blingId}: categoriaId=${categoriaId}, categoriaBlingId=${categoriaBlingId}`);
-        
-        await prisma.contaReceber.upsert({
-          where: { userId_blingId: { userId, blingId } },
-          update: {
-            descricao,
-            valor,
-            dataVencimento,
-            dataRecebimento,
-            status,
-            categoriaId,
-            formaPagamentoId,
-            origem: "SINCRONIZACAO",
-            atualizadoEm: new Date(),
-          },
-          create: {
-            userId,
-            blingId,
-            descricao,
-            valor,
-            dataVencimento,
-            dataRecebimento,
-            status,
-            categoriaId,
-            formaPagamentoId,
-            origem: "SINCRONIZACAO",
-          },
-        });
+
+        const competenciaFinal = null; // Competência não utilizada em Contas a Receber
+
+        const updateData: any = {
+          descricao,
+          valor,
+          dataVencimento,
+          dataRecebimento,
+          status,
+          categoriaId,
+          formaPagamentoId,
+          origem: "SINCRONIZACAO",
+          atualizadoEm: new Date(),
+        };
+        const createData: any = {
+          userId,
+          blingId,
+          descricao,
+          valor,
+          dataVencimento,
+          dataRecebimento,
+          status,
+          categoriaId,
+          formaPagamentoId,
+          origem: "SINCRONIZACAO",
+        };
+        // Não persistimos competência em Contas a Receber
+
+        try {
+          await prisma.contaReceber.upsert({
+            where: { userId_blingId: { userId, blingId } },
+            update: updateData,
+            create: createData,
+          });
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          const code = String((err && (err as any).code) || "");
+          if (code === 'P2022' || msg.toLowerCase().includes('data_competencia')) {
+            // Fallback raw SQL quando o client ou schema antigo tentar usar data_competencia
+            try {
+              const newId = `cr_${userId}_${blingId}`;
+              await prisma.$executeRaw`
+                INSERT INTO conta_receber (
+                  id,
+                  user_id,
+                  bling_id,
+                  descricao,
+                  valor,
+                  data_vencimento,
+                  data_recebimento,
+                  status,
+                  categoria_id,
+                  forma_pagamento_id,
+                  origem,
+                  atualizado_em
+                ) VALUES (
+                  ${newId},
+                  ${userId},
+                  ${blingId},
+                  ${descricao},
+                  ${valor},
+                  ${dataVencimento},
+                  ${dataRecebimento},
+                  ${status},
+                  ${categoriaId ?? null},
+                  ${formaPagamentoId ?? null},
+                  'SINCRONIZACAO',
+                  NOW()
+                )
+                ON CONFLICT (user_id, bling_id) DO UPDATE SET
+                  descricao = EXCLUDED.descricao,
+                  valor = EXCLUDED.valor,
+                  data_vencimento = EXCLUDED.data_vencimento,
+                  data_recebimento = EXCLUDED.data_recebimento,
+                  status = EXCLUDED.status,
+                  categoria_id = EXCLUDED.categoria_id,
+                  forma_pagamento_id = EXCLUDED.forma_pagamento_id,
+                  origem = EXCLUDED.origem,
+                  atualizado_em = NOW();
+              `;
+            } catch (rawErr) {
+              throw rawErr;
+            }
+          } else {
+            throw err;
+          }
+        }
           synced++;
         } catch (e) {
           console.error("Falha ao sincronizar conta a receber:", e);

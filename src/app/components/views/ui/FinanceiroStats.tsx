@@ -10,6 +10,7 @@ interface FinanceiroStatsProps {
   dataFimPersonalizada?: Date | null;
   portadorId?: string | null;
   categoriasSelecionadas?: Set<string>;
+  tipoVisualizacao?: 'caixa' | 'competencia';
   refreshKey?: number;
 }
 
@@ -43,6 +44,7 @@ export default function FinanceiroStats({
   dataFimPersonalizada = null,
   portadorId = null,
   categoriasSelecionadas = new Set(),
+  tipoVisualizacao = 'caixa',
   refreshKey = 0,
 }: FinanceiroStatsProps) {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
@@ -63,6 +65,7 @@ export default function FinanceiroStats({
         if (categoriasSelecionadas.size > 0) {
           params.append('categoriaIds', Array.from(categoriasSelecionadas).join(','));
         }
+        params.append('tipo', tipoVisualizacao);
         if (refreshKey) params.append('refresh', String(refreshKey));
 
         const url = `/api/financeiro/dashboard/stats${params.toString() ? `?${params.toString()}` : ''}`;
@@ -78,7 +81,7 @@ export default function FinanceiroStats({
     }
     load();
     return () => { isMounted = false; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, refreshKey]);
+  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, tipoVisualizacao, refreshKey]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
   const formatPercentage = (value: number) => `${value > 0 ? "+" : ""}${(value || 0).toFixed(1)}%`;

@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
     const categoriaIdsParam = url.searchParams.get("categoriaIds");
     const categoriaIds = categoriaIdsParam ? categoriaIdsParam.split(",").filter(Boolean) : [];
     const tipoParam = (url.searchParams.get("tipo") || "despesas").toLowerCase(); // despesas | receitas
+    const tipoDataParam = (url.searchParams.get("tipoData") || "caixa").toLowerCase() as 'caixa' | 'competencia'; // caixa | competencia
 
     const now = new Date();
 
@@ -102,12 +103,20 @@ export async function GET(req: NextRequest) {
     }
 
     // Default: despesas (contas a pagar)
+    // Escolher critério de data baseado no tipo de visualização
     const where: any = {
       userId: session.sub,
-      OR: [
-        { dataPagamento: { gte: start, lte: end } },
-        { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
-      ],
+      OR: tipoDataParam === 'caixa'
+        ? [
+            // Caixa: usar dataPagamento (ou dataVencimento se null)
+            { dataPagamento: { gte: start, lte: end } },
+            { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
+          ]
+        : [
+            // Competência: usar dataCompetencia (ou dataVencimento se null)
+            { dataCompetencia: { gte: start, lte: end } },
+            { AND: [{ dataCompetencia: null }, { dataVencimento: { gte: start, lte: end } }] },
+          ],
     };
     if (portadorIdParam) where.formaPagamentoId = String(portadorIdParam);
     if (categoriaIds.length > 0) where.categoriaId = { in: categoriaIds };
@@ -118,12 +127,15 @@ export async function GET(req: NextRequest) {
         valor: true,
         dataPagamento: true,
         dataVencimento: true,
+        dataCompetencia: true,
         categoria: { select: { id: true, nome: true, descricao: true } },
       },
     });
 
     const data = rows.map(r => ({
-      date: r.dataPagamento || r.dataVencimento,
+      date: tipoDataParam === 'caixa'
+        ? (r.dataPagamento || r.dataVencimento)
+        : (r.dataCompetencia || r.dataVencimento),
       valor: toNumber(r.valor),
       categoria: r.categoria?.descricao || r.categoria?.nome || "Sem categoria",
     }));

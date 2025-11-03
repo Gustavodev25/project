@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, memo } from "react";
 import NumberLoader from "../../../../components/NumberLoader";
@@ -25,7 +25,7 @@ type Stats = {
   impostos: number;
   taxasPlataformas: { total: number; mercadoLivre: number; shopee: number };
   custoFrete: { total: number; mercadoLivre: number; shopee: number };
-  margemContribuicao: number; // Receita líquida após taxas e frete
+  margemContribuicao: number; // Receita lÃ­quida apÃ³s taxas e frete
   cmv: number;
   lucroBruto: number;
   vendasRealizadas: number;
@@ -66,7 +66,7 @@ const DashboardStats = memo(function DashboardStats({
       try {
         setLoading(true);
         
-        // Construir parâmetros da URL
+        // Construir parÃ¢metros da URL
         const params = new URLSearchParams();
         if (periodoAtivo !== "todos") {
           params.append("periodo", periodoAtivo);
@@ -93,7 +93,7 @@ const DashboardStats = memo(function DashboardStats({
         const data = (await res.json()) as Stats;
         if (isMounted) setStats({ ...DEFAULT_STATS, ...data });
       } catch (err) {
-        console.error("Falha ao carregar estatísticas do dashboard:", err);
+        console.error("Falha ao carregar estatÃ­sticas do dashboard:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -117,7 +117,7 @@ const DashboardStats = memo(function DashboardStats({
   const formatPercentage = (value: number) => `${value > 0 ? "+" : ""}${(value || 0).toFixed(1)}%`;
   const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value || 0);
 
-  // Função para renderizar valores com loader
+  // FunÃ§Ã£o para renderizar valores com loader
   const renderValue = (
     value: number,
     formatter: (val: number) => string,
@@ -160,7 +160,7 @@ const DashboardStats = memo(function DashboardStats({
             <span className={`text-xs font-medium ${stats.faturamentoTendencia > 0 ? 'text-green-600' : 'text-red-600'}`}>
               {renderValue(stats.faturamentoTendencia, formatPercentage, "w-16", "percentage")}
             </span>
-            <span className="text-xs text-gray-500 ml-2">vs mês anterior</span>
+            <span className="text-xs text-gray-500 ml-2">vs mÃªs anterior</span>
           </div>
         </div>
       </div>
@@ -178,6 +178,7 @@ const DashboardStats = memo(function DashboardStats({
               <h3 className="text-xs font-medium text-gray-600">Impostos s/ Faturamento</h3>
             </div>
           </div>
+          <a href="/financeiro/aliquotas" className="text-[10px] px-2 py-1 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50">Cadastrar alíquota</a>
         </div>
         <div className="space-y-1">
           <div className="text-lg font-bold text-gray-900">{renderValue(-Math.abs(stats.impostos), formatCurrency, "w-24", "currency")}</div>
@@ -187,14 +188,14 @@ const DashboardStats = memo(function DashboardStats({
             ) : stats.impostos > 0 ? (
               `${(safeDiv(stats.impostos, stats.faturamentoTotal) * 100).toFixed(1)}% do faturamento`
             ) : (
-              <span className="text-gray-500">Configure alíquotas</span>
+              <span className="text-gray-500">Configure alíquotas <a href="/financeiro/aliquotas" className="ml-2 text-blue-600 hover:underline">Cadastrar</a></span>
             )}
           </div>
         </div>
       </div>
 
       {/* Taxas das Plataformas */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Total de taxas pagas às plataformas">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Total de taxas pagas Ã s plataformas">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -269,8 +270,8 @@ const DashboardStats = memo(function DashboardStats({
         </div>
       </div>
 
-      {/* Margem de Contribuição (Receita líquida) */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Após taxas e frete">
+      {/* Margem de ContribuiÃ§Ã£o (Receita lÃ­quida) */}
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="ApÃ³s taxas e frete">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -279,7 +280,7 @@ const DashboardStats = memo(function DashboardStats({
               </svg>
             </div>
             <div>
-              <h3 className="text-xs font-medium text-gray-600">Receita Líquida</h3>
+              <h3 className="text-xs font-medium text-gray-600">Receita LÃ­quida</h3>
             </div>
           </div>
         </div>
@@ -322,7 +323,7 @@ const DashboardStats = memo(function DashboardStats({
       </div>
 
       {/* Lucro Bruto */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Receita líquida - CMV">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Receita líquida - Impostos - CMV">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -348,7 +349,7 @@ const DashboardStats = memo(function DashboardStats({
       </div>
 
       {/* Vendas Realizadas */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Número total de vendas">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="NÃºmero total de vendas">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -367,8 +368,8 @@ const DashboardStats = memo(function DashboardStats({
         </div>
       </div>
 
-      {/* Ticket Médio (Venda) */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor médio por venda">
+      {/* Ticket MÃ©dio (Venda) */}
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor mÃ©dio por venda">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -377,7 +378,7 @@ const DashboardStats = memo(function DashboardStats({
               </svg>
             </div>
             <div>
-              <h3 className="text-xs font-medium text-gray-600">Ticket Médio (Venda)</h3>
+              <h3 className="text-xs font-medium text-gray-600">Ticket MÃ©dio (Venda)</h3>
             </div>
           </div>
         </div>
@@ -407,8 +408,8 @@ const DashboardStats = memo(function DashboardStats({
         </div>
       </div>
 
-      {/* Ticket Médio (Unid.) */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor médio por unidade vendida">
+      {/* Ticket MÃ©dio (Unid.) */}
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Valor mÃ©dio por unidade vendida">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -417,7 +418,7 @@ const DashboardStats = memo(function DashboardStats({
               </svg>
             </div>
             <div>
-              <h3 className="text-xs font-medium text-gray-600">Ticket Médio (Unid.)</h3>
+              <h3 className="text-xs font-medium text-gray-600">Ticket MÃ©dio (Unid.)</h3>
             </div>
           </div>
         </div>
@@ -431,3 +432,4 @@ const DashboardStats = memo(function DashboardStats({
 });
 
 export default DashboardStats;
+

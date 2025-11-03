@@ -11,66 +11,71 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function getDateRange(periodo: string): { start: Date; end: Date } {
+function getNowInBrazil(): { year: number; month: number; day: number } {
   const now = new Date();
-  
+  const s = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const [month, day, year] = s.split('/').map(Number);
+  return { year, month, day };
+}
+
+function getDateRange(periodo: string): { start: Date; end: Date } {
+  const b = getNowInBrazil();
+  const now = new Date();
   switch (periodo) {
-    case "hoje": {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'hoje': {
+      const start = new Date(Date.UTC(b.year, b.month - 1, b.day, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, b.day + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ontem": {
-      const ontem = new Date(now);
-      ontem.setDate(ontem.getDate() - 1);
-      const start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
-      const end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+    case 'ontem': {
+      const start = new Date(Date.UTC(b.year, b.month - 1, b.day - 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, b.day, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ultimos_7d": {
-      const seteAtras = new Date(now);
-      seteAtras.setDate(seteAtras.getDate() - 6);
-      const start = new Date(seteAtras.getFullYear(), seteAtras.getMonth(), seteAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_7d': {
+      const start = new Date(Date.UTC(b.year, b.month - 1, b.day - 6, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, b.day + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ultimos_30d": {
-      const trintaAtras = new Date(now);
-      trintaAtras.setDate(trintaAtras.getDate() - 29);
-      const start = new Date(trintaAtras.getFullYear(), trintaAtras.getMonth(), trintaAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_30d': {
+      const start = new Date(Date.UTC(b.year, b.month - 1, b.day - 29, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, b.day + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ultimos_12m": {
-      const dozeAtras = new Date(now);
-      dozeAtras.setMonth(dozeAtras.getMonth() - 12);
-      const start = new Date(dozeAtras.getFullYear(), dozeAtras.getMonth(), dozeAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_12m': {
+      const ref = new Date(b.year, b.month - 13, b.day);
+      const start = new Date(Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate(), 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, b.day + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "este_mes": {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'este_mes': {
+      const lastDay = new Date(b.year, b.month, 0).getDate();
+      const start = new Date(Date.UTC(b.year, b.month - 1, 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, lastDay + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "mes_passado": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    case 'mes_passado': {
+      const lastMonth = new Date(b.year, b.month - 2, 1);
+      const lastDayOfLastMonth = new Date(b.year, b.month - 1, 0).getDate();
+      const start = new Date(Date.UTC(lastMonth.getFullYear(), lastMonth.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(lastMonth.getFullYear(), lastMonth.getMonth(), lastDayOfLastMonth + 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ultimos_3_meses": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'ultimos_3_meses': {
+      const ref = new Date(b.year, b.month - 2, 1);
+      const start = new Date(Date.UTC(ref.getFullYear(), ref.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "ultimos_6_meses": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'ultimos_6_meses': {
+      const ref = new Date(b.year, b.month - 5, 1);
+      const start = new Date(Date.UTC(ref.getFullYear(), ref.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(b.year, b.month - 1, 1, 2, 59, 59, 999));
       return { start, end };
     }
-    case "todos":
+    case 'todos':
     default: {
-      return { start: new Date(0), end: new Date() };
+      return { start: new Date(0), end: now };
     }
   }
 }

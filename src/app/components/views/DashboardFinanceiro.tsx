@@ -24,10 +24,11 @@ export default function DashboardFinanceiro() {
 
   // Filtros
   const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {
-    // Inicializar com último mês
+    // Inicializar com o MÊS PASSADO (conforme descrição)
     const hoje = new Date();
-    const ano = hoje.getFullYear();
-    const mes = hoje.getMonth() + 1;
+    const prev = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    const ano = prev.getFullYear();
+    const mes = prev.getMonth() + 1; // 1..12
     const key = `${ano}-${String(mes).padStart(2, "0")}`;
     return new Set([key]);
   });
@@ -36,6 +37,7 @@ export default function DashboardFinanceiro() {
   const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
   const [portadorId, setPortadorId] = useState<string | null>(null);
   const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<Set<string>>(new Set());
+  const [tipoVisualizacao, setTipoVisualizacao] = useState<'caixa' | 'competencia'>('caixa');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -119,6 +121,8 @@ export default function DashboardFinanceiro() {
             onPortadorChange={(id) => { setPortadorId(id); setRefreshKey((v) => v + 1); }}
             categoriasSelecionadas={categoriasSelecionadas}
             onCategoriasSelecionadasChange={(ids) => { setCategoriasSelecionadas(ids); setRefreshKey((v) => v + 1); }}
+            tipoVisualizacao={tipoVisualizacao}
+            onTipoVisualizacaoChange={(tipo) => { setTipoVisualizacao(tipo); setRefreshKey((v) => v + 1); }}
           />
 
           <FinanceiroStats
@@ -127,6 +131,7 @@ export default function DashboardFinanceiro() {
             dataFimPersonalizada={dataFimPersonalizada}
             portadorId={portadorId}
             categoriasSelecionadas={categoriasSelecionadas}
+            tipoVisualizacao={tipoVisualizacao}
             refreshKey={refreshKey}
           />
 
@@ -137,6 +142,7 @@ export default function DashboardFinanceiro() {
               dataFimPersonalizada={dataFimPersonalizada}
               portadorId={portadorId}
               categoriasSelecionadas={categoriasSelecionadas}
+              tipoVisualizacao={tipoVisualizacao}
               refreshKey={refreshKey}
               tipo="despesas"
             />

@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
     const dataFimParam = url.searchParams.get("dataFim");
     const portadorIdParam = url.searchParams.get("portadorId");
     const categoriaIdsParam = url.searchParams.get("categoriaIds");
+    const tipoParam = (url.searchParams.get("tipo") || "caixa").toLowerCase() as 'caixa' | 'competencia';
     const categoriaIds = categoriaIdsParam ? categoriaIdsParam.split(",").filter(Boolean) : [];
 
     const now = new Date();
@@ -144,12 +145,20 @@ export async function GET(req: NextRequest) {
     const totalReceitasFin = receitasFin.reduce((acc, it) => acc + toNumber(it.valor), 0);
 
     // 2) Despesas operacionais no periodo (contas a pagar)
+    // Escolher critério de data baseado no tipo de visualização
     const whereDespesas: Prisma.ContaPagarWhereInput = {
       userId: session.sub,
-      OR: [
-        { dataPagamento: { gte: start, lte: end } },
-        { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
-      ],
+      OR: tipoParam === 'caixa'
+        ? [
+            // Caixa: usar dataPagamento (ou dataVencimento se null)
+            { dataPagamento: { gte: start, lte: end } },
+            { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
+          ]
+        : [
+            // Competência: usar dataCompetencia (ou dataVencimento se null)
+            { dataCompetencia: { gte: start, lte: end } },
+            { AND: [{ dataCompetencia: null }, { dataVencimento: { gte: start, lte: end } }] },
+          ],
     };
     if (portadorIdParam) whereDespesas.formaPagamentoId = String(portadorIdParam);
     if (categoriaIds.length > 0) whereDespesas.categoriaId = { in: categoriaIds };

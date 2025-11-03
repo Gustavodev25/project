@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
 
     const userId = session.sub;
     const body = await request.json();
-    const { descricao, valor, dataPagamento, categoriaId, formaPagamentoId } = body;
+    const { descricao, valor, dataPagamento, categoriaId, formaPagamentoId, historico } = body;
 
     if (!descricao || !valor || !dataPagamento) {
       return NextResponse.json(
@@ -33,8 +33,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const contaPagar = await prisma.contaPagar.create({
-      data: {
+    let contaPagar;
+    try {
+    contaPagar = await prisma.contaPagar.create({
+      data: ({
         userId: userId,
         descricao,
         valor: parseFloat(valor),
@@ -43,12 +45,37 @@ export async function POST(request: NextRequest) {
         status: "pago",
         categoriaId: categoriaId ? String(categoriaId) : null,
         formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
-      },
+        historico: historico ? String(historico) : undefined,
+      } as any),
       include: {
         categoria: true,
         formaPagamento: true,
       },
     });
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const code = String((err && (err as any).code) || "");
+      if (msg.includes('Unknown argument `historico`') || msg.toLowerCase().includes('historico') || code === 'P2022') {
+        contaPagar = await prisma.contaPagar.create({
+          data: ({
+            userId: userId,
+            descricao,
+            valor: parseFloat(valor),
+            dataVencimento: new Date(dataPagamento),
+            dataPagamento: new Date(dataPagamento),
+            status: "pago",
+            categoriaId: categoriaId ? String(categoriaId) : null,
+            formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
+          } as any),
+          include: {
+            categoria: true,
+            formaPagamento: true,
+          },
+        });
+      } else {
+        throw err;
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -127,7 +154,7 @@ export async function PUT(request: NextRequest) {
     const url = new URL(request.url);
     const id = url.pathname.split('/').pop();
     const body = await request.json();
-    const { descricao, valor, dataPagamento, categoriaId, formaPagamentoId } = body;
+    const { descricao, valor, dataPagamento, categoriaId, formaPagamentoId, historico } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -159,23 +186,46 @@ export async function PUT(request: NextRequest) {
     }
 
     // Atualizar o registro
-    const contaPagarAtualizada = await prisma.contaPagar.update({
+    let contaPagarAtualizada;
+    try {
+    contaPagarAtualizada = await prisma.contaPagar.update({
       where: {
         id: id,
       },
-      data: {
+      data: ({
         descricao,
         valor: parseFloat(valor),
         dataVencimento: new Date(dataPagamento),
         dataPagamento: new Date(dataPagamento),
         categoriaId: categoriaId ? String(categoriaId) : null,
         formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
-      },
+        historico: historico ? String(historico) : undefined,
+      } as any),
       include: {
         categoria: true,
         formaPagamento: true,
       },
     });
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const code = String((err && (err as any).code) || "");
+      if (msg.includes('Unknown argument `historico`') || msg.toLowerCase().includes('historico') || code === 'P2022') {
+        contaPagarAtualizada = await prisma.contaPagar.update({
+          where: { id: id },
+          data: ({
+            descricao,
+            valor: parseFloat(valor),
+            dataVencimento: new Date(dataPagamento),
+            dataPagamento: new Date(dataPagamento),
+            categoriaId: categoriaId ? String(categoriaId) : null,
+            formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
+          } as any),
+          include: { categoria: true, formaPagamento: true },
+        });
+      } else {
+        throw err;
+      }
+    }
 
     return NextResponse.json({
       success: true,

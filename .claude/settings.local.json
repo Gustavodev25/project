@@ -31,7 +31,12 @@
       "Bash(Select-String -Pattern \"ModalSyncVendas\" -Context 2,2)",
       "Bash(Select-String -Pattern \"error|Error|generated|success\" -Context 0,2)",
       "Bash(Select-String -Pattern \"error\" -Context 2,2)",
-      "Bash(Select-String -Pattern \"PROBLEMA|OK|RESUMO|Total|Com\" -Context 0,2)"
+      "Bash(Select-String -Pattern \"PROBLEMA|OK|RESUMO|Total|Com\" -Context 0,2)",
+      "Bash(cat:*)",
+      "Read(//c/Users/Gustavo Maldanis/Desktop/cyber-registro/**)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

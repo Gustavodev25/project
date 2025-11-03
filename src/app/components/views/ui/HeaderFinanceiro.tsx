@@ -23,6 +23,8 @@ interface HeaderFinanceiroProps {
   onPortadorChange: (id: string | null) => void;
   categoriasSelecionadas: Set<string>;
   onCategoriasSelecionadasChange: (ids: Set<string>) => void;
+  tipoVisualizacao?: 'caixa' | 'competencia';
+  onTipoVisualizacaoChange?: (tipo: 'caixa' | 'competencia') => void;
 }
 
 export default function HeaderFinanceiro({
@@ -32,6 +34,8 @@ export default function HeaderFinanceiro({
   onPortadorChange,
   categoriasSelecionadas,
   onCategoriasSelecionadasChange,
+  tipoVisualizacao = 'caixa',
+  onTipoVisualizacaoChange,
 }: HeaderFinanceiroProps) {
   const [formas, setFormas] = useState<FormaPagamento[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -127,6 +131,36 @@ export default function HeaderFinanceiro({
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Switch Caixa/Competência */}
+          {onTipoVisualizacaoChange && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 bg-white">
+              <span className={`text-xs font-medium transition-colors duration-200 ${
+                tipoVisualizacao === 'competencia' ? 'text-gray-900' : 'text-gray-500'
+              }`}>
+                Competência
+              </span>
+              <button
+                onClick={() => onTipoVisualizacaoChange(tipoVisualizacao === 'caixa' ? 'competencia' : 'caixa')}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
+                  tipoVisualizacao === 'caixa' ? 'bg-blue-600' : 'bg-gray-200'
+                }`}
+                role="switch"
+                aria-checked={tipoVisualizacao === 'caixa'}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-200 ${
+                    tipoVisualizacao === 'caixa' ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={`text-xs font-medium transition-colors duration-200 ${
+                tipoVisualizacao === 'caixa' ? 'text-gray-900' : 'text-gray-500'
+              }`}>
+                Caixa
+              </span>
+            </div>
+          )}
+
           {/* Categoria de Despesas */}
           <div className="relative">
             <button

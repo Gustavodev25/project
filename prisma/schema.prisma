@@ -368,9 +368,11 @@ model ContaPagar {
   formaPagamentoId String?         @map("forma_pagamento_id")
   categoriaId      String?         @map("categoria_id")
   descricao        String
+  historico        String?
   valor            Decimal         @db.Decimal(10, 2)
   dataVencimento   DateTime        @map("data_vencimento")
   dataPagamento    DateTime?       @map("data_pagamento")
+  dataCompetencia  DateTime?       @map("data_competencia")
   status           String          @default("pendente")
   origem           String          @default("MANUAL") // MANUAL, SINCRONIZACAO, EXCEL
   sincronizadoEm   DateTime        @default(now()) @map("sincronizado_em")

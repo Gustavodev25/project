@@ -109,8 +109,9 @@ export async function POST(request: Request) {
     // Helpers simples + fila controlada para detalhes (evita 429)
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let activeDetail = 0;
-    const maxConcurrentDetail = 1;
-    const fetchDetalheContaPagarCategoriaId = async (id: number): Promise<string | null> => {
+    // Aumenta concorrência controlada para acelerar sem estourar rate limit
+    const maxConcurrentDetail = 3;
+    const fetchDetalheContaPagarCategoriaId = async (id: number): Promise<{ catId: string | null; competencia: Date | null; historico?: string | null } | null> => {
       while (activeDetail >= maxConcurrentDetail) {
         await sleep(50);
       }
@@ -122,14 +123,16 @@ export async function POST(request: Request) {
         if (catId) {
           console.log(`[Sync CP] Categoria pelo detalhe: conta ${id} -> catBlingId=${catId}`);
         }
-        return catId;
+        const competencia = parseDate((conta as any)?.competencia || (conta as any)?.dataCompetencia || null);
+        const historico = (conta as any)?.historico || (conta as any)?.observacao || null;
+        return { catId, competencia, historico };
       } catch (e) {
         console.error(`[Sync CP] Erro no detalhe da conta ${id}:`, e);
         return null;
       } finally {
         activeDetail--;
-        // Pausa para manter ~2-3 req/s e evitar 429
-        await sleep(350);
+        // Pausa breve entre chamadas de detalhe (com concorrência 3)
+        await sleep(150);
       }
     };
 
@@ -265,7 +268,8 @@ export async function POST(request: Request) {
     });
 
     // Processar em lotes concorrentes para acelerar
-    const batchSize = 5; // reduzir concorrência para diminuir risco de 429
+    // Aumenta tamanho do lote de processamento principal (controle via backoff no blingFetchJSON)
+    const batchSize = 12;
     for (let start = 0; start < contasBling.length; start += batchSize) {
       const end = Math.min(start + batchSize, contasBling.length);
       const batch = contasBling.slice(start, end);
@@ -299,6 +303,18 @@ export async function POST(request: Request) {
         const dataPagamento = parseDate(
           item?.dataPagamento || item?.dataLiquidacao || item?.pagamento,
         );
+        let competenciaFromDetail: Date | null = null;
+
+        // Data de competência (quando disponível no Bling) com fallback para vencimento
+        const dataCompetencia =
+          parseDate(
+            (item as any)?.dataCompetencia ||
+            (item as any)?.competencia ||
+            (item as any)?.competenceDate ||
+            (item as any)?.competenciaData ||
+            (item as any)?.competencia_inicio ||
+            (item as any)?.competenciaInicio
+           );
 
         // Tentar extrair categoria diretamente (múltiplas variações da API)
         let categoriaBlingId =
@@ -326,7 +342,8 @@ export async function POST(request: Request) {
           if (!categoriaBlingId && item?.id) {
             const _resolvedByQueue = await fetchDetalheContaPagarCategoriaId(Number(item.id));
             if (_resolvedByQueue) {
-              categoriaBlingId = _resolvedByQueue;
+              categoriaBlingId = _resolvedByQueue.catId || categoriaBlingId;
+              competenciaFromDetail = _resolvedByQueue.competencia || competenciaFromDetail;
             }
           }
 
@@ -487,34 +504,112 @@ export async function POST(request: Request) {
         )
           status = "vencido";
 
+        // Resolver data de competência final (detalhe > lista > vencimento)
+        const competenciaFinal =
+          competenciaFromDetail ||
+          parseDate(
+            (item as any)?.dataCompetencia ||
+            (item as any)?.competencia ||
+            (item as any)?.competenceDate ||
+            (item as any)?.competenciaData ||
+            (item as any)?.competencia_inicio ||
+            (item as any)?.competenciaInicio
+           );
+
         console.log(`[Sync CP] Salvando conta ${blingId}: categoriaId=${categoriaId}, categoriaBlingId=${categoriaBlingId}`);
-        
-        await prisma.contaPagar.upsert({
-          where: { userId_blingId: { userId, blingId } },
-          update: {
-            descricao,
-            valor,
-            dataVencimento,
-            dataPagamento,
-            status,
-            categoriaId,
-            formaPagamentoId,
-            origem: "SINCRONIZACAO",
-            atualizadoEm: new Date(),
-          },
-          create: {
-            userId,
-            blingId,
-            descricao,
-            valor,
-            dataVencimento,
-            dataPagamento,
-            status,
-            categoriaId,
-            formaPagamentoId,
-            origem: "SINCRONIZACAO",
-          },
-        });
+
+        const updateData: any = {
+          descricao,
+          valor,
+          dataVencimento,
+          dataPagamento,
+          status,
+          categoriaId,
+          formaPagamentoId,
+          origem: "SINCRONIZACAO",
+          atualizadoEm: new Date(),
+        };
+        const createData: any = {
+          userId,
+          blingId,
+          descricao,
+          valor,
+          dataVencimento,
+          dataPagamento,
+          status,
+          categoriaId,
+          formaPagamentoId,
+          origem: "SINCRONIZACAO",
+        };
+        // histórico vindo do item da listagem ou do detalhe (se disponível)
+        const historicoStr: string | null = (item as any)?.historico || (item as any)?.observacao || null;
+        if (historicoStr) {
+          updateData.historico = historicoStr;
+          createData.historico = historicoStr;
+        }
+        // se não tiver em listagem, tentar do detalhe resolvido
+        if (!historicoStr && item?.id) {
+          try {
+            const _resolved = await fetchDetalheContaPagarCategoriaId(Number(item.id));
+            if (_resolved?.historico) {
+              updateData.historico = _resolved.historico;
+              createData.historico = _resolved.historico;
+            }
+          } catch {}
+        }
+        if (competenciaFinal) {
+          updateData.dataCompetencia = competenciaFinal;
+          createData.dataCompetencia = competenciaFinal;
+        }
+
+        // Ajuste: garantir competência vinda do detalhe quando não presente na listagem (apenas Contas a Pagar)
+        if (!((item as any)?.dataCompetencia || (item as any)?.competencia || (item as any)?.competenceDate || (item as any)?.competenciaData || (item as any)?.competencia_inicio || (item as any)?.competenciaInicio)) {
+          try {
+            if (!competenciaFromDetail && item?.id) {
+              const _resolvedByQueue2 = await fetchDetalheContaPagarCategoriaId(Number(item.id));
+              if (_resolvedByQueue2?.competencia) {
+                updateData.dataCompetencia = _resolvedByQueue2.competencia;
+                createData.dataCompetencia = _resolvedByQueue2.competencia;
+              }
+            }
+          } catch {}
+        }
+
+        try {
+          await prisma.contaPagar.upsert({
+            where: { userId_blingId: { userId, blingId } },
+            update: updateData,
+            create: createData,
+          });
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          const code = String((err && (err as any).code) || "");
+          if (
+            msg.includes('Unknown argument `dataCompetencia`') ||
+            msg.toLowerCase().includes('data_competencia') ||
+            code === 'P2022'
+          ) {
+            delete updateData.dataCompetencia;
+            delete createData.dataCompetencia;
+            // tentar novamente sem dataCompetencia
+            await prisma.contaPagar.upsert({
+              where: { userId_blingId: { userId, blingId } },
+              update: updateData,
+              create: createData,
+            });
+          } else if (msg.includes('Unknown argument `historico`') || msg.toLowerCase().includes('historico') || code === 'P2022') {
+            // remover historico se coluna não existir
+            delete updateData.historico;
+            delete createData.historico;
+            await prisma.contaPagar.upsert({
+              where: { userId_blingId: { userId, blingId } },
+              update: updateData,
+              create: createData,
+            });
+          } else {
+            throw err;
+          }
+        }
           synced++;
         } catch (e) {
           console.error("Falha ao sincronizar conta a pagar:", e);
@@ -577,3 +672,4 @@ export async function POST(request: Request) {
     );
   }
 }
+

@@ -520,7 +520,7 @@ export async function GET(req: NextRequest) {
       },
       margemContribuicao: safeNumber(receitaLiquida), // Receita líquida após taxas e frete
       cmv: safeNumber(cmvTotal),
-      lucroBruto: safeNumber(lucroBruto),
+      lucroBruto: safeNumber(lucroBruto - (Number.isFinite(impostosTotal) ? impostosTotal : 0)),
       vendasRealizadas: safeNumber(vendasRealizadas),
       unidadesVendidas: safeNumber(unidadesVendidas),
       periodo: useRange ? { start: start.toISOString(), end: end.toISOString() } : null,

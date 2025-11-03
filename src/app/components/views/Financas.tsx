@@ -190,6 +190,8 @@ const formatDateBR = (dateValue: string | Date | null | undefined): string => {
   return date.toLocaleDateString("pt-BR");
 };
 
+// (Removido) Competência agora usa formatDateBR (DD/MM/AAAA)
+
 const emptyStateIcons = [
   <svg
     key="icon1"
@@ -1695,8 +1697,14 @@ export default function Financas() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Histórico</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data de Pagamento</th>
+                        <th className="px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <span className="block leading-tight">DATA<br/>PAGAMENTO</span>
+                        </th>
+                        <th className="px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <span className="block leading-tight">DATA<br/>COMPETENCIA</span>
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Forma</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -1708,12 +1716,14 @@ export default function Financas() {
                       {paginatedContasPagar.map((c) => (
                         <tr key={c.id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.descricao}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900 whitespace-pre-line" title={c.historico || ''}>{c.historico || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{Number(c.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 w-24">
                             <div className="flex flex-col leading-tight">
                               <span>{formatDateBR(c.dataVencimento)}</span>
                             </div>
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 w-24">{formatDateBR(c.dataCompetencia)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.categoria?.descricao || c.categoria?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{c.formaPagamento?.nome || "-"}</td>
                           <td className="px-6 py-4 whitespace-nowrap"><span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">{c.status}</span></td>

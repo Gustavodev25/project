@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     const contaReceber = await prisma.contaReceber.create({
-      data: {
+      data: ({
         userId: userId,
         descricao,
         valor: parseFloat(valor),
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
         status: "recebido",
         categoriaId: categoriaId ? String(categoriaId) : null,
         formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
-      },
+      } as any),
       include: {
         categoria: true,
         formaPagamento: true,
@@ -81,18 +81,56 @@ export async function GET(request: NextRequest) {
 
     const userId = session.sub;
 
-    const contasReceber = await prisma.contaReceber.findMany({
-      where: {
-        userId: userId,
-      },
-      include: {
-        categoria: true,
-        formaPagamento: true,
-      },
-      orderBy: {
-        dataVencimento: "desc",
-      },
-    });
+    let contasReceber: any[] = [];
+    try {
+      contasReceber = await prisma.contaReceber.findMany({
+        where: { userId },
+        include: { categoria: true, formaPagamento: true },
+        orderBy: { dataVencimento: "desc" },
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const code = String((err && (err as any).code) || "");
+      if (code === 'P2022' || msg.toLowerCase().includes('data_competencia')) {
+        // Fallback seguro via SQL bruto quando o client do Prisma ainda estiver desatualizado
+        const rows = await prisma.$queryRawUnsafe<any[]>(
+          `
+          SELECT 
+            cr.id,
+            cr.user_id     AS "userId",
+            cr.bling_id    AS "blingId",
+            cr.descricao,
+            cr.valor,
+            cr.data_vencimento  AS "dataVencimento",
+            cr.data_recebimento AS "dataRecebimento",
+            cr.status,
+            cr.origem,
+            cr.sincronizado_em  AS "sincronizadoEm",
+            cr.atualizado_em    AS "atualizadoEm",
+            json_build_object(
+              'id', c.id,
+              'nome', c.nome,
+              'descricao', c.descricao
+            ) AS categoria,
+            json_build_object(
+              'id', fp.id,
+              'nome', fp.nome,
+              'descricao', fp.descricao,
+              'tipo', fp.tipo
+            ) AS "formaPagamento"
+          FROM conta_receber cr
+          LEFT JOIN categoria c ON c.id = cr.categoria_id
+          LEFT JOIN forma_pagamento fp ON fp.id = cr.forma_pagamento_id
+          WHERE cr.user_id = $1
+          ORDER BY cr.data_vencimento DESC
+          `,
+          userId,
+        );
+        contasReceber = rows || [];
+      } else {
+        throw err;
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -163,14 +201,14 @@ export async function PUT(request: NextRequest) {
       where: {
         id: id,
       },
-      data: {
+      data: ({
         descricao,
         valor: parseFloat(valor),
         dataVencimento: new Date(dataRecebimento),
         dataRecebimento: new Date(dataRecebimento),
         categoriaId: categoriaId ? String(categoriaId) : null,
         formaPagamentoId: formaPagamentoId ? String(formaPagamentoId) : null,
-      },
+      } as any),
       include: {
         categoria: true,
         formaPagamento: true,

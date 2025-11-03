@@ -27,67 +27,78 @@ function formatPeriodo(date: Date, tipo: 'mensal' | 'semanal' | 'diario'): strin
   }
 }
 
-function getDateRange(periodo: string): { start: Date; end: Date; tipo: 'mensal' | 'semanal' | 'diario' } {
+// Usa a data do Brasil (America/Sao_Paulo) para evitar perda de dados em "hoje/ontem" em servidores UTC
+function getNowInBrazil(): { year: number; month: number; day: number } {
   const now = new Date();
-  
+  const brazilDateString = now.toLocaleString('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const [month, day, year] = brazilDateString.split('/').map(Number);
+  return { year, month, day };
+}
+
+function getDateRange(periodo: string): { start: Date; end: Date; tipo: 'mensal' | 'semanal' | 'diario' } {
+  const brazilToday = getNowInBrazil();
+  const now = new Date();
+
   switch (periodo) {
-    case "hoje": {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'hoje': {
+      const start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "ontem": {
-      const ontem = new Date(now);
-      ontem.setDate(ontem.getDate() - 1);
-      const start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
-      const end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+    case 'ontem': {
+      const start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day - 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "ultimos_7d": {
-      const seteAtras = new Date(now);
-      seteAtras.setDate(seteAtras.getDate() - 6);
-      const start = new Date(seteAtras.getFullYear(), seteAtras.getMonth(), seteAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_7d': {
+      const start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day - 6, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "ultimos_30d": {
-      const trintaAtras = new Date(now);
-      trintaAtras.setDate(trintaAtras.getDate() - 29);
-      const start = new Date(trintaAtras.getFullYear(), trintaAtras.getMonth(), trintaAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_30d': {
+      const start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day - 29, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "ultimos_12m": {
-      const dozeAtras = new Date(now);
-      dozeAtras.setMonth(dozeAtras.getMonth() - 12);
-      const start = new Date(dozeAtras.getFullYear(), dozeAtras.getMonth(), dozeAtras.getDate(), 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    case 'ultimos_12m': {
+      const startRef = new Date(brazilToday.year, brazilToday.month - 13, brazilToday.day);
+      const start = new Date(Date.UTC(startRef.getFullYear(), startRef.getMonth(), startRef.getDate(), 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, brazilToday.day + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'mensal' };
     }
-    case "este_mes": {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'este_mes': {
+      const lastDay = new Date(brazilToday.year, brazilToday.month, 0).getDate();
+      const start = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, lastDay + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "mes_passado": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    case 'mes_passado': {
+      const lastMonth = new Date(brazilToday.year, brazilToday.month - 2, 1);
+      const lastDayOfLastMonth = new Date(brazilToday.year, brazilToday.month - 1, 0).getDate();
+      const start = new Date(Date.UTC(lastMonth.getFullYear(), lastMonth.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(lastMonth.getFullYear(), lastMonth.getMonth(), lastDayOfLastMonth + 1, 2, 59, 59, 999));
       return { start, end, tipo: 'diario' };
     }
-    case "ultimos_3_meses": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'ultimos_3_meses': {
+      const startRef = new Date(brazilToday.year, brazilToday.month - 2, 1);
+      const start = new Date(Date.UTC(startRef.getFullYear(), startRef.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, 1, 2, 59, 59, 999));
       return { start, end, tipo: 'mensal' };
     }
-    case "ultimos_6_meses": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    case 'ultimos_6_meses': {
+      const startRef = new Date(brazilToday.year, brazilToday.month - 5, 1);
+      const start = new Date(Date.UTC(startRef.getFullYear(), startRef.getMonth(), 1, 3, 0, 0, 0));
+      const end = new Date(Date.UTC(brazilToday.year, brazilToday.month - 1, 1, 2, 59, 59, 999));
       return { start, end, tipo: 'mensal' };
     }
-    case "todos":
+    case 'todos':
     default: {
-      // Para "todos", vamos buscar todas as vendas e determinar o range dinamicamente
-      return { start: new Date(0), end: new Date(), tipo: 'mensal' };
+      return { start: new Date(0), end: now, tipo: 'mensal' };
     }
   }
 }

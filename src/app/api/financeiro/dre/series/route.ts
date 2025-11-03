@@ -89,8 +89,6 @@ export async function GET(req: NextRequest) {
     console.log('[DRE API] Categorias de DESPESA:', categoriasDespesa.length);
 
     // Definir critérios de data baseado no tipo de visualização
-    // Por enquanto, ambos usam a mesma lógica (dataPagamento/dataRecebimento)
-    // No futuro, caixa usará dataPagamento e competência usará dataVencimento
     const getDateCriteria = (tipo: 'caixa' | 'competencia') => {
       if (tipo === 'caixa') {
         // Caixa: usar data de pagamento/recebimento (efetivo)
@@ -105,10 +103,11 @@ export async function GET(req: NextRequest) {
           ],
         };
       } else {
-        // Competência: usar data de vencimento (competência)
+        // Competência: usar data de competência (ou vencimento se competência for null)
         return {
           pagar: [
-            { dataVencimento: { gte: rangeStart, lte: rangeEnd } },
+            { dataCompetencia: { gte: rangeStart, lte: rangeEnd } },
+            { AND: [{ dataCompetencia: null }, { dataVencimento: { gte: rangeStart, lte: rangeEnd } }] },
           ],
           receber: [
             { dataVencimento: { gte: rangeStart, lte: rangeEnd } },
@@ -200,6 +199,7 @@ export async function GET(req: NextRequest) {
         valor: true,
         dataPagamento: true,
         dataVencimento: true,
+        dataCompetencia: true,
         categoriaId: true,
         categoria: { select: { id: true, nome: true, descricao: true } },
       },
@@ -210,6 +210,7 @@ export async function GET(req: NextRequest) {
         valor: contasPagar[0].valor,
         dataVencimento: contasPagar[0].dataVencimento,
         dataPagamento: contasPagar[0].dataPagamento,
+        dataCompetencia: contasPagar[0].dataCompetencia,
         categoria: contasPagar[0].categoria?.nome
       });
     }
@@ -255,8 +256,8 @@ export async function GET(req: NextRequest) {
     for (const row of contasPagar) {
       // Escolher data baseada no tipo de visualização
       const d = tipoParam === 'caixa'
-        ? (row.dataPagamento || row.dataVencimento)  // Caixa: prioriza dataPagamento
-        : row.dataVencimento;                        // Competência: sempre dataVencimento
+        ? (row.dataPagamento || row.dataVencimento)     // Caixa: prioriza dataPagamento
+        : (row.dataCompetencia || row.dataVencimento);  // Competência: prioriza dataCompetencia
 
       if (!d) continue;
       const key = monthKey(new Date(d));
