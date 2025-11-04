@@ -415,6 +415,8 @@ function getFieldMapping(headers: string[], type: string) {
           mapping['dataPagamento'] = index.toString();
         } else if (normalizedHeader.includes('data de recebimento') || normalizedHeader.includes('data_recebimento')) {
           mapping['dataRecebimento'] = index.toString();
+        } else if (normalizedHeader.includes('data de competencia') || normalizedHeader.includes('data_competencia') || normalizedHeader.includes('competencia')) {
+          mapping['dataCompetencia'] = index.toString();
         } else if (normalizedHeader.includes('categoria')) {
           mapping['categoria'] = index.toString();
         } else if (normalizedHeader.includes('forma de pagamento') || normalizedHeader.includes('forma_pagamento')) {
@@ -508,18 +510,32 @@ function parseRowData(
       const descricaoPagar = getValue('descricao');
       const valorPagar = getValue('valor');
       const dataVencimentoPagar = getValue('dataVencimento');
-      
+
       if (!descricaoPagar || !valorPagar || !dataVencimentoPagar) {
         throw new Error('Campos obrigatórios faltando: Descrição, Valor, Data de Vencimento');
+      }
+
+      const dataPagamentoPagar = getValue('dataPagamento') ? parseDate(getValue('dataPagamento')!) : null;
+      const dataVencParsed = parseDate(dataVencimentoPagar);
+
+      // Data de competência: usar da planilha se existir, senão usar dataPagamento, senão dataVencimento
+      let dataCompetenciaPagar: Date | null = null;
+      if (getValue('dataCompetencia')) {
+        dataCompetenciaPagar = parseDate(getValue('dataCompetencia')!);
+      } else if (dataPagamentoPagar) {
+        dataCompetenciaPagar = dataPagamentoPagar;
+      } else {
+        dataCompetenciaPagar = dataVencParsed;
       }
 
       return {
         userId,
         descricao: descricaoPagar.toString(),
         valor: parseDecimal(valorPagar),
-        dataVencimento: parseDate(dataVencimentoPagar),
-        dataPagamento: getValue('dataPagamento') ? parseDate(getValue('dataPagamento')!) : null,
-        status: getValue('dataPagamento') ? 'pago' : 'pendente',
+        dataVencimento: dataVencParsed,
+        dataPagamento: dataPagamentoPagar,
+        dataCompetencia: dataCompetenciaPagar,
+        status: dataPagamentoPagar ? 'pago' : 'pendente',
         categoriaId: resolveCategoriaId(getValue('categoria'), refs),
         formaPagamentoId: resolveFormaId(getValue('formaPagamento'), refs),
         origem: "EXCEL",
@@ -529,18 +545,32 @@ function parseRowData(
       const descricaoReceber = getValue('descricao');
       const valorReceber = getValue('valor');
       const dataVencimentoReceber = getValue('dataVencimento');
-      
+
       if (!descricaoReceber || !valorReceber || !dataVencimentoReceber) {
         throw new Error('Campos obrigatórios faltando: Descrição, Valor, Data de Vencimento');
+      }
+
+      const dataRecebimentoReceber = getValue('dataRecebimento') ? parseDate(getValue('dataRecebimento')!) : null;
+      const dataVencReceberParsed = parseDate(dataVencimentoReceber);
+
+      // Data de competência: usar da planilha se existir, senão usar dataRecebimento, senão dataVencimento
+      let dataCompetenciaReceber: Date | null = null;
+      if (getValue('dataCompetencia')) {
+        dataCompetenciaReceber = parseDate(getValue('dataCompetencia')!);
+      } else if (dataRecebimentoReceber) {
+        dataCompetenciaReceber = dataRecebimentoReceber;
+      } else {
+        dataCompetenciaReceber = dataVencReceberParsed;
       }
 
       return {
         userId,
         descricao: descricaoReceber.toString(),
         valor: parseDecimal(valorReceber),
-        dataVencimento: parseDate(dataVencimentoReceber),
-        dataRecebimento: getValue('dataRecebimento') ? parseDate(getValue('dataRecebimento')!) : null,
-        status: getValue('dataRecebimento') ? 'recebido' : 'pendente',
+        dataVencimento: dataVencReceberParsed,
+        dataRecebimento: dataRecebimentoReceber,
+        dataCompetencia: dataCompetenciaReceber,
+        status: dataRecebimentoReceber ? 'recebido' : 'pendente',
         categoriaId: resolveCategoriaId(getValue('categoria'), refs),
         formaPagamentoId: resolveFormaId(getValue('formaPagamento'), refs),
         origem: "EXCEL",
@@ -616,6 +646,8 @@ function getFieldMappingNormalized(headers: string[], type: string) {
           mapping['dataPagamento'] = index.toString();
         else if (h.includes('data de recebimento') || h.includes('data_recebimento') || h === 'recebimento')
           mapping['dataRecebimento'] = index.toString();
+        else if (h.includes('data de competencia') || h.includes('data_competencia') || h.includes('competencia'))
+          mapping['dataCompetencia'] = index.toString();
         else if (h.includes('categoria')) mapping['categoria'] = index.toString();
         else if (h.includes('forma de pagamento') || h.includes('forma_pagamento') || h.includes('portador'))
           mapping['formaPagamento'] = index.toString();

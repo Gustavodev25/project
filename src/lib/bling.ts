@@ -176,11 +176,38 @@ function getLast3MonthsDates() {
   const hoje = new Date();
   const tresMesesAtras = new Date();
   tresMesesAtras.setMonth(hoje.getMonth() - 3);
-  
+
   return {
     dataInicial: tresMesesAtras.toISOString().split('T')[0], // YYYY-MM-DD
     dataFinal: hoje.toISOString().split('T')[0], // YYYY-MM-DD
   };
+}
+
+// Função para determinar o período de sincronização baseado no usuário
+async function getSyncDateRange(userId?: string): Promise<{ dataInicial: string; dataFinal: string }> {
+  // Se não tem userId, usar período padrão de 3 meses
+  if (!userId) {
+    return getLast3MonthsDates();
+  }
+
+  // Buscar o usuário para verificar se é o cliente Bonfim
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true }
+  });
+
+  // Cliente Bonfim: período fixo de 01/01/2024 - 31/08/2025
+  // Identificar pelo email contendo "bonfim" (case-insensitive)
+  if (user?.email && user.email.toLowerCase().includes('bonfim')) {
+    console.log(`[Bling] Usuário Bonfim detectado - usando período histórico fixo`);
+    return {
+      dataInicial: '2024-01-01',
+      dataFinal: '2025-08-31'
+    };
+  }
+
+  // Outros clientes: período padrão de 3 meses
+  return getLast3MonthsDates();
 }
 
 async function blingFetchJSON(
@@ -974,11 +1001,11 @@ export async function extractCategoriasFromContas(accessToken: string) {
   }
 }
 
-export async function getBlingContasPagar(accessToken: string) {
+export async function getBlingContasPagar(accessToken: string, userId?: string) {
   const candidates = ["/contas/pagar", "/financeiro/contas-pagar", "/contas-pagar"];
-  const { dataInicial, dataFinal } = getLast3MonthsDates();
-  
-  console.log(`[Bling] Buscando contas a pagar dos ÃƒÂºltimos 3 meses: ${dataInicial} atÃƒÂ© ${dataFinal}`);
+  const { dataInicial, dataFinal } = await getSyncDateRange(userId);
+
+  console.log(`[Bling] Buscando contas a pagar: ${dataInicial} até ${dataFinal}`);
   
   for (const path of candidates) {
     console.log(`[Bling] Buscando contas a pagar em: ${path}`);
@@ -1020,11 +1047,11 @@ export async function getBlingContasPagar(accessToken: string) {
   return [];
 }
 
-export async function getBlingContasReceber(accessToken: string) {
+export async function getBlingContasReceber(accessToken: string, userId?: string) {
   const candidates = ["/contas/receber", "/financeiro/contas-receber", "/contas-receber"];
-  const { dataInicial, dataFinal } = getLast3MonthsDates();
-  
-  console.log(`[Bling] Buscando contas a receber dos ÃƒÂºltimos 3 meses: ${dataInicial} atÃƒÂ© ${dataFinal}`);
+  const { dataInicial, dataFinal } = await getSyncDateRange(userId);
+
+  console.log(`[Bling] Buscando contas a receber: ${dataInicial} até ${dataFinal}`);
   
   for (const path of candidates) {
     console.log(`[Bling] Buscando contas a receber em: ${path}`);

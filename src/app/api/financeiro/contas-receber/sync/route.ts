@@ -149,6 +149,7 @@ export async function POST(request: Request) {
 
     const contasBling: any[] = await getBlingContasReceber(
       refreshedAccount.access_token,
+      userId,
     );
     
     // Debug: verificar estrutura das primeiras contas

@@ -145,6 +145,16 @@ export async function GET(req: NextRequest) {
     const totalReceitasFin = receitasFin.reduce((acc, it) => acc + toNumber(it.valor), 0);
 
     // 2) Despesas operacionais no periodo (contas a pagar)
+    // Se nenhuma categoria específica foi selecionada, buscar TODAS as categorias do tipo DESPESA
+    let categoriaIdsParaFiltro = categoriaIds;
+    if (categoriaIds.length === 0) {
+      const todasCategoriasDespesa = await prisma.categoria.findMany({
+        where: { userId: session.sub, tipo: { equals: 'DESPESA', mode: 'insensitive' } },
+        select: { id: true },
+      });
+      categoriaIdsParaFiltro = todasCategoriasDespesa.map(c => c.id);
+    }
+
     // Escolher critério de data baseado no tipo de visualização
     const whereDespesas: Prisma.ContaPagarWhereInput = {
       userId: session.sub,
@@ -161,7 +171,7 @@ export async function GET(req: NextRequest) {
           ],
     };
     if (portadorIdParam) whereDespesas.formaPagamentoId = String(portadorIdParam);
-    if (categoriaIds.length > 0) whereDespesas.categoriaId = { in: categoriaIds };
+    if (categoriaIdsParaFiltro.length > 0) whereDespesas.categoriaId = { in: categoriaIdsParaFiltro };
     const despesas = await prisma.contaPagar.findMany({ where: whereDespesas, select: { valor: true } });
     const despesasOperacionais = despesas.reduce((acc, it) => acc + toNumber(it.valor), 0);
 
