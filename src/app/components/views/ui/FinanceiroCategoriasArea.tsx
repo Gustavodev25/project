@@ -98,36 +98,58 @@ export default function FinanceiroCategoriasArea({
     return arr;
   })();
 
+  const treemapKey = treemapData.map((d) => `${d.name}:${d.value}`).join("|");
+
+  const effectSignature = `${loading ? "loading" : "ready"}|${tipo}|${treemapKey}`;
+
   // Instancia/atualiza ECharts (Treemap)
   useEffect(() => {
-    let disposeFn: (() => void) | null = null;
+    if (loading) return;
+    if (!chartRef.current) return;
+    if (treemapData.length === 0) return;
+
+    let chart: any = null;
     let resizeHandler: (() => void) | null = null;
-    (async () => {
-      if (!chartRef.current) return;
-      const echarts = await import('echarts');
-      const inst = echarts.init(chartRef.current);
-      disposeFn = () => inst.dispose();
-      resizeHandler = () => inst.resize();
-      window.addEventListener('resize', resizeHandler);
+    let cancelled = false;
+
+    const ensureLayout = async (el: HTMLDivElement) => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) return;
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    };
+
+    const setup = async () => {
+      const el = chartRef.current;
+      if (!el || !el.isConnected) return;
+      await ensureLayout(el);
+      if (!el.isConnected || el.clientWidth === 0 || el.clientHeight === 0) return;
+
+      const echarts = await import("echarts");
+      if (cancelled) return;
+
+      chart = echarts.getInstanceByDom(el) || echarts.init(el);
+      resizeHandler = () => {
+        if (chart && !chart.isDisposed()) chart.resize();
+      };
+      window.addEventListener("resize", resizeHandler);
 
       const option: any = {
         tooltip: {
           formatter: (info: any) => {
             const v = info?.value ?? 0;
-            const n = info?.name ?? '';
+            const n = info?.name ?? "";
             return `${n}<br/>${formatCurrency(v as number)}`;
-          }
+          },
         },
         series: [
           {
-            type: 'treemap',
+            type: "treemap",
             roam: false,
             data: treemapData,
             breadcrumb: { show: false },
             label: {
               show: true,
               formatter: (params: any) => {
-                const name = params?.name ?? '';
+                const name = params?.name ?? "";
                 const v = params?.value ?? 0;
                 return `${name}\n${formatCurrency(v)}`;
               },
@@ -135,29 +157,42 @@ export default function FinanceiroCategoriasArea({
             },
             upperLabel: { show: false },
             itemStyle: {
-              borderColor: '#fff',
+              borderColor: "#fff",
               borderWidth: 2,
               gapWidth: 2,
             },
             levels: [
               {
                 color: [
-                  '#f97316', '#10b981', '#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16', '#8b5cf6', '#fb7185', '#64748b'
+                  "#f97316",
+                  "#10b981",
+                  "#6366f1",
+                  "#f59e0b",
+                  "#ef4444",
+                  "#06b6d4",
+                  "#84cc16",
+                  "#8b5cf6",
+                  "#fb7185",
+                  "#64748b",
                 ],
-                colorMappingBy: 'index'
-              }
-            ]
-          }
-        ]
+                colorMappingBy: "index",
+              },
+            ],
+          },
+        ],
       };
 
-      inst.setOption(option, true);
-    })();
-    return () => {
-      if (resizeHandler) window.removeEventListener('resize', resizeHandler);
-      if (disposeFn) disposeFn();
+      chart.setOption(option, true);
     };
-  }, [treemapData.map(d => d.name + d.value).join('|')]);
+
+    setup();
+
+    return () => {
+      cancelled = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (chart && !chart.isDisposed()) chart.dispose();
+    };
+  }, [effectSignature]);
 
   if (loading) {
     return (

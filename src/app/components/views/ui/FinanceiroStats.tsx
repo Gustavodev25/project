@@ -17,9 +17,11 @@ interface FinanceiroStatsProps {
 type Stats = {
   // Apenas os KPIs específicos do financeiro
   faturamentoBruto: number;
+  deducoesReceita?: number;
   taxasPlataformas: { total: number; mercadoLivre: number; shopee: number };
   custoFrete: { total: number; mercadoLivre: number; shopee: number };
   receitaLiquida: number;
+  receitaOperacionalLiquida?: number;
   cmv: number;
   lucroBruto: number;
   despesasOperacionais: number;
@@ -29,9 +31,11 @@ type Stats = {
 const DEFAULT_STATS: Stats = {
   // Apenas os KPIs específicos do financeiro
   faturamentoBruto: 0,
+  deducoesReceita: 0,
   taxasPlataformas: { total: 0, mercadoLivre: 0, shopee: 0 },
   custoFrete: { total: 0, mercadoLivre: 0, shopee: 0 },
   receitaLiquida: 0,
+  receitaOperacionalLiquida: 0,
   cmv: 0,
   lucroBruto: 0,
   despesasOperacionais: 0,
@@ -173,7 +177,7 @@ export default function FinanceiroStats({
       </div>
 
       {/* Receita Líquida */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Após taxas e frete">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Receita bruta menos devoluções/cancelamentos">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -225,7 +229,7 @@ export default function FinanceiroStats({
       </div>
 
       {/* Lucro Bruto */}
-      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Receita líquida - CMV">
+      <div className="bg-[#F3F3F3] rounded-lg border border-gray-200 p-3 shadow-sm" title="Receita líquida - taxas - frete - CMV">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <div className="w-6 h-6 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
@@ -292,4 +296,3 @@ export default function FinanceiroStats({
     </div>
   );
 }
-
