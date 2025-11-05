@@ -691,6 +691,13 @@ export default function Financas() {
     }
   }, [activeTab]);
 
+  // Garantir categorias carregadas para filtros nas abas Pagar/Receber (prod/Vercel)
+  useEffect(() => {
+    if ((activeTab === "contas_pagar" || activeTab === "contas_receber") && categorias.length === 0) {
+      loadCategorias();
+    }
+  }, [activeTab, categorias.length]);
+
   // Carregar formas de pagamento e categorias quando abrir modais de despesa/receita
   useEffect(() => {
     if (isModalOpen && (activeTab === "contas_pagar" || activeTab === "contas_receber")) {
