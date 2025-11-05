@@ -140,7 +140,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Build month windows
-    const parsed = mesesParam.map(parseMesKeyLocal).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
+    const parsed = mesesParam.map(parseMesKey).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
     if (parsed.length === 0) {
       return NextResponse.json({ error: "Meses inválidos" }, { status: 400 });
     }
@@ -354,7 +354,7 @@ export async function GET(req: NextRequest) {
         : (row.dataCompetencia || row.dataVencimento);  // Competência: prioriza dataCompetencia
 
       if (!d) continue;
-      const key = monthKeyLocal(new Date(d));
+      const key = monthKey(new Date(d));
       if (!despesasPorMes.hasOwnProperty(key)) continue; // fora dos meses solicitados
       const catId = row.categoriaId || row.categoria?.id || "sem_categoria";
       if (!valoresPorCategoriaMes[catId]) valoresPorCategoriaMes[catId] = {};
@@ -376,7 +376,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeli) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKeyLocal(new Date(d));
+      const key = monthKey(new Date(d));
       if (!receitaBrutaMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -401,7 +401,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopee) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKeyLocal(new Date(d));
+      const key = monthKey(new Date(d));
       if (!receitaBrutaShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -429,7 +429,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeliCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKeyLocal(new Date(d));
+      const key = monthKey(new Date(d));
       if (!deducoesMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -440,7 +440,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopeeCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKeyLocal(new Date(d));
+      const key = monthKey(new Date(d));
       if (!deducoesShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
