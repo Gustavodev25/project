@@ -1,39 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { verifySessionToken } from '@/lib/auth';
+import { PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
 
-// GET /api/sku/export - Exportar Excel
-export async function GET(request: NextRequest) {
+const prisma = new PrismaClient();
+
+async function testExport() {
+  console.log('🧪 Testando exportação de SKUs...\n');
+
   try {
-    const sessionCookie = request.cookies.get('session')?.value;
-    
-    if (!sessionCookie) {
-      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
-    }
-    
-    const session = await verifySessionToken(sessionCookie);
-
-    const { searchParams } = new URL(request.url);
-    const tipo = searchParams.get('tipo') || '';
-    const ativo = searchParams.get('ativo');
-
-    // Construir filtros
-    const where: any = {
-      userId: session.sub,
-    };
-
-    if (tipo) {
-      where.tipo = tipo;
-    }
-
-    if (ativo !== null) {
-      where.ativo = ativo === 'true';
-    }
-
     // Buscar SKUs
     const skus = await prisma.sKU.findMany({
-      where,
       orderBy: [
         { tipo: 'desc' },
         { sku: 'asc' },
@@ -45,6 +20,49 @@ export async function GET(request: NextRequest) {
         },
       },
     });
+
+    console.log(`📊 Total de SKUs: ${skus.length}\n`);
+
+    // Testar cada SKU individualmente
+    for (const sku of skus) {
+      console.log(`Processando SKU: ${sku.sku}`);
+      console.log(`  Tipo: ${typeof sku.skusFilhos}, Valor: ${sku.skusFilhos}`);
+      console.log(`  Tags Tipo: ${typeof sku.tags}, Valor: ${sku.tags}`);
+
+      // Parse seguro de skusFilhos
+      let skusFilhosStr = '';
+      if (sku.skusFilhos) {
+        try {
+          const parsed = typeof sku.skusFilhos === 'string'
+            ? JSON.parse(sku.skusFilhos)
+            : sku.skusFilhos;
+          if (Array.isArray(parsed)) {
+            skusFilhosStr = parsed.join(', ');
+            console.log(`  ✅ skusFilhos parseado: ${skusFilhosStr}`);
+          }
+        } catch (e) {
+          console.error(`  ❌ Erro ao parsear skusFilhos:`, e);
+        }
+      }
+
+      // Parse seguro de tags
+      let tagsStr = '';
+      if (sku.tags) {
+        try {
+          const parsed = typeof sku.tags === 'string'
+            ? JSON.parse(sku.tags)
+            : sku.tags;
+          if (Array.isArray(parsed)) {
+            tagsStr = parsed.join(', ');
+            console.log(`  ✅ tags parseado: ${tagsStr}`);
+          }
+        } catch (e) {
+          console.error(`  ❌ Erro ao parsear tags:`, e);
+        }
+      }
+
+      console.log('');
+    }
 
     // Preparar dados para Excel
     const excelData = skus.map(sku => {
@@ -83,8 +101,8 @@ export async function GET(request: NextRequest) {
         'Produto': sku.produto,
         'Tipo': sku.tipo === 'pai' ? 'Kit' : 'Individual',
         'SKU Pai': sku.skuPai || '',
-        'Custo Unitário': Number(sku.custoUnitario).toString(),
-        'Quantidade': Number(sku.quantidade).toString(),
+        'Custo Unitário': sku.custoUnitario.toString(),
+        'Quantidade': sku.quantidade.toString(),
         'Hierarquia 1': sku.hierarquia1 || '',
         'Hierarquia 2': sku.hierarquia2 || '',
         'Ativo': sku.ativo ? 'Sim' : 'Não',
@@ -96,6 +114,9 @@ export async function GET(request: NextRequest) {
         'Última Atualização': sku.updatedAt.toISOString().split('T')[0],
       };
     });
+
+    console.log('\n✅ Dados parseados com sucesso!');
+    console.log(`📄 Total de linhas no Excel: ${excelData.length}\n`);
 
     // Criar workbook
     const wb = XLSX.utils.book_new();
@@ -126,23 +147,19 @@ export async function GET(request: NextRequest) {
     // Gerar buffer
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    // Retornar arquivo
-    return new NextResponse(buffer, {
-      headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="skus_${new Date().toISOString().split('T')[0]}.xlsx"`,
-      },
-    });
+    console.log('✅ Excel gerado com sucesso!');
+    console.log(`📦 Tamanho do buffer: ${buffer.length} bytes\n`);
+
+    // Salvar arquivo de teste
+    const fs = require('fs');
+    fs.writeFileSync('test-export.xlsx', buffer);
+    console.log('✅ Arquivo salvo como test-export.xlsx');
+
   } catch (error) {
-    console.error('Erro ao exportar SKUs:', error);
-    console.error('Stack trace:', error instanceof Error ? error.stack : 'N/A');
-    console.error('Mensagem:', error instanceof Error ? error.message : String(error));
-    return NextResponse.json(
-      {
-        error: 'Erro interno do servidor',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    );
+    console.error('❌ Erro:', error);
+  } finally {
+    await prisma.$disconnect();
   }
 }
+
+testExport();

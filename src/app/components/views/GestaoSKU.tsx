@@ -17,7 +17,7 @@ import TabelaGestaoSKU, {
   type CreateSKUInput,
 } from "./ui/TabelaGestaoSKU";
 import SKUsPendentesModal from "./ui/SKUsPendentesModal";
-import { ImportExcelModal } from "./ui/ImportExcelModal";
+import { ImportSKUExcelModal } from "./ui/ImportSKUExcelModal";
 import { useToast } from "./ui/toaster";
 
 const FULL_W = "16rem";
@@ -184,11 +184,17 @@ export default function GestaoSKU() {
     try {
       const params = new URLSearchParams();
       if (filtros.tipo) params.append('tipo', filtros.tipo);
-      if (filtros.ativo !== null) params.append('ativo', filtros.ativo);
+      if (filtros.ativo !== null && filtros.ativo !== '') {
+        params.append('ativo', String(filtros.ativo));
+      }
 
       const response = await fetch(`/api/sku/export?${params}`);
-      if (!response.ok) throw new Error('Erro ao exportar');
-      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Erro na exportação:', errorText);
+        throw new Error('Erro ao exportar');
+      }
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -198,7 +204,7 @@ export default function GestaoSKU() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       toast({
         variant: "success",
         title: "Exportação concluída",
@@ -209,7 +215,7 @@ export default function GestaoSKU() {
       toast({
         variant: "error",
         title: "Erro na exportação",
-        description: "Não foi possível exportar os SKUs",
+        description: error instanceof Error ? error.message : "Não foi possível exportar os SKUs",
       });
     }
   };
@@ -510,12 +516,11 @@ export default function GestaoSKU() {
         onPickToCreate={handlePickToCreate}
       />
 
-      {/* TODO: Revisar ImportExcelModal - precisa de platform prop específico para SKU
-      <ImportExcelModal
+      <ImportSKUExcelModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={handleImportComplete}
-      /> */}
+      />
     </div>
   );
 }

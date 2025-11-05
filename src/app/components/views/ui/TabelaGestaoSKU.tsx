@@ -199,17 +199,20 @@ export default function TabelaGestaoSKU({
           if (Array.isArray(parsed)) listaKit = parsed as string[];
         } catch {}
       }
-      
+
       const viaKitLista = filhos.filter((f) => listaKit.includes(f.sku));
       const combinados: SKU[] = [];
       const pushUnique = (arr: SKU[]) => {
         for (const item of arr) {
-          if (!combinados.find((x) => x.id === item.id)) combinados.push(item);
+          // Verifica duplicatas tanto em 'combinados' quanto no set 'usados'
+          if (!combinados.find((x) => x.id === item.id) && !usados.has(item.id)) {
+            combinados.push(item);
+          }
         }
       };
       pushUnique(viaFilho);
       pushUnique(viaKitLista);
-      
+
       for (const f of combinados.sort((a, b) => a.sku.localeCompare(b.sku))) {
         resultado.push(f);
         usados.add(f.id);
@@ -218,7 +221,7 @@ export default function TabelaGestaoSKU({
     for (const f of filhos) {
       if (!usados.has(f.id)) resultado.push(f);
     }
-    
+
     return resultado;
   }, [skus]);
   const [novoSku, setNovoSku] = useState<NovoSkuState>({
