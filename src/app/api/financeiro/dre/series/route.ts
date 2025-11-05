@@ -4,12 +4,12 @@ import { assertSessionToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-// IMPORTANTE: Para evitar divergências de timezone entre localhost e Vercel,
-// configure a variável de ambiente TZ=America/Sao_Paulo no Vercel Dashboard:
-// Settings > Environment Variables > Add: TZ = America/Sao_Paulo
-// Sem essa configuração, o Vercel usa UTC e pode haver pequenas diferenças nos valores
-// quando transações ocorrem próximo à meia-noite.
-const TIME_ZONE = process.env.TZ || "America/Sao_Paulo";
+// Timezone fixo para América/São Paulo para garantir consistência
+// entre localhost e Vercel. Não use process.env.TZ pois é variável reservada no Vercel.
+// NOTA: Pequenas diferenças de valores (< R$ 1.000) entre localhost e Vercel
+// podem ocorrer quando transações acontecem próximo à meia-noite devido ao
+// uso de Date do JavaScript que é baseado no timezone do servidor.
+const TIME_ZONE = "America/Sao_Paulo";
 
 type MesInfo = { key: string; label: string; ano: number; mes: number };
 
