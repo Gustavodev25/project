@@ -13,6 +13,9 @@ interface FiltrosFinancasProps {
   periodoAtivo?: FiltroPeriodo;
   onPeriodoChange?: (periodo: FiltroPeriodo) => void;
   onPeriodoPersonalizadoChange?: (dataInicio: Date, dataFim: Date) => void;
+  periodoCompetenciaAtivo?: FiltroPeriodo;
+  onPeriodoCompetenciaChange?: (periodo: FiltroPeriodo) => void;
+  onPeriodoCompetenciaPersonalizadoChange?: (dataInicio: Date, dataFim: Date) => void;
   filtroCategoria?: string;
   onCategoriaChange?: (categoriaId: string) => void;
   categoriasDisponiveis?: Array<{ id: string; nome: string; descricao?: string }>;
@@ -27,6 +30,9 @@ export default function FiltrosFinancas({
   periodoAtivo = "todos",
   onPeriodoChange,
   onPeriodoPersonalizadoChange,
+  periodoCompetenciaAtivo = "todos",
+  onPeriodoCompetenciaChange,
+  onPeriodoCompetenciaPersonalizadoChange,
   filtroCategoria = "todas",
   onCategoriaChange,
   categoriasDisponiveis = [],
@@ -36,19 +42,33 @@ export default function FiltrosFinancas({
   onOrigemChange,
 }: FiltrosFinancasProps) {
   const [showPeriodoDropdown, setShowPeriodoDropdown] = useState(false);
+  const [showPeriodoCompetenciaDropdown, setShowPeriodoCompetenciaDropdown] = useState(false);
   const [showCategoriaDropdown, setShowCategoriaDropdown] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showOrigemDropdown, setShowOrigemDropdown] = useState(false);
   const [showCalendarioPersonalizado, setShowCalendarioPersonalizado] = useState(false);
+  const [showCalendarioPersonalizadoComp, setShowCalendarioPersonalizadoComp] = useState(false);
   const [dataInicio, setDataInicio] = useState<Date | null>(null);
   const [dataFim, setDataFim] = useState<Date | null>(null);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
+  const [dataCompInicio, setDataCompInicio] = useState<Date | null>(null);
+  const [dataCompFim, setDataCompFim] = useState<Date | null>(null);
+  const [startDateComp, setStartDateComp] = useState<Date | null>(null);
+  const [endDateComp, setEndDateComp] = useState<Date | null>(null);
 
   // Hooks para dropdowns
   const periodoDropdown = useSmartDropdown<HTMLButtonElement>({
     isOpen: showPeriodoDropdown,
     onClose: () => setShowPeriodoDropdown(false),
+    preferredPosition: 'bottom-right',
+    offset: 8,
+    minDistanceFromEdge: 16
+  });
+
+  const periodoCompetenciaDropdown = useSmartDropdown<HTMLButtonElement>({
+    isOpen: showPeriodoCompetenciaDropdown,
+    onClose: () => setShowPeriodoCompetenciaDropdown(false),
     preferredPosition: 'bottom-right',
     offset: 8,
     minDistanceFromEdge: 16
@@ -110,6 +130,34 @@ export default function FiltrosFinancas({
     setEndDate(null);
   };
 
+  // Handlers Competência
+  const handlePeriodoCompetenciaClick = (periodo: FiltroPeriodo) => {
+    if (periodo === "personalizado") {
+      setShowCalendarioPersonalizadoComp(true);
+      return;
+    }
+    if (onPeriodoCompetenciaChange) onPeriodoCompetenciaChange(periodo);
+    setShowPeriodoCompetenciaDropdown(false);
+    setShowCalendarioPersonalizadoComp(false);
+  };
+
+  const handleConfirmarPersonalizadoCompetencia = () => {
+    if (startDateComp && endDateComp && onPeriodoCompetenciaPersonalizadoChange) {
+      onPeriodoCompetenciaPersonalizadoChange(startDateComp, endDateComp);
+      setDataCompInicio(startDateComp);
+      setDataCompFim(endDateComp);
+    }
+    if (onPeriodoCompetenciaChange) onPeriodoCompetenciaChange("personalizado");
+    setShowPeriodoCompetenciaDropdown(false);
+    setShowCalendarioPersonalizadoComp(false);
+  };
+
+  const handleCancelarPersonalizadoCompetencia = () => {
+    setShowCalendarioPersonalizadoComp(false);
+    setStartDateComp(null);
+    setEndDateComp(null);
+  };
+
   const getPeriodoLabel = (periodo: FiltroPeriodo) => {
     switch (periodo) {
       case "todos": return "Todos os Períodos";
@@ -162,6 +210,7 @@ export default function FiltrosFinancas({
 
   const limparFiltros = () => {
     if (onPeriodoChange) onPeriodoChange("todos");
+    if (onPeriodoCompetenciaChange) onPeriodoCompetenciaChange("todos");
     if (onCategoriaChange) onCategoriaChange("todas");
     if (onStatusChange) onStatusChange("todos");
     if (onOrigemChange) onOrigemChange("todas");
@@ -169,9 +218,13 @@ export default function FiltrosFinancas({
     setDataFim(null);
     setStartDate(null);
     setEndDate(null);
+    setDataCompInicio(null);
+    setDataCompFim(null);
+    setStartDateComp(null);
+    setEndDateComp(null);
   };
 
-  const temFiltrosAtivos = periodoAtivo !== "todos" || filtroCategoria !== "todas" || filtroStatus !== "todos" || filtroOrigem !== "todas";
+  const temFiltrosAtivos = periodoAtivo !== "todos" || periodoCompetenciaAtivo !== "todos" || filtroCategoria !== "todas" || filtroStatus !== "todos" || filtroOrigem !== "todas";
 
   return (
     <>
@@ -193,7 +246,7 @@ export default function FiltrosFinancas({
                 <line x1="8" y1="2" x2="8" y2="6" />
                 <line x1="3" y1="10" x2="21" y2="10" />
               </svg>
-              <span>{getPeriodoLabel(periodoAtivo)}</span>
+              <span>Pagamento: {getPeriodoLabel(periodoAtivo)}</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showPeriodoDropdown ? 'rotate-180' : ''}`}>
                 <polyline points="6,9 12,15 18,9"/>
               </svg>
@@ -257,6 +310,98 @@ export default function FiltrosFinancas({
                       <button
                         onClick={handleConfirmarPersonalizado}
                         disabled={!startDate || !endDate}
+                        className="flex-1 px-3 py-2 text-xs font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Confirmar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Período Competência */}
+          <div className="relative">
+            <button
+              ref={periodoCompetenciaDropdown.triggerRef}
+              onClick={() => setShowPeriodoCompetenciaDropdown(!showPeriodoCompetenciaDropdown)}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-all duration-200 ${
+                showPeriodoCompetenciaDropdown 
+                  ? "border-gray-400 bg-gray-50 text-gray-900" 
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              <span>Competência: {getPeriodoLabel(periodoCompetenciaAtivo || "todos")}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showPeriodoCompetenciaDropdown ? 'rotate-180' : ''}`}>
+                <polyline points="6,9 12,15 18,9"/>
+              </svg>
+            </button>
+
+            {periodoCompetenciaDropdown.isVisible && (
+              <div 
+                ref={periodoCompetenciaDropdown.dropdownRef}
+                className={`smart-dropdown w-64 ${periodoCompetenciaDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
+                style={periodoCompetenciaDropdown.position}
+              >
+                {!showCalendarioPersonalizadoComp ? (
+                  <div className="p-2">
+                    <div className="space-y-1">
+                      {[
+                        { id: "todos" as FiltroPeriodo, label: "Todos os Períodos" },
+                        { id: "hoje" as FiltroPeriodo, label: "Hoje" },
+                        { id: "ontem" as FiltroPeriodo, label: "Ontem" },
+                        { id: "este_mes" as FiltroPeriodo, label: "Este mês" },
+                        { id: "mes_passado" as FiltroPeriodo, label: "Mês passado" },
+                        { id: "personalizado" as FiltroPeriodo, label: "Personalizado..." },
+                      ].map((opcao) => (
+                        <button
+                          key={opcao.id}
+                          onClick={() => handlePeriodoCompetenciaClick(opcao.id)}
+                          className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                            periodoCompetenciaAtivo === opcao.id 
+                              ? "bg-gray-100 text-gray-900 font-medium" 
+                              : "text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          {opcao.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4">
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Período de Competência</h4>
+                    <DatePicker
+                      selected={startDateComp}
+                      onChange={(dates: [Date | null, Date | null]) => {
+                        const [start, end] = dates;
+                        setStartDateComp(start);
+                        setEndDateComp(end);
+                      }}
+                      startDate={startDateComp}
+                      endDate={endDateComp}
+                      selectsRange
+                      inline
+                      locale="pt-BR"
+                      dateFormat="dd/MM/yyyy"
+                    />
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={handleCancelarPersonalizadoCompetencia}
+                        className="flex-1 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleConfirmarPersonalizadoCompetencia}
+                        disabled={!startDateComp || !endDateComp}
                         className="flex-1 px-3 py-2 text-xs font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Confirmar
@@ -456,3 +601,4 @@ export default function FiltrosFinancas({
     </>
   );
 }
+

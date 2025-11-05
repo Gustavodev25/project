@@ -147,7 +147,7 @@ const HeaderFinancas = ({
                   >
                     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
                   </svg>
-                  <span>Sincronizar</span>
+                  <span>Trazer dados do Bling</span>
                 </>
               )}
             </button>
@@ -776,9 +776,86 @@ export default function Financas() {
     });
   };
 
+  // ===== Novos filtros com parse local e múltiplos campos de data =====
+  const parseLocalDate = (iso?: string | null) => {
+    if (!iso) return null;
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})/.exec(String(iso));
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    const d = new Date(iso as string);
+    if (isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const calcularPeriodo2 = (periodo: FiltroPeriodo, inicioCustom?: Date | null, fimCustom?: Date | null) => {
+    const hoje = new Date();
+    hoje.setHours(0,0,0,0);
+    switch (periodo) {
+      case "hoje":
+        return { inicio: hoje, fim: hoje };
+      case "ontem": {
+        const ontem = new Date(hoje);
+        ontem.setDate(ontem.getDate() - 1);
+        return { inicio: ontem, fim: ontem };
+      }
+      case "este_mes": {
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+        return { inicio, fim };
+      }
+      case "mes_passado": {
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+        return { inicio, fim };
+      }
+      case "personalizado":
+        if (inicioCustom && fimCustom) return { inicio: inicioCustom, fim: fimCustom };
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  const aplicarFiltros2 = (contas: any[], tipoLista: "contas_pagar" | "contas_receber") => {
+    return contas.filter((conta) => {
+      // Vencimento: não aplicar por padrão (pedido: focar em Pagamento e Competência)
+      // Competência (novo)
+      const pComp = calcularPeriodo2(filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim);
+      if (pComp) {
+        const d = parseLocalDate(conta.dataCompetencia);
+        if (!d) return false;
+        const i = new Date(pComp.inicio); i.setHours(0,0,0,0);
+        const f = new Date(pComp.fim); f.setHours(23,59,59,999);
+        if (d < i || d > f) return false;
+      }
+      // Pagamento/Recebimento (quando período ativo)
+      if (filtroPeriodo !== "todos" || (filtroDataInicio && filtroDataFim)) {
+        const pPag = calcularPeriodo2(filtroPeriodo, filtroDataInicio, filtroDataFim);
+        if (pPag) {
+          const raw = tipoLista === "contas_pagar" ? conta.dataPagamento : (conta.dataRecebimento || conta.dataPagamento);
+          const d = parseLocalDate(raw);
+          if (d) {
+            const i = new Date(pPag.inicio); i.setHours(0,0,0,0);
+            const f = new Date(pPag.fim); f.setHours(23,59,59,999);
+            if (d < i || d > f) return false;
+          }
+        }
+      }
+      // Demais filtros
+      if (filtroCategoria !== "todas" && conta.categoriaId !== filtroCategoria) return false;
+      if (filtroStatus !== "todos" && conta.status !== filtroStatus) return false;
+      if (filtroOrigem !== "todas" && conta.origem !== filtroOrigem) return false;
+      return true;
+    });
+  };
+
   // Paginação (client-side) para tabelas de contas
-  const contasPagarFiltradas = aplicarFiltros(contasPagar);
-  const contasReceberFiltradas = aplicarFiltros(contasReceber);
+  const contasPagarFiltradas = aplicarFiltros2(contasPagar, "contas_pagar");
+  const contasReceberFiltradas = aplicarFiltros2(contasReceber, "contas_receber");
   const totalPagar = contasPagarFiltradas.length;
   const totalReceber = contasReceberFiltradas.length;
   const totalPagesPagar = Math.max(1, Math.ceil(totalPagar / itemsPerPage));
@@ -1209,7 +1286,7 @@ export default function Financas() {
           >
             <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
           </svg>
-          <span>Sincronizar</span>
+          <span>Trazer dados do Bling</span>
         </>
       )}
     </button>
@@ -1530,6 +1607,12 @@ export default function Financas() {
                 onPeriodoPersonalizadoChange={(inicio, fim) => {
                   setFiltroDataInicio(inicio);
                   setFiltroDataFim(fim);
+                }}
+                periodoCompetenciaAtivo={filtroPeriodoCompetencia}
+                onPeriodoCompetenciaChange={setFiltroPeriodoCompetencia}
+                onPeriodoCompetenciaPersonalizadoChange={(inicio, fim) => {
+                  setFiltroDataCompInicio(inicio);
+                  setFiltroDataCompFim(fim);
                 }}
                 filtroCategoria={filtroCategoria}
                 onCategoriaChange={setFiltroCategoria}
