@@ -126,7 +126,8 @@ export async function GET(request: NextRequest) {
       categorias = await prisma.categoria.findMany({
         where: {
           userId: userId,
-          ativo: true,
+          // Removido filtro ativo: true para mostrar todas as categorias (inclusive inativas)
+          // Categorias inativas ainda podem estar em uso por contas antigas
         },
         orderBy: {
           nome: "asc",
@@ -148,7 +149,7 @@ export async function GET(request: NextRequest) {
         subCategorias = await prisma.categoria.findMany({
           where: {
             categoriaPaiId: { in: categoriaIds },
-            ativo: true,
+            // Removido filtro ativo: true para mostrar todas as subcategorias
           },
           orderBy: {
             nome: "asc",

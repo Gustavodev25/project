@@ -33,6 +33,9 @@ interface HeaderFinancasProps {
   hasSyncedBefore?: boolean;
   isIncrementalSyncing?: boolean;
   filtrosComponent?: React.ReactNode;
+  onSyncClick?: () => void;
+  isSyncing?: boolean;
+  syncProgress?: string;
 }
 
 const HeaderFinancas = ({ 
@@ -43,7 +46,10 @@ const HeaderFinancas = ({
   onIncrementalSync, 
   hasSyncedBefore = false, 
   isIncrementalSyncing = false,
-  filtrosComponent
+  filtrosComponent,
+  onSyncClick,
+  isSyncing,
+  syncProgress
 }: HeaderFinancasProps) => {
   const tabs = [
     { id: "contas_pagar" as TabOption, label: "Contas a Pagar" },
@@ -114,6 +120,38 @@ const HeaderFinancas = ({
             </svg>
             Importar Excel
           </button>
+
+          {onSyncClick && (
+            <button
+              onClick={onSyncClick}
+              disabled={!!isSyncing}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSyncing ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
+                  <span>{syncProgress || "Sincronizando..."}</span>
+                </>
+              ) : (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                  </svg>
+                  <span>Sincronizar</span>
+                </>
+              )}
+            </button>
+          )}
 
           {/* Botão de Adicionar */}
           <button
@@ -1474,6 +1512,9 @@ export default function Financas() {
             onIncrementalSync={handleIncrementalSync}
             hasSyncedBefore={hasSyncedBefore}
             isIncrementalSyncing={isIncrementalSyncing}
+            onSyncClick={handleSync}
+            isSyncing={isSyncing}
+            syncProgress={syncProgress}
             filtrosComponent={(activeTab === "contas_pagar" || activeTab === "contas_receber") ? (
               <FiltrosFinancas
                 tipo={activeTab}
@@ -1485,7 +1526,13 @@ export default function Financas() {
                 }}
                 filtroCategoria={filtroCategoria}
                 onCategoriaChange={setFiltroCategoria}
-                categoriasDisponiveis={categorias.filter(c => c.tipo === (activeTab === "contas_pagar" ? 'DESPESA' : 'RECEITA')).map(c => ({ id: c.id, nome: c.nome, descricao: c.descricao }))}
+                categoriasDisponiveis={(() => {
+                  const tipoAlvo = activeTab === "contas_pagar" ? 'DESPESA' : 'RECEITA';
+                  const flattened = categorias.flatMap((c: any) => [c, ...(c.subCategorias || [])]);
+                  return flattened
+                    .filter((c: any) => c && c.tipo === tipoAlvo)
+                    .map((c: any) => ({ id: c.id, nome: c.nome, descricao: c.descricao }));
+                })()}
                 filtroStatus={filtroStatus}
                 onStatusChange={setFiltroStatus}
                 filtroOrigem={filtroOrigem}

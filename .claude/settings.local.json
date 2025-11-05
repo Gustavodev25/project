@@ -36,7 +36,10 @@
       "Read(//c/Users/Gustavo Maldanis/Desktop/cyber-registro/**)",
       "Bash(curl:*)",
       "Bash(taskkill:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(.env.local)",
+      "Bash(ping:*)",
+      "Bash(git -C \"c:/Users/Gustavo Maldanis/Desktop/backup/Desktop/backup/project-a58bcb3c19a37515908ff30229d5a38e52ff38f4\" status)"
     ],
     "deny": [],
     "ask": []

@@ -179,7 +179,11 @@ export async function GET(req: NextRequest) {
     let categoriaIdsParaFiltro = categoriaIds;
     if (categoriaIds.length === 0) {
       const todasCategoriasDespesa = await prisma.categoria.findMany({
-        where: { userId: session.sub, tipo: { equals: "DESPESA", mode: "insensitive" } },
+        where: {
+          userId: session.sub,
+          tipo: { equals: "DESPESA", mode: "insensitive" },
+          ativo: true  // Incluir apenas categorias ativas para consistência com o filtro
+        },
         select: { id: true },
       });
       categoriaIdsParaFiltro = todasCategoriasDespesa.map((c) => c.id);
@@ -195,7 +199,7 @@ export async function GET(req: NextRequest) {
             ]
           : [
               { dataCompetencia: { gte: start, lte: end } },
-              { AND: [{ dataCompetencia: null }, { dataVencimento: { gte: start, lte: end } }] },
+              { AND: [{ dataCompetencia: { equals: null } }, { dataVencimento: { gte: start, lte: end } }] },
             ],
     };
     if (portadorIdParam) whereDespesas.formaPagamentoId = String(portadorIdParam);
