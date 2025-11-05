@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     // Helpers simples + fila controlada para detalhes (evita 429)
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let activeDetail = 0;
-    const maxConcurrentDetail = 2;
+    const maxConcurrentDetail = 8; // Otimizado para maior velocidade
     const fetchDetalheContaReceberCategoriaId = async (id: number): Promise<{ catId: string | null; competencia: Date | null } | null> => {
       while (activeDetail >= maxConcurrentDetail) {
         await sleep(40);
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         return null;
       } finally {
         activeDetail--;
-        await sleep(150);
+        await sleep(80); // Otimizado para maior velocidade
       }
     };
 
@@ -219,7 +219,7 @@ export async function POST(request: Request) {
       progressLabel: `Processando ${totalContas} contas`
     });
 
-    const batchSize = 12; // aumenta concorrência de processamento principal
+    const batchSize = 25; // Otimizado para maior velocidade
     for (let start = 0; start < contasBling.length; start += batchSize) {
       const end = Math.min(start + batchSize, contasBling.length);
       const batch = contasBling.slice(start, end);

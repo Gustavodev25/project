@@ -110,7 +110,7 @@ export async function POST(request: Request) {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let activeDetail = 0;
     // Aumenta concorrência controlada para acelerar sem estourar rate limit
-    const maxConcurrentDetail = 3;
+    const maxConcurrentDetail = 8; // Otimizado para maior velocidade
     const fetchDetalheContaPagarCategoriaId = async (id: number): Promise<{ catId: string | null; competencia: Date | null; historico?: string | null } | null> => {
       while (activeDetail >= maxConcurrentDetail) {
         await sleep(50);
@@ -131,8 +131,8 @@ export async function POST(request: Request) {
         return null;
       } finally {
         activeDetail--;
-        // Pausa breve entre chamadas de detalhe (com concorrência 3)
-        await sleep(150);
+        // Pausa breve entre chamadas de detalhe (otimizado para velocidade)
+        await sleep(80);
       }
     };
 
@@ -270,7 +270,7 @@ export async function POST(request: Request) {
 
     // Processar em lotes concorrentes para acelerar
     // Aumenta tamanho do lote de processamento principal (controle via backoff no blingFetchJSON)
-    const batchSize = 12;
+    const batchSize = 25; // Otimizado para maior velocidade
     for (let start = 0; start < contasBling.length; start += batchSize) {
       const end = Math.min(start + batchSize, contasBling.length);
       const batch = contasBling.slice(start, end);

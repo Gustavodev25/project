@@ -268,7 +268,7 @@ async function fetchAllPages(
   path: string,
   accessToken: string,
   baseQuery?: Record<string, string | number | undefined>,
-  hardLimit = 50, // Reduzido de 100 para 50
+  hardLimit = 100, // Otimizado para maior cobertura de dados
 ): Promise<any[]> {
   const results: any[] = [];
 
@@ -361,7 +361,7 @@ export async function getBlingFormasPagamento(accessToken: string) {
       // Usar paginaÃƒÂ§ÃƒÂ£o otimizada
       const list = await fetchAllPages(path, accessToken, {
         limite: 100, // MÃƒÂ¡ximo por pÃƒÂ¡gina
-      }, 5); // MÃƒÂ¡ximo 5 pÃƒÂ¡ginas (500 formas de pagamento)
+      }, 10); // MÃƒÂ¡ximo 10 pÃƒÂ¡ginas (1000 formas de pagamento)
       
       if (list.length > 0) {
         console.log(`[Bling] Encontradas ${list.length} formas de pagamento em ${path}`);
@@ -1018,7 +1018,7 @@ export async function getBlingContasPagar(accessToken: string, userId?: string) 
         tipoFiltroData: "V", // V = Data de vencimento (igual ao contas a receber)
         dataInicial: dataInicial, // Filtro de data inicial
         dataFinal: dataFinal, // Filtro de data final
-      }, 20); // MÃƒÂ¡ximo 20 pÃƒÂ¡ginas (2000 contas) - igual ao contas a receber
+      }, 50); // MÃƒÂ¡ximo 50 pÃƒÂ¡ginas (5000 contas)
       
       if (list.length > 0) {
         console.log(`[Bling] Encontradas ${list.length} contas a pagar em ${path} (ÃƒÂºltimos 3 meses)`);
@@ -1064,7 +1064,7 @@ export async function getBlingContasReceber(accessToken: string, userId?: string
         tipoFiltroData: "V", // V = Data de vencimento
         dataInicial: dataInicial, // Filtro de data inicial
         dataFinal: dataFinal, // Filtro de data final
-      }, 20); // MÃƒÂ¡ximo 20 pÃƒÂ¡ginas (2000 contas)
+      }, 50); // MÃƒÂ¡ximo 50 pÃƒÂ¡ginas (5000 contas)
       
       if (list.length > 0) {
         console.log(`[Bling] Encontradas ${list.length} contas a receber em ${path} (ÃƒÂºltimos 3 meses)`);

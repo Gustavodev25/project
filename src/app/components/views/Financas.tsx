@@ -452,27 +452,31 @@ export default function Financas() {
           throw new Error("Erro ao sincronizar categorias");
         }
 
-        // Agora sincroniza Contas a Receber e depois Contas a Pagar (ordem fixa)
-        setSyncProgress("Sincronizando contas a receber...");
-        let res = await fetch("/api/financeiro/contas-receber/sync", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
+        // Sincroniza Contas a Receber e Contas a Pagar EM PARALELO (otimização de velocidade)
+        setSyncProgress("Sincronizando contas a receber e contas a pagar...");
+        const [receberRes, pagarRes] = await Promise.all([
+          fetch("/api/financeiro/contas-receber/sync", {
+            method: "POST",
+            credentials: "include",
+          }),
+          fetch("/api/financeiro/contas-pagar/sync", {
+            method: "POST",
+            credentials: "include",
+          })
+        ]);
+
+        // Verificar erros de Contas a Receber
+        if (!receberRes.ok) {
+          const errorData = await receberRes.json().catch(() => ({}));
           if (errorData.requiresReconnection) {
             throw new Error("Tokens do Bling expirados. Reconecte sua conta Bling para continuar.");
           }
           throw new Error("Erro ao sincronizar contas a receber");
         }
 
-        setSyncProgress("Sincronizando contas a pagar...");
-        res = await fetch("/api/financeiro/contas-pagar/sync", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
+        // Verificar erros de Contas a Pagar
+        if (!pagarRes.ok) {
+          const errorData = await pagarRes.json().catch(() => ({}));
           if (errorData.requiresReconnection) {
             throw new Error("Tokens do Bling expirados. Reconecte sua conta Bling para continuar.");
           }
@@ -506,26 +510,31 @@ export default function Financas() {
           throw new Error("Erro ao sincronizar categorias");
         }
 
-        setSyncProgress("Sincronizando contas a receber...");
-        res = await fetch("/api/financeiro/contas-receber/sync", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
+        // Sincroniza Contas a Receber e Contas a Pagar EM PARALELO (otimização de velocidade)
+        setSyncProgress("Sincronizando contas a receber e contas a pagar...");
+        const [receberRes2, pagarRes2] = await Promise.all([
+          fetch("/api/financeiro/contas-receber/sync", {
+            method: "POST",
+            credentials: "include",
+          }),
+          fetch("/api/financeiro/contas-pagar/sync", {
+            method: "POST",
+            credentials: "include",
+          })
+        ]);
+
+        // Verificar erros de Contas a Receber
+        if (!receberRes2.ok) {
+          const errorData = await receberRes2.json().catch(() => ({}));
           if (errorData.requiresReconnection) {
             throw new Error("Tokens do Bling expirados. Reconecte sua conta Bling para continuar.");
           }
           throw new Error("Erro ao sincronizar contas a receber");
         }
 
-        setSyncProgress("Sincronizando contas a pagar...");
-        res = await fetch("/api/financeiro/contas-pagar/sync", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
+        // Verificar erros de Contas a Pagar
+        if (!pagarRes2.ok) {
+          const errorData = await pagarRes2.json().catch(() => ({}));
           if (errorData.requiresReconnection) {
             throw new Error("Tokens do Bling expirados. Reconecte sua conta Bling para continuar.");
           }
