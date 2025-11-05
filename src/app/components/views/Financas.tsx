@@ -273,8 +273,11 @@ export default function Financas() {
   
   // Estados de filtros
   const [filtroPeriodo, setFiltroPeriodo] = useState<FiltroPeriodo>("todos");
+  const [filtroPeriodoCompetencia, setFiltroPeriodoCompetencia] = useState<FiltroPeriodo>("todos");
   const [filtroDataInicio, setFiltroDataInicio] = useState<Date | null>(null);
   const [filtroDataFim, setFiltroDataFim] = useState<Date | null>(null);
+  const [filtroDataCompInicio, setFiltroDataCompInicio] = useState<Date | null>(null);
+  const [filtroDataCompFim, setFiltroDataCompFim] = useState<Date | null>(null);
   const [filtroCategoria, setFiltroCategoria] = useState<string>("todas");
   const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>("todos");
   const [filtroOrigem, setFiltroOrigem] = useState<FiltroOrigem>("todas");
