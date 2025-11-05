@@ -87,6 +87,24 @@ function monthKey(d: Date): string {
   return `${rec.year}-${rec.month}`;
 }
 
+// Fallbacks (comportamento anterior baseado no timezone do host)
+function parseMesKeyLocal(key: string): { start: Date; end: Date; ano: number; mes: number } | null {
+  const m = /^([0-9]{4})-([0-9]{2})$/.exec(key);
+  if (!m) return null;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  if (!Number.isFinite(ano) || !Number.isFinite(mes) || mes < 1 || mes > 12) return null;
+  const start = new Date(ano, mes - 1, 1, 0, 0, 0, 0);
+  const end = new Date(ano, mes, 0, 23, 59, 59, 999);
+  return { start, end, ano, mes };
+}
+
+function monthKeyLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
 function monthLabel(ano: number, mes: number): string {
   return `${String(mes).padStart(2, "0")}/${ano}`;
 }
@@ -122,7 +140,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Build month windows
-    const parsed = mesesParam.map(parseMesKey).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
+    const parsed = mesesParam.map(parseMesKeyLocal).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
     if (parsed.length === 0) {
       return NextResponse.json({ error: "Meses inválidos" }, { status: 400 });
     }
@@ -336,7 +354,7 @@ export async function GET(req: NextRequest) {
         : (row.dataCompetencia || row.dataVencimento);  // Competência: prioriza dataCompetencia
 
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!despesasPorMes.hasOwnProperty(key)) continue; // fora dos meses solicitados
       const catId = row.categoriaId || row.categoria?.id || "sem_categoria";
       if (!valoresPorCategoriaMes[catId]) valoresPorCategoriaMes[catId] = {};
@@ -358,7 +376,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeli) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!receitaBrutaMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -383,7 +401,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopee) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!receitaBrutaShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -411,7 +429,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeliCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!deducoesMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -422,7 +440,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopeeCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!deducoesShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
