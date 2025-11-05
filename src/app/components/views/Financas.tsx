@@ -805,9 +805,14 @@ export default function Financas() {
       if (filtroPeriodoCompetencia !== "todos" || (filtroDataCompInicio && filtroDataCompFim)) {
         const pComp = calcularPeriodo2(filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim);
         if (pComp) {
-          const d = parseLocalDate(conta.dataCompetencia);
-          // Se o filtro de competência está ativo mas o registro não tem data de competência, excluir
+          // Usar dataCompetencia, fallback para dataVencimento
+          let d = parseLocalDate(conta.dataCompetencia);
+          if (!d) {
+            d = parseLocalDate(conta.dataVencimento);
+          }
+          // Se não tem nenhuma data, excluir
           if (!d) return false;
+          
           const i = new Date(pComp.inicio); i.setHours(0,0,0,0);
           const f = new Date(pComp.fim); f.setHours(23,59,59,999);
           // Se a data está fora do período, excluir
@@ -819,10 +824,15 @@ export default function Financas() {
       if (filtroPeriodo !== "todos" || (filtroDataInicio && filtroDataFim)) {
         const pPag = calcularPeriodo2(filtroPeriodo, filtroDataInicio, filtroDataFim);
         if (pPag) {
-          const raw = tipoLista === "contas_pagar" ? conta.dataPagamento : (conta.dataRecebimento || conta.dataPagamento);
-          const d = parseLocalDate(raw);
-          // Se o filtro de pagamento está ativo mas o registro não tem data de pagamento, excluir
+          // Usar dataPagamento/dataRecebimento, fallback para dataVencimento
+          const rawPrimary = tipoLista === "contas_pagar" ? conta.dataPagamento : conta.dataRecebimento;
+          let d = parseLocalDate(rawPrimary);
+          if (!d) {
+            d = parseLocalDate(conta.dataVencimento);
+          }
+          // Se não tem nenhuma data, excluir
           if (!d) return false;
+          
           const i = new Date(pPag.inicio); i.setHours(0,0,0,0);
           const f = new Date(pPag.fim); f.setHours(23,59,59,999);
           // Se a data está fora do período, excluir

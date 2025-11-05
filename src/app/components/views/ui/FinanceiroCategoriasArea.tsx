@@ -11,6 +11,15 @@ interface FinanceiroCategoriasAreaProps {
   portadorId?: string | null;
   categoriasSelecionadas?: Set<string>; // Se filtrar categorias específicas, mostra apenas elas
   tipoVisualizacao?: 'caixa' | 'competencia';
+  
+  // Filtros separados de pagamento e competência
+  filtroPeriodoPagamento?: FiltroPeriodo;
+  filtroDataPagInicio?: Date | null;
+  filtroDataPagFim?: Date | null;
+  filtroPeriodoCompetencia?: FiltroPeriodo;
+  filtroDataCompInicio?: Date | null;
+  filtroDataCompFim?: Date | null;
+  
   refreshKey?: number;
   tipo?: "despesas" | "receitas";
 }
@@ -36,6 +45,14 @@ export default function FinanceiroCategoriasArea({
   portadorId = null,
   categoriasSelecionadas = new Set(),
   tipoVisualizacao = 'caixa',
+  
+  filtroPeriodoPagamento = "todos",
+  filtroDataPagInicio = null,
+  filtroDataPagFim = null,
+  filtroPeriodoCompetencia = "todos",
+  filtroDataCompInicio = null,
+  filtroDataCompFim = null,
+  
   refreshKey = 0,
   tipo = "despesas",
 }: FinanceiroCategoriasAreaProps) {
@@ -49,6 +66,24 @@ export default function FinanceiroCategoriasArea({
       try {
         setLoading(true);
         const params = new URLSearchParams();
+        
+        // Filtros separados de pagamento e competência
+        if (filtroPeriodoPagamento && filtroPeriodoPagamento !== 'todos') {
+          params.append('filtroPeriodoPagamento', filtroPeriodoPagamento);
+        }
+        if (filtroDataPagInicio && filtroDataPagFim) {
+          params.append('filtroDataPagInicio', filtroDataPagInicio.toISOString());
+          params.append('filtroDataPagFim', filtroDataPagFim.toISOString());
+        }
+        if (filtroPeriodoCompetencia && filtroPeriodoCompetencia !== 'todos') {
+          params.append('filtroPeriodoCompetencia', filtroPeriodoCompetencia);
+        }
+        if (filtroDataCompInicio && filtroDataCompFim) {
+          params.append('filtroDataCompInicio', filtroDataCompInicio.toISOString());
+          params.append('filtroDataCompFim', filtroDataCompFim.toISOString());
+        }
+        
+        // Backward compatibility (período geral)
         if (periodoAtivo && periodoAtivo !== 'todos') params.append('periodo', periodoAtivo);
         if (dataInicioPersonalizada && dataFimPersonalizada) {
           params.append('dataInicio', dataInicioPersonalizada.toISOString());
@@ -75,7 +110,13 @@ export default function FinanceiroCategoriasArea({
     };
     load();
     return () => { aborted = true; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, tipoVisualizacao, refreshKey, tipo]);
+  }, [
+    periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, 
+    portadorId, categoriasSelecionadas, tipoVisualizacao,
+    filtroPeriodoPagamento, filtroDataPagInicio, filtroDataPagFim,
+    filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim,
+    refreshKey, tipo
+  ]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 

@@ -11,6 +11,15 @@ interface FinanceiroStatsProps {
   portadorId?: string | null;
   categoriasSelecionadas?: Set<string>;
   tipoVisualizacao?: 'caixa' | 'competencia';
+  
+  // Filtros separados de pagamento e competência
+  filtroPeriodoPagamento?: FiltroPeriodo;
+  filtroDataPagInicio?: Date | null;
+  filtroDataPagFim?: Date | null;
+  filtroPeriodoCompetencia?: FiltroPeriodo;
+  filtroDataCompInicio?: Date | null;
+  filtroDataCompFim?: Date | null;
+  
   refreshKey?: number;
 }
 
@@ -49,6 +58,14 @@ export default function FinanceiroStats({
   portadorId = null,
   categoriasSelecionadas = new Set(),
   tipoVisualizacao = 'caixa',
+  
+  filtroPeriodoPagamento = "todos",
+  filtroDataPagInicio = null,
+  filtroDataPagFim = null,
+  filtroPeriodoCompetencia = "todos",
+  filtroDataCompInicio = null,
+  filtroDataCompFim = null,
+  
   refreshKey = 0,
 }: FinanceiroStatsProps) {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
@@ -60,6 +77,24 @@ export default function FinanceiroStats({
       try {
         setLoading(true);
         const params = new URLSearchParams();
+        
+        // Filtros separados de pagamento e competência
+        if (filtroPeriodoPagamento && filtroPeriodoPagamento !== 'todos') {
+          params.append('filtroPeriodoPagamento', filtroPeriodoPagamento);
+        }
+        if (filtroDataPagInicio && filtroDataPagFim) {
+          params.append('filtroDataPagInicio', filtroDataPagInicio.toISOString());
+          params.append('filtroDataPagFim', filtroDataPagFim.toISOString());
+        }
+        if (filtroPeriodoCompetencia && filtroPeriodoCompetencia !== 'todos') {
+          params.append('filtroPeriodoCompetencia', filtroPeriodoCompetencia);
+        }
+        if (filtroDataCompInicio && filtroDataCompFim) {
+          params.append('filtroDataCompInicio', filtroDataCompInicio.toISOString());
+          params.append('filtroDataCompFim', filtroDataCompFim.toISOString());
+        }
+        
+        // Backward compatibility (período geral)
         if (periodoAtivo && periodoAtivo !== 'todos') params.append('periodo', periodoAtivo);
         if (dataInicioPersonalizada && dataFimPersonalizada) {
           params.append('dataInicio', dataInicioPersonalizada.toISOString());
@@ -85,7 +120,13 @@ export default function FinanceiroStats({
     }
     load();
     return () => { isMounted = false; };
-  }, [periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, portadorId, categoriasSelecionadas, tipoVisualizacao, refreshKey]);
+  }, [
+    periodoAtivo, dataInicioPersonalizada, dataFimPersonalizada, 
+    portadorId, categoriasSelecionadas, tipoVisualizacao,
+    filtroPeriodoPagamento, filtroDataPagInicio, filtroDataPagFim,
+    filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim,
+    refreshKey
+  ]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
   const formatPercentage = (value: number) => `${value > 0 ? "+" : ""}${(value || 0).toFixed(1)}%`;

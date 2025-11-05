@@ -29,6 +29,50 @@ function isCMVCategory(nome?: string | null, descricao?: string | null): boolean
   return normalized.includes("cmv") || normalized.includes("cpv") || normalized.includes("csp");
 }
 
+// Helper para calcular período baseado no tipo
+function calcularPeriodo(periodo: string | null, dataInicio: string | null, dataFim: string | null): { start: Date; end: Date } {
+  const now = new Date();
+  
+  if (dataInicio && dataFim) {
+    const start = new Date(dataInicio);
+    const endBase = new Date(dataFim);
+    return {
+      start,
+      end: new Date(endBase.getTime() + (24 * 60 * 60 * 1000 - 1))
+    };
+  }
+  
+  if (periodo) {
+    switch (periodo) {
+      case "hoje": {
+        const inicio = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        const fim = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        return { start: inicio, end: fim };
+      }
+      case "ontem": {
+        const ontem = new Date(now);
+        ontem.setDate(ontem.getDate() - 1);
+        const inicio = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
+        const fim = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+        return { start: inicio, end: fim };
+      }
+      case "mes_passado": {
+        const primeiroDia = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const ultimoDia = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        return { start: primeiroDia, end: ultimoDia };
+      }
+      case "este_mes": {
+        return { start: startOfMonth(now), end: endOfMonth(now) };
+      }
+      case "todos":
+      default:
+        return { start: new Date(0), end: new Date() };
+    }
+  }
+  
+  return { start: new Date(0), end: new Date() };
+}
+
 export async function GET(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
@@ -40,6 +84,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const url = new URL(req.url);
+    
+    // Filtros separados de pagamento e competência
+    const filtroPeriodoPagamento = url.searchParams.get("filtroPeriodoPagamento");
+    const filtroDataPagInicio = url.searchParams.get("filtroDataPagInicio");
+    const filtroDataPagFim = url.searchParams.get("filtroDataPagFim");
+    const filtroPeriodoCompetencia = url.searchParams.get("filtroPeriodoCompetencia");
+    const filtroDataCompInicio = url.searchParams.get("filtroDataCompInicio");
+    const filtroDataCompFim = url.searchParams.get("filtroDataCompFim");
+    
+    // Parâmetros gerais (backward compatibility)
     const periodoParam = url.searchParams.get("periodo");
     const dataInicioParam = url.searchParams.get("dataInicio");
     const dataFimParam = url.searchParams.get("dataFim");
@@ -48,40 +102,20 @@ export async function GET(req: NextRequest) {
     const tipoParam = (url.searchParams.get("tipo") || "caixa").toLowerCase() as "caixa" | "competencia";
     const categoriaIds = categoriaIdsParam ? categoriaIdsParam.split(",").filter(Boolean) : [];
 
-    const now = new Date();
-
-    // Determinar período
-    let start: Date;
-    let end: Date;
-    if (dataInicioParam && dataFimParam) {
-      start = new Date(dataInicioParam);
-      const endBase = new Date(dataFimParam);
-      end = new Date(endBase.getTime() + (24 * 60 * 60 * 1000 - 1));
-    } else if (periodoParam) {
-      switch (periodoParam) {
-        case "mes_passado": {
-          const primeiroDiaMesPassado = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const ultimoDiaMesPassado = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-          start = primeiroDiaMesPassado;
-          end = ultimoDiaMesPassado;
-          break;
-        }
-        case "este_mes": {
-          start = startOfMonth(now);
-          end = endOfMonth(now);
-          break;
-        }
-        case "todos":
-        default: {
-          start = new Date(0);
-          end = new Date();
-          break;
-        }
-      }
-    } else {
-      start = new Date(0);
-      end = new Date();
-    }
+    // Calcular períodos separados
+    const periodoPagamento = calcularPeriodo(filtroPeriodoPagamento, filtroDataPagInicio, filtroDataPagFim);
+    const periodoCompetencia = calcularPeriodo(filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim);
+    
+    // Período geral para vendas (usar período antigo para backward compatibility)
+    const periodoVendas = calcularPeriodo(periodoParam, dataInicioParam, dataFimParam);
+    const { start, end } = periodoVendas;
+    
+    console.log('[Dashboard Stats] Filtros aplicados:', {
+      pagamento: { periodo: filtroPeriodoPagamento, start: periodoPagamento.start.toISOString(), end: periodoPagamento.end.toISOString() },
+      competencia: { periodo: filtroPeriodoCompetencia, start: periodoCompetencia.start.toISOString(), end: periodoCompetencia.end.toISOString() },
+      vendas: { start: start.toISOString(), end: end.toISOString() },
+      tipoVisualizacao: tipoParam
+    });
 
     // 1) Vendas do período (inclui canceladas para alinhar com o DRE)
     const [vendasMeli, vendasShopee] = await Promise.all([
@@ -189,19 +223,50 @@ export async function GET(req: NextRequest) {
       categoriaIdsParaFiltro = todasCategoriasDespesa.map((c) => c.id);
     }
 
+    // Construir filtro de despesas com AMBOS os filtros (pagamento E competência)
     const whereDespesas: Prisma.ContaPagarWhereInput = {
       userId: session.sub,
-      OR:
-        tipoParam === "caixa"
-          ? [
-              { dataPagamento: { gte: start, lte: end } },
-              { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
-            ]
-          : [
-              { dataCompetencia: { gte: start, lte: end } },
-              { AND: [{ dataCompetencia: { equals: null } }, { dataVencimento: { gte: start, lte: end } }] },
-            ],
+      AND: []
     };
+    
+    // Aplicar filtro de pagamento (se não for "todos")
+    if (filtroPeriodoPagamento && filtroPeriodoPagamento !== "todos") {
+      (whereDespesas.AND as any[]).push({
+        OR: [
+          { dataPagamento: { gte: periodoPagamento.start, lte: periodoPagamento.end } },
+          { AND: [{ dataPagamento: null }, { dataVencimento: { gte: periodoPagamento.start, lte: periodoPagamento.end } }] },
+        ]
+      });
+    }
+    
+    // Aplicar filtro de competência (se não for "todos")
+    if (filtroPeriodoCompetencia && filtroPeriodoCompetencia !== "todos") {
+      (whereDespesas.AND as any[]).push({
+        OR: [
+          { dataCompetencia: { gte: periodoCompetencia.start, lte: periodoCompetencia.end } },
+          { AND: [{ dataCompetencia: null }, { dataVencimento: { gte: periodoCompetencia.start, lte: periodoCompetencia.end } }] },
+        ]
+      });
+    }
+    
+    // Se nenhum filtro específico, usar filtro antigo (backward compatibility)
+    if ((!filtroPeriodoPagamento || filtroPeriodoPagamento === "todos") && 
+        (!filtroPeriodoCompetencia || filtroPeriodoCompetencia === "todos")) {
+      whereDespesas.OR = tipoParam === "caixa"
+        ? [
+            { dataPagamento: { gte: start, lte: end } },
+            { AND: [{ dataPagamento: null }, { dataVencimento: { gte: start, lte: end } }] },
+          ]
+        : [
+            { dataCompetencia: { gte: start, lte: end } },
+            { AND: [{ dataCompetencia: { equals: null } }, { dataVencimento: { gte: start, lte: end } }] },
+          ];
+      delete whereDespesas.AND;
+    } else if ((whereDespesas.AND as any[]).length === 0) {
+      // Se AND está vazio, remover
+      delete whereDespesas.AND;
+    }
+    
     if (portadorIdParam) whereDespesas.formaPagamentoId = String(portadorIdParam);
     if (categoriaIdsParaFiltro.length > 0) whereDespesas.categoriaId = { in: categoriaIdsParaFiltro };
 
