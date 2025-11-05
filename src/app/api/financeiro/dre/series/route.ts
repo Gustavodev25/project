@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const mesesParam = (url.searchParams.get("meses") || "").split(",").map(s => s.trim()).filter(Boolean);
     const categoriasParam = (url.searchParams.get("categorias") || "").split(",").map(s => s.trim()).filter(Boolean);
-    const tipoParam = (url.searchParams.get("tipo") || "competencia").toLowerCase() as 'caixa' | 'competencia';
+    const tipoParam = (url.searchParams.get("tipo") || "caixa").toLowerCase() as 'caixa' | 'competencia';
 
     console.log('[DRE API] ===== INÍCIO DA REQUISIÇÃO =====');
     console.log('[DRE API] Usuário:', session.sub);
@@ -136,7 +136,8 @@ export async function GET(req: NextRequest) {
           quantidade: true,
           sku: true,
           dataVenda: true,
-          status: true
+          status: true,
+          orderId: true
         },
         distinct: ['orderId'],
       }),
@@ -152,7 +153,8 @@ export async function GET(req: NextRequest) {
           quantidade: true,
           sku: true,
           dataVenda: true,
-          status: true
+          status: true,
+          orderId: true
         },
         distinct: ['orderId'],
       }),
@@ -187,11 +189,21 @@ export async function GET(req: NextRequest) {
     console.log('[DRE API] SKUs com custo encontrados:', skuCustos.length);
 
     // Contas a pagar (despesas)
+    // Se nenhuma categoria específica foi selecionada, buscar TODAS as categorias do tipo DESPESA
+    let categoriaIdsParaFiltro = categoriasParam;
+    if (categoriasParam.length === 0) {
+      const todasCategoriasDespesa = await prisma.categoria.findMany({
+        where: { userId: session.sub, tipo: { equals: 'DESPESA', mode: 'insensitive' } },
+        select: { id: true },
+      });
+      categoriaIdsParaFiltro = todasCategoriasDespesa.map(c => c.id);
+    }
+
     const wherePagar: any = {
       userId: session.sub,
       OR: dateCriteria.pagar,
     };
-    if (categoriasParam.length > 0) wherePagar.categoriaId = { in: categoriasParam };
+    if (categoriaIdsParaFiltro.length > 0) wherePagar.categoriaId = { in: categoriaIdsParaFiltro };
 
     const contasPagar = await prisma.contaPagar.findMany({
       where: wherePagar,

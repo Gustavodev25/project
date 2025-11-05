@@ -24,13 +24,17 @@ export default function DashboardFinanceiro() {
 
   // Filtros
   const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {
-    // Inicializar com o MÊS PASSADO (conforme descrição)
+    // Inicializar com os ÚLTIMOS 12 MESES (padrão consistente com DRE)
     const hoje = new Date();
-    const prev = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
-    const ano = prev.getFullYear();
-    const mes = prev.getMonth() + 1; // 1..12
-    const key = `${ano}-${String(mes).padStart(2, "0")}`;
-    return new Set([key]);
+    const meses = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const ano = data.getFullYear();
+      const mes = data.getMonth() + 1; // 1..12
+      const key = `${ano}-${String(mes).padStart(2, "0")}`;
+      meses.add(key);
+    }
+    return meses;
   });
   const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("personalizado");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
