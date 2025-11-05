@@ -4,7 +4,65 @@ import { assertSessionToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
+// Padronizar timezone para evitar divergências entre localhost (geralmente America/Sao_Paulo)
+// e ambientes serverless (geralmente UTC). Usamos Intl para converter limites e chaves de mês
+// sempre considerando America/Sao_Paulo, independente do TZ do host.
+const TIME_ZONE = process.env.TZ || "America/Sao_Paulo";
+
 type MesInfo = { key: string; label: string; ano: number; mes: number };
+
+function dtfYMDHMS(timeZone = TIME_ZONE) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function partsToRecord(parts: Intl.DateTimeFormatPart[]) {
+  const rec: Record<string, string> = {};
+  for (const p of parts) rec[p.type] = p.value;
+  return rec;
+}
+
+// Retorna o offset da zona em milissegundos para um instante UTC dado
+function tzOffsetMs(dateUtc: Date, timeZone = TIME_ZONE): number {
+  const p = partsToRecord(dtfYMDHMS(timeZone).formatToParts(dateUtc));
+  const asUTC = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second)
+  );
+  return asUTC - dateUtc.getTime();
+}
+
+// Converte uma data/hora local da zona (ex.: 2025-09-01 00:00:00 em America/Sao_Paulo)
+// para o instante UTC correspondente, retornando um Date pronto para consultas no DB.
+function zonedDateToUtc(
+  year: number,
+  month1: number, // 1-12
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  ms = 0,
+  timeZone = TIME_ZONE
+): Date {
+  const guess = new Date(Date.UTC(year, month1 - 1, day, hour, minute, second, ms));
+  const off1 = tzOffsetMs(guess, timeZone);
+  const first = new Date(guess.getTime() - off1);
+  const off2 = tzOffsetMs(first, timeZone);
+  if (off2 !== off1) return new Date(guess.getTime() - off2);
+  return first;
+}
 
 function parseMesKey(key: string): { start: Date; end: Date; ano: number; mes: number } | null {
   const m = /^([0-9]{4})-([0-9]{2})$/.exec(key);
@@ -12,15 +70,21 @@ function parseMesKey(key: string): { start: Date; end: Date; ano: number; mes: n
   const ano = Number(m[1]);
   const mes = Number(m[2]);
   if (!Number.isFinite(ano) || !Number.isFinite(mes) || mes < 1 || mes > 12) return null;
-  const start = new Date(ano, mes - 1, 1, 0, 0, 0, 0);
-  const end = new Date(ano, mes, 0, 23, 59, 59, 999);
+  // Limites do mês na zona definida, depois convertidos para UTC
+  const lastDay = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const start = zonedDateToUtc(ano, mes, 1, 0, 0, 0, 0);
+  const end = zonedDateToUtc(ano, mes, lastDay, 23, 59, 59, 999);
   return { start, end, ano, mes };
 }
 
 function monthKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(d);
+  const rec = partsToRecord(parts);
+  return `${rec.year}-${rec.month}`;
 }
 
 function monthLabel(ano: number, mes: number): string {
