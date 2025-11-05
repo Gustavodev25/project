@@ -6,6 +6,8 @@ import { tryVerifySessionToken } from "@/lib/auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // Evita cache estático
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();
@@ -118,6 +120,45 @@ export async function GET(request: NextRequest) {
 
     const userId = session.sub;
     console.log(`[Categorias GET] ✅ UserId obtido: ${userId}`);
+
+    // FAST PATH: Consulta otimizada em única query (inclui subcategorias)
+    try {
+      const categoriasFast = await prisma.categoria.findMany({
+        where: { userId },
+        orderBy: { nome: 'asc' },
+        select: {
+          id: true,
+          userId: true,
+          blingId: true,
+          nome: true,
+          descricao: true,
+          tipo: true,
+          ativo: true,
+          categoriaPaiId: true,
+          sincronizadoEm: true,
+          atualizadoEm: true,
+          subCategorias: {
+            orderBy: { nome: 'asc' },
+            select: {
+              id: true,
+              userId: true,
+              blingId: true,
+              nome: true,
+              descricao: true,
+              tipo: true,
+              ativo: true,
+              categoriaPaiId: true,
+              sincronizadoEm: true,
+              atualizadoEm: true,
+            },
+          },
+        },
+      });
+      const payload = categoriasFast.map((c: any) => ({ ...c, categoriaPai: null }));
+      return NextResponse.json({ success: true, data: payload });
+    } catch (fastErr) {
+      console.warn('[Categorias GET] Aviso: fallback para caminho antigo devido a erro na consulta otimizada:', fastErr);
+    }
 
     // STEP 4: Query Categorias
     console.log('[Categorias GET] STEP 4: Buscando categorias no banco...');
