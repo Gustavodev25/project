@@ -1537,7 +1537,11 @@ export default function Financas() {
                   const tipoAlvo = activeTab === "contas_pagar" ? 'DESPESA' : 'RECEITA';
                   const flattened = categorias.flatMap((c: any) => [c, ...(c.subCategorias || [])]);
                   return flattened
-                    .filter((c: any) => c && c.tipo === tipoAlvo)
+                    .filter((c: any) => {
+                      if (!c) return false;
+                      const t = (c.tipo || '').toString().toUpperCase();
+                      return t === tipoAlvo;
+                    })
                     .map((c: any) => ({ id: c.id, nome: c.nome, descricao: c.descricao }));
                 })()}
                 filtroStatus={filtroStatus}
