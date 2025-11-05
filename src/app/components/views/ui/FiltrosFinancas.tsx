@@ -16,8 +16,8 @@ interface FiltrosFinancasProps {
   periodoCompetenciaAtivo?: FiltroPeriodo;
   onPeriodoCompetenciaChange?: (periodo: FiltroPeriodo) => void;
   onPeriodoCompetenciaPersonalizadoChange?: (dataInicio: Date, dataFim: Date) => void;
-  filtroCategoria?: string;
-  onCategoriaChange?: (categoriaId: string) => void;
+  categoriasSelecionadas?: Set<string>;
+  onCategoriasSelecionadasChange?: (categorias: Set<string>) => void;
   categoriasDisponiveis?: Array<{ id: string; nome: string; descricao?: string }>;
   filtroStatus?: FiltroStatus;
   onStatusChange?: (status: FiltroStatus) => void;
@@ -33,8 +33,8 @@ export default function FiltrosFinancas({
   periodoCompetenciaAtivo = "todos",
   onPeriodoCompetenciaChange,
   onPeriodoCompetenciaPersonalizadoChange,
-  filtroCategoria = "todas",
-  onCategoriaChange,
+  categoriasSelecionadas = new Set(),
+  onCategoriasSelecionadasChange,
   categoriasDisponiveis = [],
   filtroStatus = "todos",
   onStatusChange,
@@ -182,10 +182,51 @@ export default function FiltrosFinancas({
     }
   };
 
-  const getCategoriaLabel = (categoriaId: string) => {
-    if (categoriaId === "todas") return "Todas as Categorias";
-    const categoria = categoriasDisponiveis.find(c => c.id === categoriaId);
-    return categoria ? (categoria.descricao || categoria.nome) : "Todas as Categorias";
+  const getPeriodoCompetenciaLabel = (periodo: FiltroPeriodo) => {
+    switch (periodo) {
+      case "todos": return "Todos os Períodos";
+      case "hoje": return "Hoje";
+      case "ontem": return "Ontem";
+      case "este_mes": return "Este mês";
+      case "mes_passado": return "Mês passado";
+      case "personalizado": {
+        if (dataCompInicio && dataCompFim) {
+          const formatDate = (date: Date) => {
+            return date.toLocaleDateString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
+            });
+          };
+          return `${formatDate(dataCompInicio)} - ${formatDate(dataCompFim)}`;
+        }
+        return "Personalizado";
+      }
+      default: return "Todos os Períodos";
+    }
+  };
+
+  const getCategoriaLabel = () => {
+    const total = categoriasDisponiveis.length;
+    const selecionadas = categoriasSelecionadas.size;
+    return `Categorias (${selecionadas}/${total})`;
+  };
+
+  const toggleCategoria = (id: string) => {
+    const next = new Set(categoriasSelecionadas);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    if (onCategoriasSelecionadasChange) onCategoriasSelecionadasChange(next);
+  };
+
+  const selecionarTodasCategorias = () => {
+    if (onCategoriasSelecionadasChange) {
+      onCategoriasSelecionadasChange(new Set(categoriasDisponiveis.map((c) => c.id)));
+    }
+  };
+
+  const limparCategorias = () => {
+    if (onCategoriasSelecionadasChange) onCategoriasSelecionadasChange(new Set());
   };
 
   const getStatusLabel = (status: FiltroStatus) => {
@@ -211,7 +252,7 @@ export default function FiltrosFinancas({
   const limparFiltros = () => {
     if (onPeriodoChange) onPeriodoChange("todos");
     if (onPeriodoCompetenciaChange) onPeriodoCompetenciaChange("todos");
-    if (onCategoriaChange) onCategoriaChange("todas");
+    limparCategorias();
     if (onStatusChange) onStatusChange("todos");
     if (onOrigemChange) onOrigemChange("todas");
     setDataInicio(null);
@@ -224,7 +265,7 @@ export default function FiltrosFinancas({
     setEndDateComp(null);
   };
 
-  const temFiltrosAtivos = periodoAtivo !== "todos" || periodoCompetenciaAtivo !== "todos" || filtroCategoria !== "todas" || filtroStatus !== "todos" || filtroOrigem !== "todas";
+  const temFiltrosAtivos = periodoAtivo !== "todos" || periodoCompetenciaAtivo !== "todos" || categoriasSelecionadas.size > 0 || filtroStatus !== "todos" || filtroOrigem !== "todas";
 
   return (
     <>
@@ -338,7 +379,7 @@ export default function FiltrosFinancas({
                 <line x1="8" y1="2" x2="8" y2="6" />
                 <line x1="3" y1="10" x2="21" y2="10" />
               </svg>
-              <span>Competência: {getPeriodoLabel(periodoCompetenciaAtivo || "todos")}</span>
+              <span>Competência: {getPeriodoCompetenciaLabel(periodoCompetenciaAtivo || "todos")}</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showPeriodoCompetenciaDropdown ? 'rotate-180' : ''}`}>
                 <polyline points="6,9 12,15 18,9"/>
               </svg>
@@ -427,7 +468,7 @@ export default function FiltrosFinancas({
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 20l9-16H3z" />
               </svg>
-              <span>{getCategoriaLabel(filtroCategoria)}</span>
+              <span>{getCategoriaLabel()}</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${showCategoriaDropdown ? 'rotate-180' : ''}`}>
                 <polyline points="6,9 12,15 18,9"/>
               </svg>
@@ -436,40 +477,43 @@ export default function FiltrosFinancas({
             {categoriaDropdown.isVisible && (
               <div 
                 ref={categoriaDropdown.dropdownRef}
-                className={`smart-dropdown w-72 ${categoriaDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
+                className={`smart-dropdown w-80 ${categoriaDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'}`}
                 style={categoriaDropdown.position}
               >
                 <div className="p-2">
-                  <button
-                    onClick={() => {
-                      if (onCategoriaChange) onCategoriaChange("todas");
-                      setShowCategoriaDropdown(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
-                      filtroCategoria === "todas" 
-                        ? "bg-gray-100 text-gray-900 font-medium" 
-                        : "text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    Todas as Categorias
-                  </button>
-                  <div className="max-h-72 overflow-y-auto mt-1">
-                    {categoriasDisponiveis.map((categoria) => (
-                      <button
-                        key={categoria.id}
-                        onClick={() => {
-                          if (onCategoriaChange) onCategoriaChange(categoria.id);
-                          setShowCategoriaDropdown(false);
-                        }}
-                        className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
-                          filtroCategoria === categoria.id 
-                            ? "bg-gray-100 text-gray-900 font-medium" 
-                            : "text-gray-700 hover:bg-gray-50"
-                        }`}
-                      >
-                        {categoria.descricao || categoria.nome}
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between px-2 pb-2">
+                    <button
+                      onClick={() => { selecionarTodasCategorias(); }}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      Selecionar todas
+                    </button>
+                    <button
+                      onClick={() => { limparCategorias(); }}
+                      className="text-xs text-gray-600 hover:text-gray-700"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto mt-1 space-y-1">
+                    {categoriasDisponiveis.length === 0 ? (
+                      <div className="text-xs text-gray-600 px-3 py-2">Nenhuma categoria disponível</div>
+                    ) : (
+                      categoriasDisponiveis.map((categoria) => (
+                        <label
+                          key={categoria.id}
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-gray-50 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={categoriasSelecionadas.has(categoria.id)}
+                            onChange={() => toggleCategoria(categoria.id)}
+                          />
+                          <span className="text-gray-700">{categoria.descricao || categoria.nome}</span>
+                        </label>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>

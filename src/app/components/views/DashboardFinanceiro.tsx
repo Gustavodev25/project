@@ -42,6 +42,15 @@ export default function DashboardFinanceiro() {
   const [portadorId, setPortadorId] = useState<string | null>(null);
   const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<Set<string>>(new Set());
   const [tipoVisualizacao, setTipoVisualizacao] = useState<'caixa' | 'competencia'>('caixa');
+  
+  // Novos filtros de período separados
+  const [filtroPeriodoPagamento, setFiltroPeriodoPagamento] = useState<FiltroPeriodo>("todos");
+  const [filtroDataPagInicio, setFiltroDataPagInicio] = useState<Date | null>(null);
+  const [filtroDataPagFim, setFiltroDataPagFim] = useState<Date | null>(null);
+  const [filtroPeriodoCompetencia, setFiltroPeriodoCompetencia] = useState<FiltroPeriodo>("todos");
+  const [filtroDataCompInicio, setFiltroDataCompInicio] = useState<Date | null>(null);
+  const [filtroDataCompFim, setFiltroDataCompFim] = useState<Date | null>(null);
+  
   const [refreshKey, setRefreshKey] = useState(0);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -127,6 +136,20 @@ export default function DashboardFinanceiro() {
             onCategoriasSelecionadasChange={(ids) => { setCategoriasSelecionadas(ids); setRefreshKey((v) => v + 1); }}
             tipoVisualizacao={tipoVisualizacao}
             onTipoVisualizacaoChange={(tipo) => { setTipoVisualizacao(tipo); setRefreshKey((v) => v + 1); }}
+            filtroPeriodoPagamento={filtroPeriodoPagamento}
+            onFiltroPeriodoPagamentoChange={(periodo) => { setFiltroPeriodoPagamento(periodo); setRefreshKey((v) => v + 1); }}
+            onFiltroPagamentoPersonalizadoChange={(inicio, fim) => {
+              setFiltroDataPagInicio(inicio);
+              setFiltroDataPagFim(fim);
+              setRefreshKey((v) => v + 1);
+            }}
+            filtroPeriodoCompetencia={filtroPeriodoCompetencia}
+            onFiltroPeriodoCompetenciaChange={(periodo) => { setFiltroPeriodoCompetencia(periodo); setRefreshKey((v) => v + 1); }}
+            onFiltroCompetenciaPersonalizadoChange={(inicio, fim) => {
+              setFiltroDataCompInicio(inicio);
+              setFiltroDataCompFim(fim);
+              setRefreshKey((v) => v + 1);
+            }}
           />
 
           <FinanceiroStats
@@ -136,6 +159,12 @@ export default function DashboardFinanceiro() {
             portadorId={portadorId}
             categoriasSelecionadas={categoriasSelecionadas}
             tipoVisualizacao={tipoVisualizacao}
+            filtroPeriodoPagamento={filtroPeriodoPagamento}
+            filtroDataPagInicio={filtroDataPagInicio}
+            filtroDataPagFim={filtroDataPagFim}
+            filtroPeriodoCompetencia={filtroPeriodoCompetencia}
+            filtroDataCompInicio={filtroDataCompInicio}
+            filtroDataCompFim={filtroDataCompFim}
             refreshKey={refreshKey}
           />
 
@@ -147,6 +176,12 @@ export default function DashboardFinanceiro() {
               portadorId={portadorId}
               categoriasSelecionadas={categoriasSelecionadas}
               tipoVisualizacao={tipoVisualizacao}
+              filtroPeriodoPagamento={filtroPeriodoPagamento}
+              filtroDataPagInicio={filtroDataPagInicio}
+              filtroDataPagFim={filtroDataPagFim}
+              filtroPeriodoCompetencia={filtroPeriodoCompetencia}
+              filtroDataCompInicio={filtroDataCompInicio}
+              filtroDataCompFim={filtroDataCompFim}
               refreshKey={refreshKey}
               tipo="despesas"
             />

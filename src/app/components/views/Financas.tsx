@@ -278,7 +278,7 @@ export default function Financas() {
   const [filtroDataFim, setFiltroDataFim] = useState<Date | null>(null);
   const [filtroDataCompInicio, setFiltroDataCompInicio] = useState<Date | null>(null);
   const [filtroDataCompFim, setFiltroDataCompFim] = useState<Date | null>(null);
-  const [filtroCategoria, setFiltroCategoria] = useState<string>("todas");
+  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<Set<string>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>("todos");
   const [filtroOrigem, setFiltroOrigem] = useState<FiltroOrigem>("todas");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -755,31 +755,7 @@ export default function Financas() {
     }
   };
 
-  // Aplicar filtros
-  const aplicarFiltros = (contas: any[]) => {
-    return contas.filter(conta => {
-      // Filtro de data/período
-      const periodo = calcularPeriodo(filtroPeriodo);
-      if (periodo) {
-        const dataVencimento = new Date(conta.dataVencimento);
-        dataVencimento.setHours(0, 0, 0, 0);
-        const inicio = new Date(periodo.inicio);
-        inicio.setHours(0, 0, 0, 0);
-        const fim = new Date(periodo.fim);
-        fim.setHours(23, 59, 59, 999);
-        if (dataVencimento < inicio || dataVencimento > fim) return false;
-      }
-      // Filtro de categoria
-      if (filtroCategoria !== "todas" && conta.categoriaId !== filtroCategoria) return false;
-      // Filtro de status
-      if (filtroStatus !== "todos" && conta.status !== filtroStatus) return false;
-      // Filtro de origem
-      if (filtroOrigem !== "todas" && conta.origem !== filtroOrigem) return false;
-      return true;
-    });
-  };
-
-  // ===== Novos filtros com parse local e múltiplos campos de data =====
+  // ===== Filtros com parse local e múltiplos campos de data =====
   const parseLocalDate = (iso?: string | null) => {
     if (!iso) return null;
     const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})/.exec(String(iso));
@@ -824,36 +800,54 @@ export default function Financas() {
   };
 
   const aplicarFiltros2 = (contas: any[], tipoLista: "contas_pagar" | "contas_receber") => {
-    return contas.filter((conta) => {
-      // Vencimento: não aplicar por padrão (pedido: focar em Pagamento e Competência)
-      // Competência (novo)
-      const pComp = calcularPeriodo2(filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim);
-      if (pComp) {
-        const d = parseLocalDate(conta.dataCompetencia);
-        if (!d) return false;
-        const i = new Date(pComp.inicio); i.setHours(0,0,0,0);
-        const f = new Date(pComp.fim); f.setHours(23,59,59,999);
-        if (d < i || d > f) return false;
+    const resultado = contas.filter((conta) => {
+      // Filtro de Competência
+      if (filtroPeriodoCompetencia !== "todos" || (filtroDataCompInicio && filtroDataCompFim)) {
+        const pComp = calcularPeriodo2(filtroPeriodoCompetencia, filtroDataCompInicio, filtroDataCompFim);
+        if (pComp) {
+          const d = parseLocalDate(conta.dataCompetencia);
+          // Se o filtro de competência está ativo mas o registro não tem data de competência, excluir
+          if (!d) return false;
+          const i = new Date(pComp.inicio); i.setHours(0,0,0,0);
+          const f = new Date(pComp.fim); f.setHours(23,59,59,999);
+          // Se a data está fora do período, excluir
+          if (d < i || d > f) return false;
+        }
       }
-      // Pagamento/Recebimento (quando período ativo)
+      
+      // Filtro de Pagamento/Recebimento
       if (filtroPeriodo !== "todos" || (filtroDataInicio && filtroDataFim)) {
         const pPag = calcularPeriodo2(filtroPeriodo, filtroDataInicio, filtroDataFim);
         if (pPag) {
           const raw = tipoLista === "contas_pagar" ? conta.dataPagamento : (conta.dataRecebimento || conta.dataPagamento);
           const d = parseLocalDate(raw);
-          if (d) {
-            const i = new Date(pPag.inicio); i.setHours(0,0,0,0);
-            const f = new Date(pPag.fim); f.setHours(23,59,59,999);
-            if (d < i || d > f) return false;
-          }
+          // Se o filtro de pagamento está ativo mas o registro não tem data de pagamento, excluir
+          if (!d) return false;
+          const i = new Date(pPag.inicio); i.setHours(0,0,0,0);
+          const f = new Date(pPag.fim); f.setHours(23,59,59,999);
+          // Se a data está fora do período, excluir
+          if (d < i || d > f) return false;
         }
       }
+      
       // Demais filtros
-      if (filtroCategoria !== "todas" && conta.categoriaId !== filtroCategoria) return false;
+      if (categoriasSelecionadas.size > 0 && !categoriasSelecionadas.has(conta.categoriaId)) return false;
       if (filtroStatus !== "todos" && conta.status !== filtroStatus) return false;
       if (filtroOrigem !== "todas" && conta.origem !== filtroOrigem) return false;
       return true;
     });
+    
+    console.log(`[Financas] Filtros aplicados em ${tipoLista}:`, {
+      total: contas.length,
+      filtrados: resultado.length,
+      filtroPeriodo,
+      filtroPeriodoCompetencia,
+      categoriasSelecionadas: categoriasSelecionadas.size,
+      filtroStatus,
+      filtroOrigem
+    });
+    
+    return resultado;
   };
 
   // Paginação (client-side) para tabelas de contas
@@ -885,6 +879,15 @@ export default function Financas() {
   
   const paginatedCategorias = flattenedCategorias.slice((pageCategorias - 1) * itemsPerPage, pageCategorias * itemsPerPage);
   const paginatedFormasPagamento = formasPagamento.slice((pageFormasPagamento - 1) * itemsPerPage, pageFormasPagamento * itemsPerPage);
+
+  // Resetar páginas ao mudar filtros
+  useEffect(() => {
+    setPagePagar(1);
+  }, [filtroPeriodo, filtroPeriodoCompetencia, categoriasSelecionadas, filtroStatus, filtroOrigem]);
+  
+  useEffect(() => {
+    setPageReceber(1);
+  }, [filtroPeriodo, filtroPeriodoCompetencia, categoriasSelecionadas, filtroStatus, filtroOrigem]);
 
   useEffect(() => {
     // Garantir que a página atual exista após alterações de dados
@@ -1617,8 +1620,8 @@ export default function Financas() {
                   setFiltroDataCompInicio(inicio);
                   setFiltroDataCompFim(fim);
                 }}
-                filtroCategoria={filtroCategoria}
-                onCategoriaChange={setFiltroCategoria}
+                categoriasSelecionadas={categoriasSelecionadas}
+                onCategoriasSelecionadasChange={setCategoriasSelecionadas}
                 categoriasDisponiveis={(() => {
                   const tipoAlvo = activeTab === "contas_pagar" ? 'DESPESA' : 'RECEITA';
                   const flattened = categorias.flatMap((c: any) => [c, ...(c.subCategorias || [])]);
