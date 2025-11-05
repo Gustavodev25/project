@@ -4,9 +4,11 @@ import { assertSessionToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-// Padronizar timezone para evitar divergências entre localhost (geralmente America/Sao_Paulo)
-// e ambientes serverless (geralmente UTC). Usamos Intl para converter limites e chaves de mês
-// sempre considerando America/Sao_Paulo, independente do TZ do host.
+// IMPORTANTE: Para evitar divergências de timezone entre localhost e Vercel,
+// configure a variável de ambiente TZ=America/Sao_Paulo no Vercel Dashboard:
+// Settings > Environment Variables > Add: TZ = America/Sao_Paulo
+// Sem essa configuração, o Vercel usa UTC e pode haver pequenas diferenças nos valores
+// quando transações ocorrem próximo à meia-noite.
 const TIME_ZONE = process.env.TZ || "America/Sao_Paulo";
 
 type MesInfo = { key: string; label: string; ano: number; mes: number };
@@ -140,7 +142,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Build month windows
-    const parsed = mesesParam.map(parseMesKey).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
+    const parsed = mesesParam.map(parseMesKeyLocal).filter(Boolean) as Array<{ start: Date; end: Date; ano: number; mes: number }>;
     if (parsed.length === 0) {
       return NextResponse.json({ error: "Meses inválidos" }, { status: 400 });
     }
@@ -354,7 +356,7 @@ export async function GET(req: NextRequest) {
         : (row.dataCompetencia || row.dataVencimento);  // Competência: prioriza dataCompetencia
 
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!despesasPorMes.hasOwnProperty(key)) continue; // fora dos meses solicitados
       const catId = row.categoriaId || row.categoria?.id || "sem_categoria";
       if (!valoresPorCategoriaMes[catId]) valoresPorCategoriaMes[catId] = {};
@@ -376,7 +378,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeli) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!receitaBrutaMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -401,7 +403,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopee) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!receitaBrutaShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -429,7 +431,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasMeliCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!deducoesMeliPorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
@@ -440,7 +442,7 @@ export async function GET(req: NextRequest) {
     for (const venda of vendasShopeeCanceladas) {
       const d = venda.dataVenda;
       if (!d) continue;
-      const key = monthKey(new Date(d));
+      const key = monthKeyLocal(new Date(d));
       if (!deducoesShopeePorMes.hasOwnProperty(key)) continue;
 
       const valorTotal = Number(venda.valorTotal || 0);
