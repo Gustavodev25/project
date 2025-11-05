@@ -271,6 +271,12 @@ export default function Financas() {
   const itemsPerPage = 15;
   const [isLoading, setIsLoading] = useState(false);
   
+  // Estados de ordenação
+  const [sortFieldPagar, setSortFieldPagar] = useState<string | null>(null);
+  const [sortDirectionPagar, setSortDirectionPagar] = useState<'asc' | 'desc'>('desc');
+  const [sortFieldReceber, setSortFieldReceber] = useState<string | null>(null);
+  const [sortDirectionReceber, setSortDirectionReceber] = useState<'asc' | 'desc'>('desc');
+  
   // Estados de filtros
   const [filtroPeriodo, setFiltroPeriodo] = useState<FiltroPeriodo>("todos");
   const [filtroPeriodoCompetencia, setFiltroPeriodoCompetencia] = useState<FiltroPeriodo>("todos");
@@ -860,9 +866,91 @@ export default function Financas() {
     return resultado;
   };
 
+  // Função de ordenação
+  const ordenarContas = (contas: any[], sortField: string | null, sortDirection: 'asc' | 'desc') => {
+    if (!sortField) return contas;
+    
+    return [...contas].sort((a, b) => {
+      let valA: any;
+      let valB: any;
+      
+      // Tratar campos específicos
+      if (sortField === 'valor') {
+        valA = Number(a.valor) || 0;
+        valB = Number(b.valor) || 0;
+      } else if (sortField === 'dataPagamento' || sortField === 'dataRecebimento' || sortField === 'dataCompetencia' || sortField === 'dataVencimento') {
+        valA = a[sortField] ? new Date(a[sortField]).getTime() : 0;
+        valB = b[sortField] ? new Date(b[sortField]).getTime() : 0;
+      } else if (sortField === 'categoria') {
+        valA = (a.categoria?.descricao || a.categoria?.nome || '').toLowerCase();
+        valB = (b.categoria?.descricao || b.categoria?.nome || '').toLowerCase();
+      } else if (sortField === 'formaPagamento') {
+        valA = (a.formaPagamento?.nome || '').toLowerCase();
+        valB = (b.formaPagamento?.nome || '').toLowerCase();
+      } else {
+        valA = (a[sortField] || '').toString().toLowerCase();
+        valB = (b[sortField] || '').toString().toLowerCase();
+      }
+      
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+  
+  // Handler de clique no header para ordenação
+  const handleSort = (field: string, tabela: 'pagar' | 'receber') => {
+    if (tabela === 'pagar') {
+      if (sortFieldPagar === field) {
+        // Alternar direção: desc -> asc -> null
+        if (sortDirectionPagar === 'desc') {
+          setSortDirectionPagar('asc');
+        } else {
+          setSortFieldPagar(null);
+        }
+      } else {
+        setSortFieldPagar(field);
+        setSortDirectionPagar('desc');
+      }
+    } else {
+      if (sortFieldReceber === field) {
+        // Alternar direção: desc -> asc -> null
+        if (sortDirectionReceber === 'desc') {
+          setSortDirectionReceber('asc');
+        } else {
+          setSortFieldReceber(null);
+        }
+      } else {
+        setSortFieldReceber(field);
+        setSortDirectionReceber('desc');
+      }
+    }
+  };
+  
+  // Componente de ícone de ordenação
+  const SortIcon = ({ field, currentField, direction }: { field: string; currentField: string | null; direction: 'asc' | 'desc' }) => {
+    if (currentField !== field) {
+      return (
+        <svg className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+        </svg>
+      );
+    }
+    
+    return direction === 'desc' ? (
+      <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    ) : (
+      <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+      </svg>
+    );
+  };
+
   // Paginação (client-side) para tabelas de contas
-  const contasPagarFiltradas = aplicarFiltros2(contasPagar, "contas_pagar");
-  const contasReceberFiltradas = aplicarFiltros2(contasReceber, "contas_receber");
+  const contasPagarFiltradas = ordenarContas(aplicarFiltros2(contasPagar, "contas_pagar"), sortFieldPagar, sortDirectionPagar);
+  const contasReceberFiltradas = ordenarContas(aplicarFiltros2(contasReceber, "contas_receber"), sortFieldReceber, sortDirectionReceber);
   const totalPagar = contasPagarFiltradas.length;
   const totalReceber = contasReceberFiltradas.length;
   const totalPagesPagar = Math.max(1, Math.ceil(totalPagar / itemsPerPage));
@@ -1853,19 +1941,55 @@ export default function Financas() {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                        <th onClick={() => handleSort('descricao', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Descrição</span>
+                            <SortIcon field="descricao" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Histórico</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
-                        <th className="px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          <span className="block leading-tight">DATA<br/>PAGAMENTO</span>
+                        <th onClick={() => handleSort('valor', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Valor</span>
+                            <SortIcon field="valor" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
                         </th>
-                        <th className="px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          <span className="block leading-tight">DATA<br/>COMPETENCIA</span>
+                        <th onClick={() => handleSort('dataPagamento', 'pagar')} className="group px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span className="block leading-tight">DATA<br/>PAGAMENTO</span>
+                            <SortIcon field="dataPagamento" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Forma</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Origem</th>
+                        <th onClick={() => handleSort('dataCompetencia', 'pagar')} className="group px-6 py-3 w-24 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span className="block leading-tight">DATA<br/>COMPETENCIA</span>
+                            <SortIcon field="dataCompetencia" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('categoria', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Categoria</span>
+                            <SortIcon field="categoria" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('formaPagamento', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Forma</span>
+                            <SortIcon field="formaPagamento" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('status', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Status</span>
+                            <SortIcon field="status" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('origem', 'pagar')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Origem</span>
+                            <SortIcon field="origem" currentField={sortFieldPagar} direction={sortDirectionPagar} />
+                          </div>
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                       </tr>
                     </thead>
@@ -1953,13 +2077,48 @@ export default function Financas() {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data de Recebimento</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Forma</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Origem</th>
+                        <th onClick={() => handleSort('descricao', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Descrição</span>
+                            <SortIcon field="descricao" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('valor', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Valor</span>
+                            <SortIcon field="valor" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('dataRecebimento', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Data de Recebimento</span>
+                            <SortIcon field="dataRecebimento" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('categoria', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Categoria</span>
+                            <SortIcon field="categoria" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('formaPagamento', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Forma</span>
+                            <SortIcon field="formaPagamento" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('status', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Status</span>
+                            <SortIcon field="status" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
+                        <th onClick={() => handleSort('origem', 'receber')} className="group px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-1">
+                            <span>Origem</span>
+                            <SortIcon field="origem" currentField={sortFieldReceber} direction={sortDirectionReceber} />
+                          </div>
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                       </tr>
                     </thead>
