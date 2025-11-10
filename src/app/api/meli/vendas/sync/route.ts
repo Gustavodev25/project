@@ -370,13 +370,34 @@ async function fetchWithRetry(
   userId?: string
 ): Promise<Response> {
   let lastError: Error | null = null;
+  let lastResponse: Response | null = null;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await fetch(url, options);
+      lastResponse = response;
 
-      // Se sucesso ou erro não-retryable, retorna imediatamente
-      if (response.ok || !isRetryableError(response.status)) {
+      // Se sucesso, retorna imediatamente
+      if (response.ok) {
+        return response;
+      }
+
+      // Erros de autenticação (401, 403) não devem ser retryable - falhar imediatamente
+      if (response.status === 401 || response.status === 403) {
+        console.error(`[Sync] Erro de autenticação ${response.status} - Token pode estar inválido`);
+        if (userId) {
+          sendProgressToUser(userId, {
+            type: "sync_warning",
+            message: `Erro de autenticação ${response.status}. Verifique se a conta está conectada corretamente.`,
+            errorCode: response.status.toString()
+          });
+        }
+        return response; // Retornar resposta de erro para tratamento específico
+      }
+
+      // Se erro não-retryable (exceto auth), retorna imediatamente
+      if (!isRetryableError(response.status)) {
+        console.warn(`[Sync] Erro HTTP ${response.status} (não-retryable) em ${url.substring(0, 80)}...`);
         return response;
       }
 
@@ -390,15 +411,15 @@ async function fetchWithRetry(
       const totalDelay = delay + jitter;
 
       console.warn(
-        `[Retry] Erro ${response.status} em ${url.substring(0, 100)}... ` +
+        `[Retry] Erro ${response.status} em ${url.substring(0, 80)}... ` +
         `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
       );
 
-      // Enviar aviso via SSE
-      if (userId) {
+      // Enviar aviso via SSE apenas na primeira tentativa
+      if (userId && attempt === 0) {
         sendProgressToUser(userId, {
           type: "sync_warning",
-          message: `Erro temporário ${response.status} da API do Mercado Livre. Tentando novamente (${attempt + 1}/${maxRetries})...`,
+          message: `Erro temporário ${response.status} da API do Mercado Livre. Tentando novamente...`,
           errorCode: response.status.toString()
         });
       }
@@ -409,8 +430,18 @@ async function fetchWithRetry(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Se não for erro de rede, não tenta novamente
+      // Log do erro
+      console.error(`[Retry] Erro na requisição (tentativa ${attempt + 1}/${maxRetries}):`, lastError.message);
+
+      // Se é a última tentativa, lançar erro
       if (attempt === maxRetries - 1) {
+        if (userId) {
+          sendProgressToUser(userId, {
+            type: "sync_warning",
+            message: `Erro de conexão após ${maxRetries} tentativas: ${lastError.message}`,
+            errorCode: "NETWORK_ERROR"
+          });
+        }
         throw lastError;
       }
 
@@ -420,12 +451,26 @@ async function fetchWithRetry(
       const totalDelay = delay + jitter;
 
       console.warn(
-        `[Retry] Erro de rede em ${url.substring(0, 100)}... ` +
+        `[Retry] Erro de rede em ${url.substring(0, 80)}... ` +
         `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
       );
 
+      // Enviar aviso via SSE apenas na primeira tentativa
+      if (userId && attempt === 0) {
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro de conexão. Tentando novamente...`,
+          errorCode: "NETWORK_ERROR"
+        });
+      }
+
       await sleep(totalDelay);
     }
+  }
+
+  // Se chegou aqui, todas as tentativas falharam
+  if (lastResponse && !lastResponse.ok) {
+    return lastResponse; // Retornar última resposta de erro
   }
 
   throw lastError || new Error('Falha após múltiplas tentativas');
@@ -447,10 +492,19 @@ async function fetchOrdersForAccount(
       specificOrderIds.map(async (orderId) => {
         try {
           const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${orderId}`, { headers }, 3, userId);
-          if (!res.ok) return null;
-          return await res.json();
+          if (!res.ok) {
+            console.warn(`[Sync] Pedido ${orderId} retornou status ${res.status}, ignorando...`);
+            return null;
+          }
+          const data = await res.json();
+          return data;
         } catch (error) {
           console.error(`[Sync] Erro ao buscar pedido específico ${orderId}:`, error);
+          sendProgressToUser(userId, {
+            type: "sync_warning",
+            message: `Erro ao buscar pedido ${orderId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            errorCode: "ORDER_FETCH_ERROR"
+          });
           return null;
         }
       })
@@ -458,12 +512,17 @@ async function fetchOrdersForAccount(
 
     const shipments = await Promise.all(
       detailedOrders.map(async (order: any) => {
+        if (!order) return null;
         const shippingId = order?.shipping?.id;
         if (!shippingId) return null;
         try {
           const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-          if (!res.ok) return null;
-          return await res.json();
+          if (!res.ok) {
+            console.warn(`[Sync] Envio ${shippingId} retornou status ${res.status}, continuando sem dados de envio...`);
+            return null;
+          }
+          const data = await res.json();
+          return data;
         } catch (error) {
           console.error(`[Sync] Erro ao buscar envio ${shippingId}:`, error);
           return null;
@@ -528,18 +587,43 @@ async function fetchOrdersForAccount(
     url.searchParams.set("order.date_created.from", dateFrom.toISOString());
     url.searchParams.set("order.date_created.to", now.toISOString());
 
-    const response = await fetchWithRetry(url.toString(), { headers }, 3, userId);
+    let response;
     let payload: any = null;
+
     try {
+      response = await fetchWithRetry(url.toString(), { headers }, 3, userId);
       payload = await response.json();
-    } catch {
-      payload = null;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+      console.error(`[Sync] Erro ao buscar página offset ${offset} da conta ${account.ml_user_id}:`, errorMsg);
+
+      sendProgressToUser(userId, {
+        type: "sync_warning",
+        message: `Erro ao buscar vendas da conta ${account.nickname || account.ml_user_id} (página ${Math.floor(offset/limit) + 1}): ${errorMsg}. Continuando com próxima página...`,
+        errorCode: "PAGE_FETCH_ERROR"
+      });
+
+      // Pular esta página e continuar com a próxima
+      offset += limit;
+      continue;
     }
+
     if (!response.ok) {
       const message = typeof payload?.message === "string"
         ? payload.message
         : `Status ${response.status}`;
-      throw new Error(`Erro ao buscar pedidos: ${message}`);
+
+      console.error(`[Sync] Erro HTTP ${response.status} ao buscar pedidos da conta ${account.ml_user_id}:`, message);
+
+      sendProgressToUser(userId, {
+        type: "sync_warning",
+        message: `Erro ${response.status} ao buscar vendas da conta ${account.nickname || account.ml_user_id}. Continuando...`,
+        errorCode: response.status.toString()
+      });
+
+      // Pular esta página e continuar
+      offset += limit;
+      continue;
     }
 
     const orders = Array.isArray(payload?.results) ? payload.results : [];
@@ -550,43 +634,61 @@ async function fetchOrdersForAccount(
       expectedTotal = payload.paging.total;
     }
 
-    const [detailedOrders, shipments] = await Promise.all([
-      Promise.all(
-        orders.map(async (order: any) => {
-          const id = order?.id;
-          if (!id) return order;
-          try {
-            const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${id}`, { headers }, 3, userId);
-            if (!res.ok) {
-              // Aviso já foi enviado pelo fetchWithRetry
+    let detailedOrders: any[] = [];
+    let shipments: any[] = [];
+
+    try {
+      [detailedOrders, shipments] = await Promise.all([
+        Promise.all(
+          orders.map(async (order: any) => {
+            const id = order?.id;
+            if (!id) return order;
+            try {
+              const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${id}`, { headers }, 3, userId);
+              if (!res.ok) {
+                console.warn(`[Sync] Detalhes do pedido ${id} retornaram status ${res.status}, usando dados básicos...`);
+                return order;
+              }
+              const det = await res.json();
+              return { ...order, ...det };
+            } catch (error) {
+              console.error(`[Sync] Erro ao buscar detalhes do pedido ${id}:`, error);
               return order;
             }
-            const det = await res.json();
-            return { ...order, ...det };
-          } catch (error) {
-            console.error(`[Sync] Erro ao buscar detalhes do pedido ${id}:`, error);
-            return order;
-          }
-        }),
-      ),
-      Promise.all(
-        orders.map(async (order: any) => {
-          const shippingId = order?.shipping?.id;
-          if (!shippingId) return null;
-          try {
-            const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-            if (!res.ok) {
-              // Aviso já foi enviado pelo fetchWithRetry
+          }),
+        ),
+        Promise.all(
+          orders.map(async (order: any) => {
+            const shippingId = order?.shipping?.id;
+            if (!shippingId) return null;
+            try {
+              const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
+              if (!res.ok) {
+                console.warn(`[Sync] Detalhes do envio ${shippingId} retornaram status ${res.status}, continuando sem dados de envio...`);
+                return null;
+              }
+              const data = await res.json();
+              return data;
+            } catch (error) {
+              console.error(`[Sync] Erro ao buscar detalhes do envio ${shippingId}:`, error);
               return null;
             }
-            return await res.json();
-          } catch (error) {
-            console.error(`[Sync] Erro ao buscar detalhes do envio ${shippingId}:`, error);
-            return null;
-          }
-        }),
-      ),
-    ]);
+          }),
+        ),
+      ]);
+    } catch (error) {
+      console.error(`[Sync] Erro crítico ao buscar detalhes dos pedidos/envios:`, error);
+
+      sendProgressToUser(userId, {
+        type: "sync_warning",
+        message: `Erro ao buscar detalhes dos pedidos da conta ${account.nickname || account.ml_user_id}. Continuando...`,
+        errorCode: "DETAILS_FETCH_ERROR"
+      });
+
+      // Usar dados básicos se falhar
+      detailedOrders = orders;
+      shipments = orders.map(() => null);
+    }
 
     detailedOrders.forEach((order: any, idx: number) => {
       const shipment = shipments[idx] ?? undefined;
@@ -784,11 +886,19 @@ async function saveVendaToDatabase(
   userId: string,
   skuCache: Map<string, SkuCacheEntry>
 ): Promise<boolean> {
-  // Log simples sem debug detalhado
-  console.log(`[DEBUG] Salvando venda ${order.order.id} para userId: ${userId}`);
+  const orderId = (order.order as any)?.id || 'UNKNOWN';
+
   try {
+    console.log(`[Sync] Salvando venda ${orderId} para userId: ${userId}`);
+
     const o: any = order.order ?? {};
     const freight = order.freight;
+
+    // Validação básica dos dados essenciais
+    if (!o || !o.id) {
+      console.error(`[Sync] Venda sem ID válido, pulando...`);
+      return false;
+    }
 
     const orderItems: any[] = Array.isArray(o.order_items) ? o.order_items : [];
     const firstItem = orderItems[0] ?? {};
@@ -1123,9 +1233,28 @@ async function saveVendaToDatabase(
       console.log(`[DEBUG] Venda ${o.id} criada com sucesso`);
     }
 
+    console.log(`[Sync] ✓ Venda ${o.id} salva/atualizada com sucesso`);
     return true;
   } catch (error) {
-    console.error(`Erro ao salvar venda ${(order.order as any)?.id}:`, error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Sync] ✗ Erro ao salvar venda ${orderId}:`, errorMsg);
+
+    // Log detalhado do erro para debug
+    if (error instanceof Error && error.stack) {
+      console.error(`[Sync] Stack trace:`, error.stack);
+    }
+
+    // Tentar identificar o tipo de erro
+    if (errorMsg.includes('Unique constraint')) {
+      console.error(`[Sync] Erro de constraint único - pedido ${orderId} pode já existir`);
+    } else if (errorMsg.includes('Foreign key constraint')) {
+      console.error(`[Sync] Erro de chave estrangeira - dados relacionados podem estar ausentes`);
+    } else if (errorMsg.includes('Data too long') || errorMsg.includes('String too long')) {
+      console.error(`[Sync] Erro de tamanho de campo - algum campo excede o limite do banco`);
+    } else if (errorMsg.includes('Invalid') || errorMsg.includes('invalid')) {
+      console.error(`[Sync] Erro de validação - dados inválidos para o banco`);
+    }
+
     return false;
   }
 }
@@ -1234,66 +1363,14 @@ export async function POST(req: NextRequest) {
     };
     summaries.push(summary);
 
-    // Atualizar step para fetching
-    steps[accountIndex].currentStep = 'fetching';
-    
-    // Enviar progresso: processando conta
-    sendProgressToUser(userId, {
-      type: "sync_progress",
-      message: `Buscando vendas da conta ${account.nickname || account.ml_user_id}...`,
-      current: accountIndex,
-      total: accounts.length,
-      fetched: totalFetchedOrders,
-      expected: totalExpectedOrders,
-      accountId: account.id,
-      accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-      steps: steps
-    });
-
-    let current = account;
     try {
-      current = await refreshMeliAccountToken(account);
-      summary.expires_at = current.expires_at.toISOString();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erro desconhecido ao renovar token.";
-      errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message });
-      console.error(`[meli][vendas] Erro ao renovar token da conta ${account.id}:`, error);
-      
-      // Enviar erro via SSE
-      sendProgressToUser(userId, {
-        type: "sync_error",
-        message: `Erro ao renovar token da conta ${account.nickname || account.ml_user_id}`,
-        errorCode: "TOKEN_REFRESH_FAILED"
-      });
-      continue;
-    }
+      // Atualizar step para fetching
+      steps[accountIndex].currentStep = 'fetching';
 
-    try {
-      // Obter IDs específicos para esta conta, se fornecidos
-      const specificOrderIds = requestBody.orderIdsByAccount?.[account.id];
-      
-      const { orders: accountOrders, expectedTotal } = await fetchOrdersForAccount(
-        current, 
-        userId,
-        specificOrderIds
-      );
-      
-      const accountExpected = expectedTotal || accountOrders.length;
-      totalExpectedOrders += accountExpected;
-      totalFetchedOrders += accountOrders.length;
-      orders.push(...accountOrders);
-      
-      steps[accountIndex].expected = accountExpected;
-      steps[accountIndex].fetched = accountOrders.length;
-      steps[accountIndex].progress = accountOrders.length > 0 ? 50 : 100; // 50% após fetch
-
-      console.log(`[Sync] Conta ${account.nickname}: ${accountOrders.length} vendas encontradas`);
-      
-      // Atualizar step para saving
-      steps[accountIndex].currentStep = 'saving';
+      // Enviar progresso: processando conta
       sendProgressToUser(userId, {
         type: "sync_progress",
-        message: `Salvando vendas da conta ${account.nickname || account.ml_user_id}...`,
+        message: `Buscando vendas da conta ${account.nickname || account.ml_user_id}...`,
         current: accountIndex,
         total: accounts.length,
         fetched: totalFetchedOrders,
@@ -1303,50 +1380,146 @@ export async function POST(req: NextRequest) {
         steps: steps
       });
 
-      // Salvar vendas no banco de dados em lotes
-      if (accountOrders.length > 0) {
-        const batchResult = await saveVendasBatch(accountOrders, session.sub, 10);
-        totalSavedOrders += batchResult.saved;
-        
-        console.log(`[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas`);
-        
-        if (batchResult.errors > 0) {
-          console.warn(`[meli][vendas] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
-        }
+      let current = account;
+      try {
+        current = await refreshMeliAccountToken(account);
+        summary.expires_at = current.expires_at.toISOString();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Erro desconhecido ao renovar token.";
+        errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message });
+        console.error(`[Sync] Erro ao renovar token da conta ${account.id}:`, error);
+
+        // Atualizar step para erro
+        steps[accountIndex].currentStep = 'error';
+        steps[accountIndex].error = message;
+
+        // Enviar erro via SSE
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro ao renovar token da conta ${account.nickname || account.ml_user_id}: ${message}. Continuando com próxima conta...`,
+          errorCode: "TOKEN_REFRESH_FAILED"
+        });
+        continue;
       }
-      
-      // Marcar como concluída
-      steps[accountIndex].currentStep = 'completed';
-      steps[accountIndex].progress = 100;
-      sendProgressToUser(userId, {
-        type: "sync_progress",
-        message: `Conta ${account.nickname || account.ml_user_id} concluída!`,
-        current: accountIndex + 1,
-        total: accounts.length,
-        fetched: totalFetchedOrders,
-        expected: totalExpectedOrders,
-        accountId: account.id,
-        accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-        steps: steps
-      });
+
+      try {
+        // Obter IDs específicos para esta conta, se fornecidos
+        const specificOrderIds = requestBody.orderIdsByAccount?.[account.id];
+
+        const { orders: accountOrders, expectedTotal } = await fetchOrdersForAccount(
+          current,
+          userId,
+          specificOrderIds
+        );
+
+        const accountExpected = expectedTotal || accountOrders.length;
+        totalExpectedOrders += accountExpected;
+        totalFetchedOrders += accountOrders.length;
+        orders.push(...accountOrders);
+
+        steps[accountIndex].expected = accountExpected;
+        steps[accountIndex].fetched = accountOrders.length;
+        steps[accountIndex].progress = accountOrders.length > 0 ? 50 : 100; // 50% após fetch
+
+        console.log(`[Sync] Conta ${account.nickname}: ${accountOrders.length} vendas encontradas`);
+
+        // Atualizar step para saving
+        steps[accountIndex].currentStep = 'saving';
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Salvando vendas da conta ${account.nickname || account.ml_user_id}...`,
+          current: accountIndex,
+          total: accounts.length,
+          fetched: totalFetchedOrders,
+          expected: totalExpectedOrders,
+          accountId: account.id,
+          accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+          steps: steps
+        });
+
+        // Salvar vendas no banco de dados em lotes
+        if (accountOrders.length > 0) {
+          try {
+            const batchResult = await saveVendasBatch(accountOrders, session.sub, 10);
+            totalSavedOrders += batchResult.saved;
+
+            console.log(`[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas, ${batchResult.errors} erros`);
+
+            if (batchResult.errors > 0) {
+              console.warn(`[Sync] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
+              sendProgressToUser(userId, {
+                type: "sync_warning",
+                message: `${batchResult.errors} vendas da conta ${account.nickname || account.ml_user_id} não puderam ser salvas`,
+                errorCode: "SAVE_ERRORS"
+              });
+            }
+          } catch (saveError) {
+            const saveErrorMsg = saveError instanceof Error ? saveError.message : 'Erro desconhecido';
+            console.error(`[Sync] Erro ao salvar vendas da conta ${current.id}:`, saveError);
+            errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message: `Erro ao salvar vendas: ${saveErrorMsg}` });
+
+            sendProgressToUser(userId, {
+              type: "sync_warning",
+              message: `Erro ao salvar vendas da conta ${account.nickname || account.ml_user_id}: ${saveErrorMsg}`,
+              errorCode: "SAVE_BATCH_ERROR"
+            });
+          }
+        }
+
+        // Marcar como concluída
+        steps[accountIndex].currentStep = 'completed';
+        steps[accountIndex].progress = 100;
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Conta ${account.nickname || account.ml_user_id} concluída!`,
+          current: accountIndex + 1,
+          total: accounts.length,
+          fetched: totalFetchedOrders,
+          expected: totalExpectedOrders,
+          accountId: account.id,
+          accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+          steps: steps
+        });
+      } catch (error) {
+        steps[accountIndex].currentStep = 'error';
+        steps[accountIndex].error = error instanceof Error ? error.message : 'Erro desconhecido';
+        const message = error instanceof Error ? error.message : "Erro desconhecido ao processar pedidos.";
+        errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
+        console.error(`[Sync] Erro ao processar conta ${current.id}:`, error);
+
+        // Enviar erro via SSE
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro na conta ${current.nickname || current.ml_user_id}: ${message}. Continuando com próxima conta...`,
+          errorCode: "ACCOUNT_PROCESSING_ERROR"
+        });
+
+        // Atualizar progresso mesmo com erro
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Conta ${current.nickname || current.ml_user_id} com erro`,
+          current: accountIndex + 1,
+          total: accounts.length,
+          fetched: totalFetchedOrders,
+          expected: totalExpectedOrders,
+          accountId: current.id,
+          accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+          steps: steps
+        });
+      }
     } catch (error) {
+      // Erro catastrófico na conta - continuar com próxima
+      const errorMsg = error instanceof Error ? error.message : 'Erro crítico desconhecido';
+      console.error(`[Sync] Erro catastrófico ao processar conta ${account.id}:`, error);
+
       steps[accountIndex].currentStep = 'error';
-      steps[accountIndex].error = error instanceof Error ? error.message : 'Erro desconhecido';
-      const message = error instanceof Error ? error.message : "Erro desconhecido ao buscar pedidos.";
-      errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
-      console.error(`[meli][vendas] Erro ao buscar pedidos da conta ${current.id}:`, error);
-      
-      // Enviar erro via SSE
+      steps[accountIndex].error = errorMsg;
+      errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message: errorMsg });
+
       sendProgressToUser(userId, {
-        type: "sync_progress",
-        message: `Erro na conta ${current.nickname || current.ml_user_id}`,
-        current: accountIndex + 1,
-        total: accounts.length,
-        fetched: totalFetchedOrders,
-        expected: totalExpectedOrders,
-        accountId: current.id,
-        accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
-        steps: steps
+        type: "sync_warning",
+        message: `Erro crítico na conta ${account.nickname || account.ml_user_id}: ${errorMsg}. Continuando com próxima conta...`,
+        errorCode: "CRITICAL_ERROR"
       });
     }
   }

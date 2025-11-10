@@ -42,7 +42,8 @@
       "Bash(git -C \"c:/Users/Gustavo Maldanis/Desktop/backup/Desktop/backup/project-a58bcb3c19a37515908ff30229d5a38e52ff38f4\" status)",
       "Bash(Select-String -Pattern \"ImportSKU|sku/import|sku/export|sku/template|GestaoSKU\" -Context 0,2)",
       "Bash(npx tsx:*)",
-      "Bash(.gitignore)"
+      "Bash(.gitignore)",
+      "Bash(Get-Content \"nul\")"
     ],
     "deny": [],
     "ask": []
