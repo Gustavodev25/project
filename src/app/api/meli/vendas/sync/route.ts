@@ -9,6 +9,7 @@ import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
 import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
+export const maxDuration = 300; // Garantir tempo suficiente para salvar todas as vendas no Vercel
 
 const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
