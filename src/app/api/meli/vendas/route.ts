@@ -43,20 +43,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cachedData);
     }
 
-    // Calcular data de início: 6 meses atrás (alinhado com Shopee e Vendas Geral)
-    const hoje = new Date();
-    const dataInicio = new Date(hoje);
-    dataInicio.setMonth(dataInicio.getMonth() - 6); // Voltar 6 meses
-    
-    console.log(`[Mercado Livre] Filtrando vendas a partir de: ${dataInicio.toISOString()}`);
-
     const vendas = await prisma.meliVenda.findMany({
-      where: { 
-        userId: session.sub,
-        dataVenda: {
-          gte: dataInicio, // Filtrar vendas >= data de início (últimos 6 meses)
-        }
-      },
+      where: { userId: session.sub },
       select: {
         orderId: true,
         dataVenda: true,
