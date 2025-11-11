@@ -228,7 +228,7 @@ export default function Dashboard() {
             <UserGuidanceNotification
               type="success"
               title="ðŸ“Š Dashboard carregado!"
-              message="Aqui vocÃª pode visualizar grÃ¡ficos e estatÃ­sticas das suas vendas. Para ver os detalhes completos, acesse a tabela de vendas."
+              message="Aqui você pode visualizar gráficos e estatísticas das suas vendas. Para ver os detalhes completos, acesse a tabela de vendas."
               actionLabel="Ver Tabela de Vendas"
               actionHref="/vendas/geral"
               dismissible={true}
