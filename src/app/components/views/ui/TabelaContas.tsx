@@ -390,10 +390,20 @@ export default function TabelaContas({
       return next;
     });
 
+    const controller =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutId =
+      typeof window !== "undefined"
+        ? window.setTimeout(() => controller?.abort(), 20000)
+        : undefined;
+
     try {
-      const res = await fetch(`/api/meli/accounts/${account.id}`, {
+      const res = await fetch(`/api/meli/accounts?id=${encodeURIComponent(account.id)}`, {
         method: "DELETE",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id }),
+        signal: controller?.signal,
       });
 
       let payload: { success?: boolean; error?: string } | null = null;
@@ -416,17 +426,23 @@ export default function TabelaContas({
 
       await loadData();
     } catch (error) {
+      const isAbortError =
+        error instanceof DOMException && error.name === "AbortError";
       console.error("Erro ao excluir conta:", error);
       toast({
         variant: "error",
-        title: "Erro ao excluir conta",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível excluir esta conta. Tente novamente.",
+        title: isAbortError ? "Tempo excedido" : "Erro ao excluir conta",
+        description: isAbortError
+          ? "A exclusão demorou mais que o esperado. Tente novamente em instantes."
+          : error instanceof Error
+          ? error.message
+          : "Não foi possível excluir esta conta. Tente novamente.",
         duration: 5000,
       });
     } finally {
+      if (typeof timeoutId !== "undefined") {
+        clearTimeout(timeoutId);
+      }
       setDeletingAccounts((prev) => {
         const next = new Set(prev);
         next.delete(account.id);
