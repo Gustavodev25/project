@@ -203,7 +203,7 @@ export default function Dashboard() {
           {!isLoading && showConnectAccounts && (
             <UserGuidanceNotification
               type="warning"
-              title="ðŸš€ Bem-vindo ao Contazoom!"
+              title="🚀 Bem-vindo ao Contazoom!"
               message="Para comeÃ§ar, vocÃª precisa conectar suas contas do Mercado Livre e Shopee. ApÃ³s conectar, vocÃª poderÃ¡ sincronizar e visualizar todas as suas vendas."
               actionLabel="Conectar Contas"
               actionHref="/contas"
@@ -215,7 +215,7 @@ export default function Dashboard() {
           {!isLoading && showSyncVendas && (
             <UserGuidanceNotification
               type="info"
-              title="âœ… Contas conectadas com sucesso!"
+              title="✅ Contas conectadas com sucesso!"
               message="Agora vocÃª pode sincronizar suas vendas para visualizar os dados no dashboard. Clique no botÃ£o abaixo para comeÃ§ar a sincronizaÃ§Ã£o."
               actionLabel="Sincronizar Vendas"
               actionHref="/vendas/geral"
@@ -227,7 +227,7 @@ export default function Dashboard() {
           {!isLoading && showViewVendas && (
             <UserGuidanceNotification
               type="success"
-              title="ðŸ“Š Dashboard carregado!"
+              title="📊 Dashboard carregado!"
               message="Aqui você pode visualizar gráficos e estatísticas das suas vendas. Para ver os detalhes completos, acesse a tabela de vendas."
               actionLabel="Ver Tabela de Vendas"
               actionHref="/vendas/geral"
