@@ -24,6 +24,13 @@ const DEFAULT_HISTORY_START =
   process.env.MELI_HISTORY_START_DATE ||
   process.env.MELI_SYNC_START_DATE ||
   "2024-01-01T00:00:00.000Z";
+const INITIAL_SYNC_DAYS =
+  Number(process.env.MELI_INITIAL_SYNC_DAYS ?? "14");
+const HISTORY_CHUNK_DAYS =
+  Number(process.env.MELI_HISTORY_CHUNK_DAYS ?? "14");
+const INCREMENTAL_SYNC_HOURS =
+  Number(process.env.MELI_INCREMENTAL_SYNC_HOURS ?? "48");
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -357,6 +364,12 @@ type DateRangeWindow = {
   depth: number;
 };
 
+type SyncWindow = {
+  from: Date;
+  to: Date;
+  mode: "initial" | "recent" | "historical" | "manual";
+};
+
 type SkuCacheEntry = {
   custoUnitario: number | null;
   tipo: string | null;
@@ -498,6 +511,50 @@ function getHistoryStartDate(): Date {
     return new Date("2024-01-01T00:00:00.000Z");
   }
   return candidate;
+}
+
+async function buildSyncWindows(
+  account: MeliAccount,
+  existingVendasCount: number,
+  historyStart: Date,
+  now: Date,
+): Promise<SyncWindow[]> {
+  const windows: SyncWindow[] = [];
+
+  if (existingVendasCount === 0) {
+    const initialFrom = new Date(
+      Math.max(historyStart.getTime(), now.getTime() - INITIAL_SYNC_DAYS * DAY_IN_MS),
+    );
+    windows.push({ from: initialFrom, to: now, mode: "initial" });
+    return windows;
+  }
+
+  const recentFrom = new Date(now.getTime() - INCREMENTAL_SYNC_HOURS * 60 * 60 * 1000);
+  windows.push({ from: recentFrom, to: now, mode: "recent" });
+
+  const oldestVenda = await prisma.meliVenda.findFirst({
+    where: { meliAccountId: account.id },
+    orderBy: { dataVenda: "asc" },
+    select: { dataVenda: true },
+  });
+
+  const needsHistorical = !oldestVenda || oldestVenda.dataVenda > historyStart;
+  if (needsHistorical) {
+    const upperBoundCandidate =
+      oldestVenda?.dataVenda ?? new Date(now.getTime() - INCREMENTAL_SYNC_HOURS * 60 * 60 * 1000);
+    const safeUpperBound =
+      upperBoundCandidate.getTime() > now.getTime() ? now : upperBoundCandidate;
+
+    const historicalFrom = new Date(
+      Math.max(historyStart.getTime(), safeUpperBound.getTime() - HISTORY_CHUNK_DAYS * DAY_IN_MS),
+    );
+
+    if (historicalFrom < safeUpperBound) {
+      windows.push({ from: historicalFrom, to: safeUpperBound, mode: "historical" });
+    }
+  }
+
+  return windows;
 }
 
 function createRangeLabel(from: Date, to: Date): string {
@@ -847,12 +904,14 @@ async function fetchOrdersInRange(
   return results;
 }
 
-async function fetchOrdersForAccount(
+async function fetchOrdersForWindow(
 
   account: MeliAccount,
 
-  userId: string,
-
+  userId: string,
+
+  window?: SyncWindow,
+
   specificOrderIds?: string[], // IDs especificos para buscar
 
 ): Promise<OrdersFetchResult> {
@@ -860,8 +919,6 @@ async function fetchOrdersForAccount(
   const results: MeliOrderPayload[] = [];
 
   const headers = { Authorization: `Bearer ${account.access_token}` };
-
-
 
   if (specificOrderIds && specificOrderIds.length > 0) {
 
@@ -987,123 +1044,103 @@ async function fetchOrdersForAccount(
 
 
 
-  const existingVendasCount = await prisma.meliVenda.count({
-
-    where: { meliAccountId: account.id },
-
-  });
-
-  const isFirstSync = existingVendasCount === 0;
-
-  const now = new Date();
-
-  const historyStart = getHistoryStartDate();
+  if (!window) {
 
 
 
-  let fetchFrom = isFirstSync ? historyStart : new Date(now.getTime() - 48 * 60 * 60 * 1000);
-
-  let fetchMode: 'full' | 'incremental' = isFirstSync ? 'full' : 'incremental';
+    throw new Error("Sync window is required when no specific order IDs are provided.");
 
 
-
-  if (!isFirstSync) {
-
-    try {
-
-      const historyTotal = await countOrdersInRange(
-
-        account,
-
-        headers,
-
-        historyStart,
-
-        now,
-
-        userId,
-
-        'full-history',
-
-      );
-
-      const missingHistory = historyTotal - existingVendasCount;
-
-      if (missingHistory > MISSING_HISTORY_TOLERANCE) {
-
-        fetchFrom = historyStart;
-
-        fetchMode = 'full';
-
-        console.log(
-
-          `[Sync] Conta ${account.ml_user_id} esta com ${missingHistory} vendas fora do banco. Executando sincronizacao completa.`,
-
-        );
-
-      } else {
-
-        console.log(
-
-          `[Sync] Conta ${account.ml_user_id} esta atualizada (faltam ${missingHistory} vendas). Executando sincronizacao incremental (48h).`,
-
-        );
-
-      }
-
-    } catch (error) {
-
-      console.warn(
-
-        `[Sync] Nao foi possivel validar o historico completo da conta ${account.ml_user_id}. Mantendo sincronizacao incremental.`,
-
-        error,
-
-      );
-
-    }
-
-  } else {
-
-    console.log(
-
-      `[Sync] Primeira sincronizacao - buscando todas as vendas desde ${historyStart.toISOString()}`,
-
-    );
 
   }
+
+
+
+  const now = window.to;
+
+
+
+  const fetchFrom = window.from;
+
+
+
+  const fetchMode = window.mode;
 
 
 
   const logisticStats = new Map<string, number>();
 
+  const windowLabel =
+
+    fetchMode === "initial"
+
+      ? "janela inicial"
+
+      : fetchMode === "historical"
+
+        ? "historico"
+
+        : fetchMode === "manual"
+
+          ? "manual"
+
+          : "ultimas 48h";
+
 
 
   try {
 
+
+
     sendProgressToUser(userId, {
+
+
 
       type: "sync_progress",
 
-      message: `Conta ${account.nickname || account.ml_user_id}: preparando janelas de dados (${fetchMode === "full" ? "historico completo" : "ultimas 48h"})...`,
+
+
+      message: `Conta ${account.nickname || account.ml_user_id}: preparando janelas (${windowLabel})...`,
+
+
 
       current: 0,
 
+
+
       total: 0,
+
+
 
       accountId: account.id,
 
+
+
       accountNickname: account.nickname,
+
+
 
       debugData: { mode: fetchMode },
 
+
+
     });
+
+
 
   } catch (sseError) {
 
+
+
     console.warn("[Sync] Erro ao enviar aviso de preparacao de janelas:", sseError);
 
+
+
   }
+
+
+
+
 
 
 
@@ -1115,7 +1152,7 @@ async function fetchOrdersForAccount(
 
     console.log(
 
-      `[Sync] Conta ${account.ml_user_id} nao retornou vendas no intervalo selecionado (${fetchMode}).`,
+      `[Sync] Conta ${account.ml_user_id} nao retornou vendas no intervalo selecionado (${windowLabel}).`,
 
     );
 
@@ -1125,7 +1162,7 @@ async function fetchOrdersForAccount(
 
         type: "sync_warning",
 
-        message: `Conta ${account.nickname || account.ml_user_id} nao possui vendas no periodo selecionado.`,
+        message: `Conta ${account.nickname || account.ml_user_id} nao possui vendas na janela ().`,
 
         accountId: account.id,
 
@@ -1183,7 +1220,7 @@ async function fetchOrdersForAccount(
 
   console.log(
 
-    `[Sync] Conta ${account.ml_user_id}: ${ranges.length} janela(s) para ${fetchMode === 'full' ? 'historico completo' : 'ultimas 48h'}, total esperado inicial ${expectedTotal}.`,
+    `[Sync] Conta ${account.ml_user_id}: ${ranges.length} janela(s) para ${windowLabel}, total esperado inicial ${expectedTotal}.`,
 
   );
 
@@ -1215,7 +1252,7 @@ async function fetchOrdersForAccount(
 
               type: 'sync_progress',
 
-              message: `Conta ${account.nickname || account.ml_user_id}: ${totalFetchedAcrossRanges}/${expectedTotal || chunkTotal} vendas baixadas (${rangeLabel})`,
+              message: `Conta ${account.nickname || account.ml_user_id}: ${totalFetchedAcrossRanges}/${expectedTotal || chunkTotal} vendas baixadas (${windowLabel} - ${rangeLabel})`,
 
               current: totalFetchedAcrossRanges,
 
@@ -1836,6 +1873,7 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.sub;
+  const historyStart = getHistoryStartDate();
   
   // Ler body para obter contas selecionadas e IDs de vendas verificadas
   let requestBody: {
@@ -1969,82 +2007,254 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        // Obter IDs específicos para esta conta, se fornecidos
         const specificOrderIds = requestBody.orderIdsByAccount?.[account.id];
 
-        const { orders: accountOrders, expectedTotal } = await fetchOrdersForAccount(
-          current,
-          userId,
-          specificOrderIds
-        );
+        const existingVendasCount = await prisma.meliVenda.count({
 
-        const accountExpected = expectedTotal || accountOrders.length;
-        totalExpectedOrders += accountExpected;
-        totalFetchedOrders += accountOrders.length;
+          where: { meliAccountId: account.id },
 
-        steps[accountIndex].expected = accountExpected;
-        steps[accountIndex].fetched = accountOrders.length;
-        steps[accountIndex].progress = accountOrders.length > 0 ? 50 : 100; // 50% após fetch
-
-        console.log(`[Sync] Conta ${account.nickname}: ${accountOrders.length} vendas encontradas`);
-
-        // Atualizar step para saving
-        steps[accountIndex].currentStep = 'saving';
-        sendProgressToUser(userId, {
-          type: "sync_progress",
-          message: `Salvando vendas da conta ${account.nickname || account.ml_user_id}...`,
-          current: accountIndex,
-          total: accounts.length,
-          fetched: totalFetchedOrders,
-          expected: totalExpectedOrders,
-          accountId: account.id,
-          accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-          steps: steps
         });
 
-        // Salvar vendas no banco de dados em lotes
-        if (accountOrders.length > 0) {
+        const now = new Date();
+
+
+
+        const processAndSave = async (
+
+          fetchedOrders: MeliOrderPayload[],
+
+          expectedTotal: number,
+
+          label: string,
+
+        ) => {
+
+          const effectiveExpected = expectedTotal || fetchedOrders.length;
+
+          totalExpectedOrders += effectiveExpected;
+
+          totalFetchedOrders += fetchedOrders.length;
+
+
+
+          steps[accountIndex].expected += effectiveExpected;
+
+          steps[accountIndex].fetched += fetchedOrders.length;
+
+          steps[accountIndex].progress = fetchedOrders.length > 0 ? 50 : steps[accountIndex].progress;
+
+
+
+          console.log(
+
+            `[Sync] Conta ${account.nickname}: ${fetchedOrders.length} venda(s) encontradas na janela ${label}`,
+
+          );
+
+
+
+          if (fetchedOrders.length === 0) {
+
+            return;
+
+          }
+
+
+
+          steps[accountIndex].currentStep = 'saving';
+
+          sendProgressToUser(userId, {
+
+            type: "sync_progress",
+
+            message: `Salvando ${fetchedOrders.length} venda(s) (${label}) da conta ${account.nickname || account.ml_user_id}...`,
+
+            current: accountIndex,
+
+            total: accounts.length,
+
+            fetched: totalFetchedOrders,
+
+            expected: totalExpectedOrders,
+
+            accountId: account.id,
+
+            accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+
+            steps,
+
+          });
+
+
+
           try {
-            const batchResult = await saveVendasBatch(accountOrders, session.sub, 10);
+
+            const batchResult = await saveVendasBatch(fetchedOrders, session.sub, 10);
+
             totalSavedOrders += batchResult.saved;
 
-            console.log(`[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas, ${batchResult.errors} erros`);
+
+
+            console.log(
+
+              `[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas (${label}), ${batchResult.errors} erros`,
+
+            );
+
+
 
             if (batchResult.errors > 0) {
+
               console.warn(`[Sync] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
+
               sendProgressToUser(userId, {
+
                 type: "sync_warning",
-                message: `${batchResult.errors} vendas da conta ${account.nickname || account.ml_user_id} não puderam ser salvas`,
-                errorCode: "SAVE_ERRORS"
+
+                message: `${batchResult.errors} vendas da conta ${account.nickname || account.ml_user_id} nao puderam ser salvas (${label})`,
+
+                errorCode: "SAVE_ERRORS",
+
               });
+
             }
+
           } catch (saveError) {
+
             const saveErrorMsg = saveError instanceof Error ? saveError.message : 'Erro desconhecido';
+
             console.error(`[Sync] Erro ao salvar vendas da conta ${current.id}:`, saveError);
-            errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message: `Erro ao salvar vendas: ${saveErrorMsg}` });
+
+            errors.push({
+
+              accountId: current.id,
+
+              mlUserId: current.ml_user_id,
+
+              message: `Erro ao salvar vendas: ${saveErrorMsg}`
+
+            });
+
+
 
             sendProgressToUser(userId, {
+
               type: "sync_warning",
+
               message: `Erro ao salvar vendas da conta ${account.nickname || account.ml_user_id}: ${saveErrorMsg}`,
-              errorCode: "SAVE_BATCH_ERROR"
+
+              errorCode: "SAVE_BATCH_ERROR",
+
             });
+
           }
+
+        };
+
+
+
+        steps[accountIndex].expected = 0;
+
+        steps[accountIndex].fetched = 0;
+
+
+
+        if (specificOrderIds && specificOrderIds.length > 0) {
+
+          const { orders: manualOrders, expectedTotal } = await fetchOrdersForWindow(
+
+            current,
+
+            userId,
+
+            undefined,
+
+            specificOrderIds,
+
+          );
+
+          await processAndSave(manualOrders, expectedTotal, 'manual');
+
+        } else {
+
+          const windows = await buildSyncWindows(current, existingVendasCount, historyStart, now);
+
+
+
+          if (windows.length === 0) {
+
+            console.log(`[Sync] Conta ${account.nickname}: nada novo para sincronizar`);
+
+            sendProgressToUser(userId, {
+
+              type: "sync_progress",
+
+              message: `Conta ${account.nickname || account.ml_user_id} já está sincronizada.`,
+
+              current: accountIndex,
+
+              total: accounts.length,
+
+              fetched: totalFetchedOrders,
+
+              expected: totalExpectedOrders,
+
+              accountId: account.id,
+
+              accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+
+              steps,
+
+            });
+
+          } else {
+
+            for (const windowDef of windows) {
+
+              sendProgressToUser(userId, {
+
+                type: "sync_progress",
+
+                message: `Processando janela ${windowDef.mode} (${windowDef.from.toISOString()} → ${windowDef.to.toISOString()}) da conta ${account.nickname || account.ml_user_id}...`,
+
+                current: accountIndex,
+
+                total: accounts.length,
+
+                fetched: totalFetchedOrders,
+
+                expected: totalExpectedOrders,
+
+                accountId: account.id,
+
+                accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
+
+                steps,
+
+              });
+
+
+
+              const { orders: windowOrders, expectedTotal } = await fetchOrdersForWindow(
+
+                current,
+
+                userId,
+
+                windowDef,
+
+              );
+
+
+
+              await processAndSave(windowOrders, expectedTotal, windowDef.mode);
+
+            }
+
+          }
+
         }
 
-        // Marcar como concluída
-        steps[accountIndex].currentStep = 'completed';
-        steps[accountIndex].progress = 100;
-        sendProgressToUser(userId, {
-          type: "sync_progress",
-          message: `Conta ${account.nickname || account.ml_user_id} concluída!`,
-          current: accountIndex + 1,
-          total: accounts.length,
-          fetched: totalFetchedOrders,
-          expected: totalExpectedOrders,
-          accountId: account.id,
-          accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-          steps: steps
-        });
       } catch (error) {
         steps[accountIndex].currentStep = 'error';
         steps[accountIndex].error = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -2120,3 +2330,11 @@ export async function POST(req: NextRequest) {
     },
   });
 }
+
+
+
+
+
+
+
+
