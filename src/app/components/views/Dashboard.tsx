@@ -51,7 +51,7 @@ export default function Dashboard() {
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
 
   // Estados dos filtros
-  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("ultimos_30d");
+  const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("hoje");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
   const [dataFimPersonalizada, setDataFimPersonalizada] = useState<Date | null>(null);
   const [canalAtivo, setCanalAtivo] = useState<FiltroCanal>("todos");
