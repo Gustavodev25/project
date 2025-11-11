@@ -12,6 +12,13 @@ const MELI_API_BASE =
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
 const MAX_OFFSET = 10000; // Limite máximo da API do Mercado Livre
+const MAX_RESULTS_PER_RANGE = 9500;
+const MIN_RANGE_DURATION_MS = 1000;
+const MAX_RANGE_SPLIT_DEPTH = 32;
+const DEFAULT_HISTORY_START =
+  process.env.MELI_HISTORY_START_DATE ||
+  process.env.MELI_SYNC_START_DATE ||
+  "2024-01-01T00:00:00.000Z";
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -246,27 +253,139 @@ type AccountSummary = {
   expires_at: string;
 };
 
-async function fetchOrdersForAccount(
-  account: MeliAccount,
-): Promise<OrdersFetchResult> {
-  const results: MeliOrderPayload[] = [];
-  const headers = { Authorization: `Bearer ${account.access_token}` };
+type DateRangeWindow = {
+  from: Date;
+  to: Date;
+  total: number;
+  depth: number;
+};
 
+function getHistoryStartDate(): Date {
+  const candidate = new Date(DEFAULT_HISTORY_START);
+  if (Number.isNaN(candidate.getTime())) {
+    return new Date("2024-01-01T00:00:00.000Z");
+  }
+  return candidate;
+}
+
+function createRangeLabel(from: Date, to: Date): string {
+  return `${from.toISOString()} até ${to.toISOString()}`;
+}
+
+async function countOrdersInRange(
+  account: MeliAccount,
+  headers: Record<string, string>,
+  from: Date,
+  to: Date,
+): Promise<number> {
+  if (from > to) return 0;
+
+  const url = new URL(`${MELI_API_BASE}/orders/search`);
+  url.searchParams.set("seller", account.ml_user_id.toString());
+  url.searchParams.set("sort", "date_desc");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("offset", "0");
+  url.searchParams.set("order.date_created.from", from.toISOString());
+  url.searchParams.set("order.date_created.to", to.toISOString());
+
+  const response = await fetch(url.toString(), { headers });
+  let payload: any = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload?.message === "string" ? payload.message : `Status ${response.status}`;
+    throw new Error(`Erro ao contar pedidos da conta ${account.ml_user_id}: ${message}`);
+  }
+
+  const total = typeof payload?.paging?.total === "number" ? payload.paging.total : 0;
+  if (total > MAX_RESULTS_PER_RANGE) {
+    console.log(
+      `[meli][orders] Intervalo ${createRangeLabel(from, to)} possui ${total} vendas - dividindo janelas.`,
+    );
+  }
+  return total;
+}
+
+async function buildSafeDateRanges(
+  account: MeliAccount,
+  headers: Record<string, string>,
+  from: Date,
+  to: Date,
+): Promise<DateRangeWindow[]> {
+  const windows: DateRangeWindow[] = [];
+  const queue: DateRangeWindow[] = [{ from, to, total: 0, depth: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.from > current.to) continue;
+
+    const total = await countOrdersInRange(account, headers, current.from, current.to);
+    if (total === 0) continue;
+
+    if (total > MAX_RESULTS_PER_RANGE && current.depth < MAX_RANGE_SPLIT_DEPTH) {
+      const duration = current.to.getTime() - current.from.getTime();
+      if (duration <= MIN_RANGE_DURATION_MS) {
+        console.warn(
+          `[meli][orders] Intervalo mínimo atingido para conta ${account.ml_user_id} em ${createRangeLabel(
+            current.from,
+            current.to,
+          )}. Prosseguindo mesmo acima do limite.`,
+        );
+        windows.push({ ...current, total });
+        continue;
+      }
+
+      const midMs = current.from.getTime() + Math.floor(duration / 2);
+      if (midMs <= current.from.getTime() || midMs >= current.to.getTime()) {
+        windows.push({ ...current, total });
+        continue;
+      }
+
+      const leftTo = new Date(midMs);
+      const rightFromMs = midMs + 1;
+      if (rightFromMs > current.to.getTime()) {
+        windows.push({ ...current, total });
+        continue;
+      }
+      const rightFrom = new Date(rightFromMs);
+
+      queue.unshift({ from: current.from, to: leftTo, total: 0, depth: current.depth + 1 });
+      queue.unshift({ from: rightFrom, to: current.to, total: 0, depth: current.depth + 1 });
+      continue;
+    }
+
+    windows.push({ ...current, total });
+  }
+
+  windows.sort((a, b) => b.from.getTime() - a.from.getTime());
+  return windows;
+}
+
+async function fetchOrdersInRange(
+  account: MeliAccount,
+  headers: Record<string, string>,
+  range: DateRangeWindow,
+): Promise<MeliOrderPayload[]> {
+  const results: MeliOrderPayload[] = [];
   let offset = 0;
-  let total = Number.POSITIVE_INFINITY;
-  let expectedTotal = 0;
+  let total = range.total;
+  let page = 0;
+  const rangeLabel = createRangeLabel(range.from, range.to);
 
   while (offset < total && offset < MAX_OFFSET) {
     const limit = PAGE_LIMIT;
-    // Usar endpoint /orders/search com filtro de data desde janeiro de 2024
     const url = new URL(`${MELI_API_BASE}/orders/search`);
     url.searchParams.set("seller", account.ml_user_id.toString());
     url.searchParams.set("sort", "date_desc");
     url.searchParams.set("limit", limit.toString());
     url.searchParams.set("offset", offset.toString());
-    // Filtrar vendas desde janeiro de 2024 até hoje
-    url.searchParams.set("order.date_created.from", "2024-01-01T00:00:00.000Z");
-    url.searchParams.set("order.date_created.to", new Date().toISOString());
+    url.searchParams.set("order.date_created.from", range.from.toISOString());
+    url.searchParams.set("order.date_created.to", range.to.toISOString());
 
     const response = await fetch(url.toString(), { headers });
     let payload: any = null;
@@ -275,51 +394,80 @@ async function fetchOrdersForAccount(
     } catch {
       payload = null;
     }
+
     if (!response.ok) {
-      const message = typeof payload?.message === "string"
-        ? payload.message
-        : `Status ${response.status}`;
-      throw new Error(`Erro ao buscar pedidos: ${message}`);
+      const message =
+        typeof payload?.message === "string" ? payload.message : `Status ${response.status}`;
+      console.error(
+        `[meli][orders] Erro ${response.status} ao buscar pedidos da conta ${account.ml_user_id} (${rangeLabel}): ${message}`,
+      );
+      offset += limit;
+      continue;
     }
 
     const orders = Array.isArray(payload?.results) ? payload.results : [];
-    
-    // Atualizar total apenas na primeira requisição
-    if (offset === 0 && typeof payload?.paging?.total === "number") {
+    if (page === 0 && typeof payload?.paging?.total === "number") {
       total = payload.paging.total;
-      expectedTotal = payload.paging.total;
     }
 
-    // Para cada pedido, buscar detalhe do pedido e do envio (quando houver)
-    const [detailedOrders, shipments] = await Promise.all([
-      Promise.all(
-        orders.map(async (order: any) => {
-          const id = order?.id;
-          if (!id) return order;
-          try {
-            const res = await fetch(`${MELI_API_BASE}/orders/${id}`, { headers });
-            if (!res.ok) return order;
-            const det = await res.json();
-            return { ...order, ...det };
-          } catch {
-            return order;
-          }
-        }),
-      ),
-      Promise.all(
-        orders.map(async (order: any) => {
-          const shippingId = order?.shipping?.id;
-          if (!shippingId) return null;
-          try {
-            const res = await fetch(`${MELI_API_BASE}/shipments/${shippingId}`, { headers });
-            if (!res.ok) return null;
-            return await res.json();
-          } catch {
-            return null;
-          }
-        }),
-      ),
-    ]);
+    let detailedOrders: any[] = [];
+    let shipments: any[] = [];
+
+    try {
+      const [orderDetailsResults, shipmentDetailsResults] = await Promise.all([
+        Promise.allSettled(
+          orders.map(async (order: any) => {
+            const id = order?.id;
+            if (!id) return order;
+            try {
+              const res = await fetch(`${MELI_API_BASE}/orders/${id}`, { headers });
+              if (!res.ok) {
+                console.warn(
+                  `[meli][orders] Detalhes do pedido ${id} retornaram status ${res.status}, usando dados básicos...`,
+                );
+                return order;
+              }
+              const det = await res.json();
+              return { ...order, ...det };
+            } catch (error) {
+              console.error(`[meli][orders] Erro ao buscar detalhes do pedido ${id}:`, error);
+              return order;
+            }
+          }),
+        ),
+        Promise.allSettled(
+          orders.map(async (order: any) => {
+            const shippingId = order?.shipping?.id;
+            if (!shippingId) return null;
+            try {
+              const res = await fetch(`${MELI_API_BASE}/shipments/${shippingId}`, { headers });
+              if (!res.ok) {
+                console.warn(
+                  `[meli][orders] Detalhes do envio ${shippingId} retornaram status ${res.status}, continuando sem dados de envio...`,
+                );
+                return null;
+              }
+              const data = await res.json();
+              return data;
+            } catch (error) {
+              console.error(`[meli][orders] Erro ao buscar envio ${shippingId}:`, error);
+              return null;
+            }
+          }),
+        ),
+      ]);
+
+      detailedOrders = orderDetailsResults.map((result, index) =>
+        result.status === "fulfilled" ? result.value : orders[index],
+      );
+      shipments = shipmentDetailsResults.map((result) =>
+        result.status === "fulfilled" ? result.value : null,
+      );
+    } catch (error) {
+      console.error(`[meli][orders] Erro crítico ao buscar detalhes:`, error);
+      detailedOrders = orders;
+      shipments = orders.map(() => null);
+    }
 
     detailedOrders.forEach((order: any, idx: number) => {
       const shipment = shipments[idx] ?? undefined;
@@ -336,16 +484,54 @@ async function fetchOrdersForAccount(
 
     const fetched = orders.length;
     offset += fetched;
-    
-    // Debug: log para verificar paginação
-    console.log(`[meli][orders] Conta ${account.ml_user_id}: página ${Math.floor(offset/limit) + 1}, offset: ${offset}, total: ${total}, fetched: ${fetched} (período: 2024-01-01 até hoje)`);
-    
-    // Parar apenas se não há mais vendas ou atingiu o total
-    if (fetched === 0 || offset >= total) break;
+    page += 1;
+
+    console.log(
+      `[meli][orders] Conta ${account.ml_user_id}: página ${page} (intervalo ${rangeLabel}), offset ${offset}, fetched ${fetched}, total ${total}`,
+    );
+
+    if (fetched === 0) {
+      break;
+    }
   }
 
-  return { orders: results, expectedTotal };
+  if (total > MAX_OFFSET && results.length >= MAX_OFFSET) {
+    console.warn(
+      `[meli][orders] Limite de ${MAX_OFFSET} vendas atingido para intervalo ${rangeLabel}.`,
+    );
+  }
+
+  return results;
 }
+
+async function fetchOrdersForAccount(
+  account: MeliAccount,
+): Promise<OrdersFetchResult> {
+  const results: MeliOrderPayload[] = [];
+  const headers = { Authorization: `Bearer ${account.access_token}` };
+
+  const historyStart = getHistoryStartDate();
+  const now = new Date();
+  const ranges = await buildSafeDateRanges(account, headers, historyStart, now);
+
+  if (ranges.length === 0) {
+    console.log(`[meli][orders] Conta ${account.ml_user_id} nao retornou vendas no intervalo analisado.`);
+    return { orders: results, expectedTotal: 0 };
+  }
+
+  let expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
+  console.log(
+    `[meli][orders] Conta ${account.ml_user_id}: ${ranges.length} janela(s) necessarias para cobrir o periodo. Total estimado: ${expectedTotal}.`,
+  );
+
+  for (const range of ranges) {
+    const chunkOrders = await fetchOrdersInRange(account, headers, range);
+    results.push(...chunkOrders);
+  }
+
+  return { orders: results, expectedTotal };
+}
+
   
 export async function GET(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
