@@ -847,203 +847,480 @@ async function fetchOrdersInRange(
   return results;
 }
 
-async function fetchOrdersForAccount(
-  account: MeliAccount,
-  userId: string,
-  specificOrderIds?: string[], // IDs especificos para buscar
-): Promise<OrdersFetchResult> {
-  const results: MeliOrderPayload[] = [];
-  const headers = { Authorization: `Bearer ${account.access_token}` };
-
-  if (specificOrderIds && specificOrderIds.length > 0) {
-    console.log(`[Sync] Buscando ${specificOrderIds.length} pedidos especificos para conta ${account.ml_user_id}`);
-
-    const detailedOrders = await Promise.all(
-      specificOrderIds.map(async (orderId) => {
-        try {
-          const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${orderId}`, { headers }, 3, userId);
-          if (!res.ok) {
-            console.warn(`[Sync] Pedido ${orderId} retornou status ${res.status}, ignorando...`);
-            return null;
-          }
-          const data = await res.json();
-          return data;
-        } catch (error) {
-          console.error(`[Sync] Erro ao buscar pedido especifico ${orderId}:`, error);
-          sendProgressToUser(userId, {
-            type: 'sync_warning',
-            message: `Erro ao buscar pedido ${orderId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-            errorCode: 'ORDER_FETCH_ERROR',
-          });
-          return null;
-        }
-      })
-    );
-
-    const shipments = await Promise.all(
-      detailedOrders.map(async (order: any) => {
-        if (!order) return null;
-        const shippingId = order?.shipping?.id;
-        if (!shippingId) return null;
-        try {
-          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-          if (!res.ok) {
-            console.warn(`[Sync] Envio ${shippingId} retornou status ${res.status}, continuando sem dados de envio...`);
-            return null;
-          }
-          const data = await res.json();
-          return data;
-        } catch (error) {
-          console.error(`[Sync] Erro ao buscar envio ${shippingId}:`, error);
-          return null;
-        }
-      })
-    );
-
-    detailedOrders.forEach((order: any, idx: number) => {
-      if (!order) return;
-      const shipment = shipments[idx] ?? undefined;
-      const freight = calculateFreight(order, shipment);
-      results.push({
-        accountId: account.id,
-        accountNickname: account.nickname,
-        mlUserId: account.ml_user_id,
-        order,
-        shipment,
-        freight,
-      });
-    });
-
-    return { orders: results, expectedTotal: specificOrderIds.length };
-  }
-
-  const existingVendasCount = await prisma.meliVenda.count({
-    where: { meliAccountId: account.id },
-  });
-  const isFirstSync = existingVendasCount === 0;
-  const now = new Date();
-  const historyStart = getHistoryStartDate();
-
-  let fetchFrom = isFirstSync ? historyStart : new Date(now.getTime() - 48 * 60 * 60 * 1000);
-  let fetchMode: 'full' | 'incremental' = isFirstSync ? 'full' : 'incremental';
-
-  if (!isFirstSync) {
-    try {
-      const historyTotal = await countOrdersInRange(
-        account,
-        headers,
-        historyStart,
-        now,
-        userId,
-        'full-history',
-      );
-      const missingHistory = historyTotal - existingVendasCount;
-      if (missingHistory > MISSING_HISTORY_TOLERANCE) {
-        fetchFrom = historyStart;
-        fetchMode = 'full';
-        console.log(
-          `[Sync] Conta ${account.ml_user_id} esta com ${missingHistory} vendas fora do banco. Executando sincronizacao completa.`,
-        );
-      } else {
-        console.log(
-          `[Sync] Conta ${account.ml_user_id} esta atualizada (faltam ${missingHistory} vendas). Executando sincronizacao incremental (48h).`,
-        );
-      }
-    } catch (error) {
-      console.warn(
-        `[Sync] Nao foi possivel validar o historico completo da conta ${account.ml_user_id}. Mantendo sincronizacao incremental.`,
-        error,
-      );
-    }
-  } else {
-    console.log(
-      `[Sync] Primeira sincronizacao - buscando todas as vendas desde ${historyStart.toISOString()}`,
-    );
-  }
-
-  const logisticStats = new Map<string, number>();
-  const ranges = await buildSafeDateRanges(account, headers, fetchFrom, now, userId);
-
-  if (ranges.length === 0) {
-    console.log(
-      `[Sync] Conta ${account.ml_user_id} nao retornou vendas no intervalo selecionado (${fetchMode}).`,
-    );
-    return { orders: results, expectedTotal: 0 };
-  }
-
-  let expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
-  let totalFetchedAcrossRanges = 0;
-
-  console.log(
-    `[Sync] Conta ${account.ml_user_id}: ${ranges.length} janela(s) para ${fetchMode === 'full' ? 'historico completo' : 'ultimas 48h'}, total esperado inicial ${expectedTotal}.`,
-  );
-
-  for (const range of ranges) {
-    const chunkOrders = await fetchOrdersInRange(
-      account,
-      headers,
-      userId,
-      range,
-      logisticStats,
-      {
-        onPageFetched: ({ fetched, chunkOffset, chunkTotal, rangeLabel, page }) => {
-          totalFetchedAcrossRanges += fetched;
-          try {
-            sendProgressToUser(userId, {
-              type: 'sync_progress',
-              message: `Conta ${account.nickname || account.ml_user_id}: ${totalFetchedAcrossRanges}/${expectedTotal || chunkTotal} vendas baixadas (${rangeLabel})`,
-              current: totalFetchedAcrossRanges,
-              total: expectedTotal || chunkTotal,
-              fetched: totalFetchedAcrossRanges,
-              expected: expectedTotal || chunkTotal,
-              accountId: account.id,
-              accountNickname: account.nickname,
-              page,
-              offset: chunkOffset,
-              debugData: {
-                range: rangeLabel,
-                chunkTotal,
-              },
-            });
-          } catch (sseError) {
-            console.warn('[Sync] Erro ao enviar progresso SSE (nao critico):', sseError);
-          }
-        },
-        onRangeTotalAdjusted: (delta) => {
-          if (!delta) return;
-          expectedTotal += delta;
-        },
-        onRangeLimitReached: ({ total, rangeLabel }) => {
-          const vendasRestantes = total - MAX_OFFSET;
-          console.log(
-            `[Sync] Aviso: limite de ${MAX_OFFSET} vendas atingido no intervalo ${rangeLabel}. ${vendasRestantes} vendas podem ter ficado de fora.`,
-          );
-          sendProgressToUser(userId, {
-            type: 'sync_warning',
-            message: `Limite de 10.000 vendas por intervalo atingido (${rangeLabel}). Sincronizadas ${MAX_OFFSET} de ${total} vendas disponiveis.`,
-            errorCode: 'MAX_OFFSET_REACHED',
-          });
-        },
-      },
-    );
-
-    results.push(...chunkOrders);
-  }
-
-  console.log(`[Sync] Conta ${account.ml_user_id} - tipos de logistica encontrados:`);
-  const sortedStats = Array.from(logisticStats.entries()).sort((a, b) => b[1] - a[1]);
-  sortedStats.forEach(([type, count]) => {
-    console.log(`  ${type}: ${count} vendas`);
-  });
-
-  if (!logisticStats.has('cross_docking')) {
-    console.log(
-      `[Sync] Nenhuma venda com cross_docking (Coleta) foi encontrada na API do Mercado Livre para esta conta.`,
-    );
-  }
-
-  return { orders: results, expectedTotal };
-}
+async function fetchOrdersForAccount(
+
+  account: MeliAccount,
+
+  userId: string,
+
+  specificOrderIds?: string[], // IDs especificos para buscar
+
+): Promise<OrdersFetchResult> {
+
+  const results: MeliOrderPayload[] = [];
+
+  const headers = { Authorization: `Bearer ${account.access_token}` };
+
+
+
+  if (specificOrderIds && specificOrderIds.length > 0) {
+
+    console.log(`[Sync] Buscando ${specificOrderIds.length} pedidos especificos para conta ${account.ml_user_id}`);
+
+
+
+    const detailedOrders = await Promise.all(
+
+      specificOrderIds.map(async (orderId) => {
+
+        try {
+
+          const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${orderId}`, { headers }, 3, userId);
+
+          if (!res.ok) {
+
+            console.warn(`[Sync] Pedido ${orderId} retornou status ${res.status}, ignorando...`);
+
+            return null;
+
+          }
+
+          const data = await res.json();
+
+          return data;
+
+        } catch (error) {
+
+          console.error(`[Sync] Erro ao buscar pedido especifico ${orderId}:`, error);
+
+          sendProgressToUser(userId, {
+
+            type: 'sync_warning',
+
+            message: `Erro ao buscar pedido ${orderId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+
+            errorCode: 'ORDER_FETCH_ERROR',
+
+          });
+
+          return null;
+
+        }
+
+      })
+
+    );
+
+
+
+    const shipments = await Promise.all(
+
+      detailedOrders.map(async (order: any) => {
+
+        if (!order) return null;
+
+        const shippingId = order?.shipping?.id;
+
+        if (!shippingId) return null;
+
+        try {
+
+          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
+
+          if (!res.ok) {
+
+            console.warn(`[Sync] Envio ${shippingId} retornou status ${res.status}, continuando sem dados de envio...`);
+
+            return null;
+
+          }
+
+          const data = await res.json();
+
+          return data;
+
+        } catch (error) {
+
+          console.error(`[Sync] Erro ao buscar envio ${shippingId}:`, error);
+
+          return null;
+
+        }
+
+      })
+
+    );
+
+
+
+    detailedOrders.forEach((order: any, idx: number) => {
+
+      if (!order) return;
+
+      const shipment = shipments[idx] ?? undefined;
+
+      const freight = calculateFreight(order, shipment);
+
+      results.push({
+
+        accountId: account.id,
+
+        accountNickname: account.nickname,
+
+        mlUserId: account.ml_user_id,
+
+        order,
+
+        shipment,
+
+        freight,
+
+      });
+
+    });
+
+
+
+    return { orders: results, expectedTotal: specificOrderIds.length };
+
+  }
+
+
+
+  const existingVendasCount = await prisma.meliVenda.count({
+
+    where: { meliAccountId: account.id },
+
+  });
+
+  const isFirstSync = existingVendasCount === 0;
+
+  const now = new Date();
+
+  const historyStart = getHistoryStartDate();
+
+
+
+  let fetchFrom = isFirstSync ? historyStart : new Date(now.getTime() - 48 * 60 * 60 * 1000);
+
+  let fetchMode: 'full' | 'incremental' = isFirstSync ? 'full' : 'incremental';
+
+
+
+  if (!isFirstSync) {
+
+    try {
+
+      const historyTotal = await countOrdersInRange(
+
+        account,
+
+        headers,
+
+        historyStart,
+
+        now,
+
+        userId,
+
+        'full-history',
+
+      );
+
+      const missingHistory = historyTotal - existingVendasCount;
+
+      if (missingHistory > MISSING_HISTORY_TOLERANCE) {
+
+        fetchFrom = historyStart;
+
+        fetchMode = 'full';
+
+        console.log(
+
+          `[Sync] Conta ${account.ml_user_id} esta com ${missingHistory} vendas fora do banco. Executando sincronizacao completa.`,
+
+        );
+
+      } else {
+
+        console.log(
+
+          `[Sync] Conta ${account.ml_user_id} esta atualizada (faltam ${missingHistory} vendas). Executando sincronizacao incremental (48h).`,
+
+        );
+
+      }
+
+    } catch (error) {
+
+      console.warn(
+
+        `[Sync] Nao foi possivel validar o historico completo da conta ${account.ml_user_id}. Mantendo sincronizacao incremental.`,
+
+        error,
+
+      );
+
+    }
+
+  } else {
+
+    console.log(
+
+      `[Sync] Primeira sincronizacao - buscando todas as vendas desde ${historyStart.toISOString()}`,
+
+    );
+
+  }
+
+
+
+  const logisticStats = new Map<string, number>();
+
+
+
+  try {
+
+    sendProgressToUser(userId, {
+
+      type: "sync_progress",
+
+      message: `Conta ${account.nickname || account.ml_user_id}: preparando janelas de dados (${fetchMode === "full" ? "historico completo" : "ultimas 48h"})...`,
+
+      current: 0,
+
+      total: 0,
+
+      accountId: account.id,
+
+      accountNickname: account.nickname,
+
+      debugData: { mode: fetchMode },
+
+    });
+
+  } catch (sseError) {
+
+    console.warn("[Sync] Erro ao enviar aviso de preparacao de janelas:", sseError);
+
+  }
+
+
+
+  const ranges = await buildSafeDateRanges(account, headers, fetchFrom, now, userId);
+
+
+
+  if (ranges.length === 0) {
+
+    console.log(
+
+      `[Sync] Conta ${account.ml_user_id} nao retornou vendas no intervalo selecionado (${fetchMode}).`,
+
+    );
+
+    try {
+
+      sendProgressToUser(userId, {
+
+        type: "sync_warning",
+
+        message: `Conta ${account.nickname || account.ml_user_id} nao possui vendas no periodo selecionado.`,
+
+        accountId: account.id,
+
+        accountNickname: account.nickname,
+
+        debugData: { mode: fetchMode },
+
+      });
+
+    } catch (sseError) {
+
+      console.warn("[Sync] Erro ao enviar aviso de ausencia de vendas:", sseError);
+
+    }
+
+    return { orders: results, expectedTotal: 0 };
+
+  }
+
+
+
+  let expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
+
+  let totalFetchedAcrossRanges = 0;
+
+
+
+  try {
+
+    sendProgressToUser(userId, {
+
+      type: "sync_progress",
+
+      message: `Conta ${account.nickname || account.ml_user_id}: ${ranges.length} janela(s) detectadas (${expectedTotal} vendas estimadas).`,
+
+      current: 0,
+
+      total: expectedTotal,
+
+      accountId: account.id,
+
+      accountNickname: account.nickname,
+
+      debugData: { mode: fetchMode, ranges: ranges.length },
+
+    });
+
+  } catch (sseError) {
+
+    console.warn("[Sync] Erro ao enviar resumo das janelas:", sseError);
+
+  }
+
+
+
+  console.log(
+
+    `[Sync] Conta ${account.ml_user_id}: ${ranges.length} janela(s) para ${fetchMode === 'full' ? 'historico completo' : 'ultimas 48h'}, total esperado inicial ${expectedTotal}.`,
+
+  );
+
+
+
+  for (const range of ranges) {
+
+    const chunkOrders = await fetchOrdersInRange(
+
+      account,
+
+      headers,
+
+      userId,
+
+      range,
+
+      logisticStats,
+
+      {
+
+        onPageFetched: ({ fetched, chunkOffset, chunkTotal, rangeLabel, page }) => {
+
+          totalFetchedAcrossRanges += fetched;
+
+          try {
+
+            sendProgressToUser(userId, {
+
+              type: 'sync_progress',
+
+              message: `Conta ${account.nickname || account.ml_user_id}: ${totalFetchedAcrossRanges}/${expectedTotal || chunkTotal} vendas baixadas (${rangeLabel})`,
+
+              current: totalFetchedAcrossRanges,
+
+              total: expectedTotal || chunkTotal,
+
+              fetched: totalFetchedAcrossRanges,
+
+              expected: expectedTotal || chunkTotal,
+
+              accountId: account.id,
+
+              accountNickname: account.nickname,
+
+              page,
+
+              offset: chunkOffset,
+
+              debugData: {
+
+                range: rangeLabel,
+
+                chunkTotal,
+
+              },
+
+            });
+
+          } catch (sseError) {
+
+            console.warn('[Sync] Erro ao enviar progresso SSE (nao critico):', sseError);
+
+          }
+
+        },
+
+        onRangeTotalAdjusted: (delta) => {
+
+          if (!delta) return;
+
+          expectedTotal += delta;
+
+        },
+
+        onRangeLimitReached: ({ total, rangeLabel }) => {
+
+          const vendasRestantes = total - MAX_OFFSET;
+
+          console.log(
+
+            `[Sync] Aviso: limite de ${MAX_OFFSET} vendas atingido no intervalo ${rangeLabel}. ${vendasRestantes} vendas podem ter ficado de fora.`,
+
+          );
+
+          sendProgressToUser(userId, {
+
+            type: 'sync_warning',
+
+            message: `Limite de 10.000 vendas por intervalo atingido (${rangeLabel}). Sincronizadas ${MAX_OFFSET} de ${total} vendas disponiveis.`,
+
+            errorCode: 'MAX_OFFSET_REACHED',
+
+          });
+
+        },
+
+      },
+
+    );
+
+
+
+    results.push(...chunkOrders);
+
+  }
+
+
+
+  console.log(`[Sync] Conta ${account.ml_user_id} - tipos de logistica encontrados:`);
+
+  const sortedStats = Array.from(logisticStats.entries()).sort((a, b) => b[1] - a[1]);
+
+  sortedStats.forEach(([type, count]) => {
+
+    console.log(`  ${type}: ${count} vendas`);
+
+  });
+
+
+
+  if (!logisticStats.has('cross_docking')) {
+
+    console.log(
+
+      `[Sync] Nenhuma venda com cross_docking (Coleta) foi encontrada na API do Mercado Livre para esta conta.`,
+
+    );
+
+  }
+
+
+
+  return { orders: results, expectedTotal };
+
+}
+
 
 
 
@@ -1625,7 +1902,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const orders: MeliOrderPayload[] = [];
   const errors: SyncError[] = [];
   const summaries: AccountSummary[] = [];
   let totalExpectedOrders = 0;
@@ -1705,7 +1981,6 @@ export async function POST(req: NextRequest) {
         const accountExpected = expectedTotal || accountOrders.length;
         totalExpectedOrders += accountExpected;
         totalFetchedOrders += accountOrders.length;
-        orders.push(...accountOrders);
 
         steps[accountIndex].expected = accountExpected;
         steps[accountIndex].fetched = accountOrders.length;
@@ -1836,7 +2111,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     syncedAt: new Date().toISOString(),
     accounts: summaries,
-    orders,
+    orders: [] as MeliOrderPayload[],
     errors,
     totals: { 
       expected: totalExpectedOrders, 
