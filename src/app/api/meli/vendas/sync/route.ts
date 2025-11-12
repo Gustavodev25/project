@@ -2110,9 +2110,33 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Sync] 📥 Iniciando salvamento de ${allOrders.length} vendas no banco...`);
 
+        // Enviar evento SSE informando que vai começar a salvar
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Preparando para salvar ${allOrders.length} vendas no banco de dados...`,
+          current: 0,
+          total: allOrders.length,
+          fetched: 0,
+          expected: allOrders.length,
+          accountId: current.id,
+          accountNickname: current.nickname || `Conta ${current.ml_user_id}`
+        });
+
         try {
           await processAndSave(allOrders, expectedTotal, 'completo');
           console.log(`[Sync] ✅ Salvamento concluído para conta ${current.ml_user_id}`);
+
+          // Enviar evento SSE confirmando conclusão do salvamento
+          sendProgressToUser(userId, {
+            type: "sync_progress",
+            message: `✅ Salvamento concluído para ${current.nickname || current.ml_user_id}`,
+            current: allOrders.length,
+            total: allOrders.length,
+            fetched: allOrders.length,
+            expected: allOrders.length,
+            accountId: current.id,
+            accountNickname: current.nickname || `Conta ${current.ml_user_id}`
+          });
         } catch (saveError) {
           const saveMsg = saveError instanceof Error ? saveError.message : 'Erro ao salvar vendas';
           console.error(`[Sync] ❌ Erro ao salvar vendas da conta ${current.ml_user_id}:`, saveError);

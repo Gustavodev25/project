@@ -219,6 +219,25 @@ export function useVendas(platform: string = "Mercado Livre") {
           body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
         console.log(`[useVendas] Resposta da API sync-async: status=${res.status} ${res.statusText}`);
+
+        // IMPORTANTE: NÃO marcar isSyncing como false aqui!
+        // O sync continua em background e o SSE vai notificar quando terminar
+        if (!res.ok) {
+          let message = `Erro ${res.status}`;
+          try {
+            const errJson = await res.json();
+            const apiMsg = (errJson?.errors && errJson.errors[0]?.message) || errJson?.error || errJson?.message;
+            if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
+          } catch {}
+          throw new Error(message);
+        }
+
+        // Apenas processar a resposta inicial (confirmação de início)
+        const payload = await res.json();
+        console.log(`[useVendas] Sincronização iniciada em background:`, payload);
+
+        // NÃO chamar setIsSyncing(false) aqui - só vai ser false quando SSE enviar sync_complete
+        return;
       } else if (platform === "Shopee") {
         const body: any = {};
         if (accountIds && accountIds.length > 0) {
@@ -285,42 +304,24 @@ export function useVendas(platform: string = "Mercado Livre") {
         setSyncProgress({ fetched: 0, expected: 0 });
         return;
       }
+      // NOTA: Código após todos os returns foi removido pois era inacessível
 
-      if (!res.ok) {
-        let message = `Erro ${res.status}`;
-        try {
-          const errJson = await res.json();
-          const apiMsg = (errJson?.errors && errJson.errors[0]?.message) || errJson?.error || errJson?.message;
-          if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
-        } catch {}
-        console.error(`[useVendas] Erro na resposta da API sync:`, message);
-        throw new Error(message);
-      }
-
-      console.log(`[useVendas] Parseando resposta JSON da API sync...`);
-      const payload: MeliOrdersResponse & { totals?: { expected?: number; fetched?: number; saved?: number } } = await res.json();
-      console.log(`[useVendas] Payload recebido:`, payload);
-      const realTotals = payload.totals || { fetched: 0, expected: 0 };
-      console.log(`[useVendas] Totais extraídos:`, realTotals);
-
-      setSyncProgress({
-        fetched: realTotals.fetched || 0,
-        expected: realTotals.expected || realTotals.fetched || 0
-      });
-      setLastSyncedAt(payload.syncedAt ?? null);
-      setSyncErrors(payload.errors ?? []);
-
-      console.log(`[useVendas] Sincronização concluída, recarregando vendas do banco...`);
-      // Carregar vendas atualizadas do banco (vai atualizar cache automaticamente)
-      await loadVendasFromDatabase();
-      console.log(`[useVendas] Vendas recarregadas do banco com sucesso`);
-      
     } catch (error) {
       console.error("Erro ao sincronizar vendas:", error);
       setSyncErrors([{ accountId: "", mlUserId: 0, message: error instanceof Error ? error.message : "Erro desconhecido" }]);
-    } finally {
+      // Em caso de erro, parar o syncing
       setIsSyncing(false);
       setIsTableLoading(false);
+    } finally {
+      // IMPORTANTE: Para Mercado Livre (async), não marcar como false aqui!
+      // O sync continua em background e só termina quando SSE enviar sync_complete
+      // Para outras plataformas, marcar como false normalmente
+      if (platform !== "Mercado Livre") {
+        setIsSyncing(false);
+        setIsTableLoading(false);
+      } else {
+        console.log(`[useVendas] Mercado Livre: mantendo isSyncing=true até receber sync_complete via SSE`);
+      }
     }
   };
 
