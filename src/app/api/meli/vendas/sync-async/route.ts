@@ -1,20 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // Apenas retorna imediatamente
+export const maxDuration = 10; // Apenas para retornar imediatamente
 
 /**
- * ENDPOINT DE SINCRONIZAÇÃO ASSÍNCRONA - VERSÃO SIMPLIFICADA
+ * ENDPOINT QUE APENAS VALIDA E RETORNA IMEDIATAMENTE
  *
- * PROBLEMA: No Vercel, não existe "background processing" real.
- * Fetch interno também está sujeito ao maxDuration.
- *
- * SOLUÇÃO: Este endpoint apenas retorna sucesso imediatamente.
- * O processamento real acontece no endpoint /sync que deve ser otimizado
- * para processar dentro do limite de 5 minutos.
- *
- * O frontend mantém isSyncing=true até receber sync_complete via SSE.
+ * O frontend deve chamar diretamente /sync e aguardar via SSE.
+ * Este endpoint só serve para compatibilidade, mas redireciona o frontend
+ * para usar /sync diretamente.
  */
 
 export async function POST(req: NextRequest) {
@@ -42,36 +38,32 @@ export async function POST(req: NextRequest) {
       console.error('[Sync Async] Erro ao parsear body:', error);
     }
 
-    console.log(`[Sync Async] Redirecionando para sincronização síncrona com SSE`);
-
-    // MUDANÇA: Chamar endpoint /sync diretamente e aguardar
-    // Isso garante que o processamento acontece dentro do maxDuration configurado
-    const syncUrl = new URL('/api/meli/vendas/sync', req.url);
-
-    const syncResponse = await fetch(syncUrl.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': `session=${sessionCookie}`
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!syncResponse.ok) {
-      const errorText = await syncResponse.text();
-      console.error('[Sync Async] Erro na sincronização:', errorText);
-      return NextResponse.json({
-        success: false,
-        message: `Erro na sincronização: ${syncResponse.status}`
-      }, { status: syncResponse.status });
+    // Buscar contas para validar
+    const accountsWhere: any = { userId: session.sub };
+    if (requestBody.accountIds && requestBody.accountIds.length > 0) {
+      accountsWhere.id = { in: requestBody.accountIds };
     }
 
-    const result = await syncResponse.json();
+    const accounts = await prisma.meliAccount.findMany({
+      where: accountsWhere,
+      select: { id: true, nickname: true, ml_user_id: true }
+    });
 
+    if (accounts.length === 0) {
+      return NextResponse.json({
+        success: false,
+        message: "Nenhuma conta encontrada"
+      }, { status: 404 });
+    }
+
+    console.log(`[Sync Async] Retornando imediatamente. Frontend deve monitorar SSE.`);
+
+    // Retornar imediatamente - frontend monitora via SSE
     return NextResponse.json({
       success: true,
-      message: 'Sincronização concluída',
-      ...result
+      message: `Use o endpoint /sync diretamente. Este endpoint está deprecated.`,
+      accounts: accounts,
+      redirectTo: '/api/meli/vendas/sync'
     });
 
   } catch (error) {
