@@ -568,6 +568,7 @@ async function fetchAllOrdersForAccount(
     }
 
     console.log(`[Sync] 📄 Página ${page + 1}: ${orders.length} vendas (${offset + orders.length}/${total})`);
+    console.log(`[Sync] Debug - offset atual: ${offset}, novo offset será: ${offset + orders.length}`);
 
     // Buscar detalhes
     const [orderDetailsResults, shipmentDetailsResults] = await Promise.all([
@@ -2085,16 +2086,38 @@ export async function POST(req: NextRequest) {
         const headers = { Authorization: `Bearer ${current.access_token}` };
 
         console.log(`[Sync] 🚀 Buscando TODAS as vendas da conta ${current.ml_user_id} (${current.nickname})`);
+        console.log(`[Sync] Debug - accountIndex: ${accountIndex}, userId: ${userId}`);
 
-        const { orders: allOrders, expectedTotal } = await fetchAllOrdersForAccount(
-          current,
-          headers,
-          userId,
-        );
+        let allOrders: MeliOrderPayload[] = [];
+        let expectedTotal = 0;
 
-        console.log(`[Sync] ✅ Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
+        try {
+          const result = await fetchAllOrdersForAccount(
+            current,
+            headers,
+            userId,
+          );
+          allOrders = result.orders;
+          expectedTotal = result.expectedTotal;
 
-        await processAndSave(allOrders, expectedTotal, 'completo');
+          console.log(`[Sync] ✅ Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
+          console.log(`[Sync] Debug - allOrders.length: ${allOrders.length}, expectedTotal: ${expectedTotal}`);
+        } catch (fetchError) {
+          const fetchMsg = fetchError instanceof Error ? fetchError.message : 'Erro ao buscar vendas';
+          console.error(`[Sync] ❌ Erro ao buscar vendas da conta ${current.ml_user_id}:`, fetchError);
+          throw new Error(`Falha ao buscar vendas: ${fetchMsg}`);
+        }
+
+        console.log(`[Sync] 📥 Iniciando salvamento de ${allOrders.length} vendas no banco...`);
+
+        try {
+          await processAndSave(allOrders, expectedTotal, 'completo');
+          console.log(`[Sync] ✅ Salvamento concluído para conta ${current.ml_user_id}`);
+        } catch (saveError) {
+          const saveMsg = saveError instanceof Error ? saveError.message : 'Erro ao salvar vendas';
+          console.error(`[Sync] ❌ Erro ao salvar vendas da conta ${current.ml_user_id}:`, saveError);
+          throw new Error(`Falha ao salvar vendas: ${saveMsg}`);
+        }
 
       } catch (error) {
         steps[accountIndex].currentStep = 'error';
