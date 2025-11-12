@@ -54,12 +54,16 @@ const HeaderVendasMercadolivre = ({
   const hasBeenSynced = lastSyncedAt !== null;
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  
+
   // Estados para sincronização automática
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
   const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Estados para contas novas sem vendas
+  const [newAccounts, setNewAccounts] = useState<any[]>([]);
+  const [isLoadingNewAccounts, setIsLoadingNewAccounts] = useState(true);
 
   // Hook para dropdown de informações
   const infoDropdown = useSmartDropdown<HTMLButtonElement>({
@@ -153,6 +157,32 @@ const HeaderVendasMercadolivre = ({
     loadNotifications();
   }, []);
 
+  // Carregar contas novas sem vendas ao montar componente
+  useEffect(() => {
+    const loadNewAccounts = async () => {
+      try {
+        setIsLoadingNewAccounts(true);
+        const res = await fetch("/api/meli/accounts/new", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          console.log("[VendasML] Contas novas carregadas:", data);
+          setNewAccounts(data.newAccounts || []);
+        }
+      } catch (error) {
+        console.error("[VendasML] Erro ao carregar contas novas:", error);
+        setNewAccounts([]);
+      } finally {
+        setIsLoadingNewAccounts(false);
+      }
+    };
+
+    loadNewAccounts();
+  }, []);
+
   // Função para alternar sincronização automática
   const handleToggleAutoSync = async () => {
     const newValue = !autoSyncEnabled;
@@ -213,7 +243,23 @@ const HeaderVendasMercadolivre = ({
     if (reloadVendas) {
       await reloadVendas();
     }
+    // Recarregar lista de contas novas
+    const res = await fetch("/api/meli/accounts/new", {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setNewAccounts(data.newAccounts || []);
+    }
     // Fechar modal (já acontece automaticamente no ModalSyncVendas)
+  };
+
+  // Função para sincronizar conta nova específica
+  const handleSyncNewAccount = async (accountId: string) => {
+    console.log("[VendasML] Sincronizando conta nova:", accountId);
+    // Chamar onSyncOrders com o ID da conta (sincronização completa do histórico)
+    await onSyncOrders([accountId]);
   };
 
   // Effect para sincronização automática
@@ -336,17 +382,17 @@ const HeaderVendasMercadolivre = ({
         </p>
       </div>
 
-      {/* Botão de Sincronização */}
-      <button
-          onClick={handleOpenSyncModal}
-          className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700"
-          disabled={isSyncing}
-        >
-        {/* Ícone */}
-        <div className="flex items-center relative">
-          {isSyncing ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
-          ) : (
+      {/* Container de botões */}
+      <div className="flex items-center gap-3">
+        {/* Botão de Sincronização Nova Conta */}
+        {!isLoadingNewAccounts && newAccounts.length > 0 && (
+          <button
+            onClick={() => handleSyncNewAccount(newAccounts[0].id)}
+            className="inline-flex items-center gap-2 rounded-md border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-green-100 hover:border-green-400 disabled:opacity-50 disabled:cursor-not-allowed text-green-700"
+            disabled={isSyncing}
+            title={`Sincronizar vendas da conta: ${newAccounts[0].nickname || `ID ${newAccounts[0].ml_user_id}`}`}
+          >
+            {/* Ícone de estrela/sparkle */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="16"
@@ -357,48 +403,88 @@ const HeaderVendasMercadolivre = ({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
             >
-              <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-              <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
-              <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>
-          )}
-          {/* Badge de vendas novas */}
-          {newOrdersCount > 0 && !isSyncing && (
-            <span className="absolute -top-2 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full animate-pulse">
-              {newOrdersCount > 99 ? '99+' : newOrdersCount}
+
+            {/* Texto */}
+            <span>
+              Sincronizar {newAccounts[0].nickname || "conta nova"}
             </span>
-          )}
-        </div>
-        
-        {/* Texto */}
-        <span>{isSyncing ? "Sincronizando..." : "Sincronizar vendas"}</span>
-        
-        {/* Avatares das contas conectadas */}
-        {contasConectadas.length > 0 && (
-          <div className="flex items-center -space-x-1">
-            {contasConectadas.slice(0, 3).map((conta) => (
-              <div
-                key={conta.id}
-                className="relative bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6"
-                title={conta.nickname || `Conta ${conta.ml_user_id}`}
+
+            {/* Badge de contador */}
+            {newAccounts.length > 1 && (
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-green-700 bg-green-200 rounded-full">
+                {newAccounts.length}
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Botão de Sincronização */}
+        <button
+          onClick={handleOpenSyncModal}
+          className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700"
+          disabled={isSyncing}
+        >
+          {/* Ícone */}
+          <div className="flex items-center relative">
+            {isSyncing ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-700"></div>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="icon icon-tabler icons-tabler-outline icon-tabler-shopping-bag"
               >
-                <span>
-                  {conta.nickname
-                    ? conta.nickname.charAt(0).toUpperCase()
-                    : conta.ml_user_id.toString().slice(-1)}
-                </span>
-              </div>
-            ))}
-            {contasConectadas.length > 3 && (
-              <div className="relative bg-gray-400 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6 ml-1">
-                <span>+{contasConectadas.length - 3}</span>
-              </div>
+                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
+                <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
+              </svg>
+            )}
+            {/* Badge de vendas novas */}
+            {newOrdersCount > 0 && !isSyncing && (
+              <span className="absolute -top-2 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full animate-pulse">
+                {newOrdersCount > 99 ? '99+' : newOrdersCount}
+              </span>
             )}
           </div>
-        )}
-      </button>
+
+          {/* Texto */}
+          <span>{isSyncing ? "Sincronizando..." : "Sincronizar vendas"}</span>
+
+          {/* Avatares das contas conectadas */}
+          {contasConectadas.length > 0 && (
+            <div className="flex items-center -space-x-1">
+              {contasConectadas.slice(0, 3).map((conta) => (
+                <div
+                  key={conta.id}
+                  className="relative bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6"
+                  title={conta.nickname || `Conta ${conta.ml_user_id}`}
+                >
+                  <span>
+                    {conta.nickname
+                      ? conta.nickname.charAt(0).toUpperCase()
+                      : conta.ml_user_id.toString().slice(-1)}
+                  </span>
+                </div>
+              ))}
+              {contasConectadas.length > 3 && (
+                <div className="relative bg-gray-400 text-white rounded-full flex items-center justify-center text-xs font-semibold w-6 h-6 ml-1">
+                  <span>+{contasConectadas.length - 3}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </button>
+      </div>
 
       {/* Modal de Sincronização */}
       <ModalSyncVendas
