@@ -207,8 +207,9 @@ export function useVendas(platform: string = "Mercado Livre") {
           body.orderIdsByAccount = orderIdsByAccount;
         }
 
-        console.log(`[useVendas] Chamando API /api/meli/vendas/sync com body:`, body);
-        res = await fetch("/api/meli/vendas/sync", {
+        console.log(`[useVendas] Chamando API /api/meli/vendas/sync-async com body:`, body);
+        // MUDANÇA: Usar endpoint assíncrono que retorna imediatamente
+        res = await fetch("/api/meli/vendas/sync-async", {
           method: "POST",
           cache: "no-store",
           credentials: "include",
@@ -217,7 +218,7 @@ export function useVendas(platform: string = "Mercado Livre") {
           },
           body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
-        console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
+        console.log(`[useVendas] Resposta da API sync-async: status=${res.status} ${res.statusText}`);
       } else if (platform === "Shopee") {
         const body: any = {};
         if (accountIds && accountIds.length > 0) {
