@@ -70,19 +70,73 @@ npx prisma generate
 npm run dev
 ```
 
-## 🚀 Deploy no Render
+## 🚀 Deploy no Vercel
 
-### Build Command
+### Passo a Passo
+
+1. **Conectar Repositório**
+   - Acesse [vercel.com](https://vercel.com)
+   - Clique em "New Project"
+   - Importe o repositório do GitHub
+
+2. **Configurar Variáveis de Ambiente**
+   - Na aba "Environment Variables", adicione todas as variáveis do `.env.local`
+   - Variáveis obrigatórias:
+     - `DATABASE_URL` - PostgreSQL (use Vercel Postgres ou Neon)
+     - `JWT_SECRET` - Chave secreta para autenticação
+     - `MELI_CLIENT_ID` / `MELI_CLIENT_SECRET` - Credenciais Mercado Livre
+     - `SHOPEE_CLIENT_ID` / `SHOPEE_CLIENT_SECRET` - Credenciais Shopee
+     - `BLING_CLIENT_ID` / `BLING_CLIENT_SECRET` - Credenciais Bling
+     - `CRON_SECRET` - Segredo para cron jobs
+
+3. **Configurar Banco de Dados**
+   - Opção 1: Usar Vercel Postgres (recomendado)
+   - Opção 2: Usar [Neon](https://neon.tech) (gratuito)
+   - Após criar o banco, copie a `DATABASE_URL`
+
+4. **Deploy Automático**
+   - Vercel detecta Next.js automaticamente
+   - Build Command: `npm run build`
+   - Output Directory: `.next`
+   - Install Command: `npm install`
+
+5. **Executar Migrações**
+   ```bash
+   # Localmente, após configurar DATABASE_URL de produção
+   npx prisma migrate deploy
+   ```
+
+### Configurações Importantes
+
+#### Timeouts (maxDuration)
+O projeto já está configurado com `maxDuration: 300` (5 minutos) nas rotas de sincronização:
+- `/api/meli/vendas/sync/route.ts`
+- `/api/shopee/vendas/sync/route.ts`
+
+Isso garante tempo suficiente para sincronizar TODAS as vendas.
+
+#### Sincronização Completa do Mercado Livre
+A nova implementação busca **TODAS as vendas sem limite**:
+- Busca até 9.950 vendas por paginação direta
+- Automaticamente divide por períodos mensais se necessário
+- Respeita limite de offset da API (evita erro 400)
+- Progresso em tempo real via SSE
+
+### Deploy Alternativo no Render
+
+Se preferir usar Render ao invés de Vercel:
+
+#### Build Command
 ```bash
 npm run build
 ```
 
-### Start Command
+#### Start Command
 ```bash
 npm start
 ```
 
-### Banco de Dados
+#### Banco de Dados
 - Use PostgreSQL no Render
 - Configure a variável `DATABASE_URL`
 - Execute as migrações após o deploy
