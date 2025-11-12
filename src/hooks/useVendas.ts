@@ -99,13 +99,42 @@ export function useVendas(platform: string = "Mercado Livre") {
 
   // Ref para rastrear se sync_complete já foi processado
   const syncCompleteProcessedRef = useRef(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Resetar flag quando começar nova sincronização
   useEffect(() => {
     if (isSyncing) {
       syncCompleteProcessedRef.current = false;
+
+      // Timeout de segurança: se após 10 minutos não receber sync_complete, forçar conclusão
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+
+      syncTimeoutRef.current = setTimeout(() => {
+        if (isSyncing && platform === "Mercado Livre") {
+          console.warn('[useVendas] ⚠️ Timeout de sincronização atingido (10min) - forçando conclusão');
+          setIsSyncing(false);
+          setIsTableLoading(false);
+          loadVendasFromDatabase().catch(err => {
+            console.error('[useVendas] Erro ao recarregar vendas após timeout:', err);
+          });
+        }
+      }, 10 * 60 * 1000); // 10 minutos
+    } else {
+      // Limpar timeout quando sync terminar normalmente
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
     }
-  }, [isSyncing]);
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, [isSyncing, platform]);
 
   // Atualizar progresso quando receber eventos SSE (Mercado Livre e Shopee)
   useEffect(() => {
@@ -177,23 +206,23 @@ export function useVendas(platform: string = "Mercado Livre") {
       setSyncProgress({ fetched: 0, expected: 0 });
       setSyncErrors([]);
 
-      // SSE já deve estar conectado pelo botão (com delay de 500ms)
-      // Apenas garantir que está conectado
+      // IMPORTANTE: Sempre conectar SSE para Mercado Livre
       if (platform === "Mercado Livre" || platform === "Shopee") {
-        console.log(`[useVendas] Status SSE antes de conectar: isConnected=${isConnected}`);
+        console.log(`[useVendas] 🔌 Status SSE antes de conectar: isConnected=${isConnected}`);
         if (!isConnected) {
-          console.log('[useVendas] SSE não está conectado, conectando agora...');
+          console.log('[useVendas] 🔌 SSE não está conectado, conectando agora...');
           try {
             connect();
-            console.log('[useVendas] Função connect() chamada, aguardando 500ms...');
-            // Aguardar conexão estabelecer
-            await new Promise(resolve => setTimeout(resolve, 500));
-            console.log('[useVendas] Aguardo de 500ms concluído');
+            console.log('[useVendas] 🔌 Função connect() chamada, aguardando 1000ms...');
+            // Aguardar conexão estabelecer (aumentado para 1s)
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log('[useVendas] 🔌 Aguardo concluído, verificando conexão...');
+            console.log('[useVendas] 🔌 Status SSE após aguardar: isConnected=', isConnected);
           } catch (error) {
-            console.warn('[useVendas] SSE não disponível, continuando sem progresso em tempo real:', error);
+            console.warn('[useVendas] ⚠️ SSE não disponível, continuando sem progresso em tempo real:', error);
           }
         } else {
-          console.log('[useVendas] SSE já está conectado ✓');
+          console.log('[useVendas] ✅ SSE já está conectado');
         }
       }
 
@@ -236,7 +265,14 @@ export function useVendas(platform: string = "Mercado Livre") {
         const payload = await res.json();
         console.log(`[useVendas] Sincronização iniciada em background:`, payload);
 
+        // Enviar progresso inicial para mostrar que começou
+        setSyncProgress({
+          fetched: 0,
+          expected: payload.accounts?.length || 0
+        });
+
         // NÃO chamar setIsSyncing(false) aqui - só vai ser false quando SSE enviar sync_complete
+        console.log(`[useVendas] ⚠️ Aguardando eventos SSE... isSyncing permanece true`);
         return;
       } else if (platform === "Shopee") {
         const body: any = {};
