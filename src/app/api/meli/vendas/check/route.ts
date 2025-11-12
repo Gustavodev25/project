@@ -47,6 +47,7 @@ async function checkNewOrdersForAccount(
     select: { orderId: true }
   });
   const existingIds = new Set(existingOrderIds.map(v => v.orderId));
+  console.log(`[meli][check] Conta ${account.ml_user_id} (${account.nickname}): ${existingIds.size} vendas já existem no banco`);
 
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
@@ -99,10 +100,10 @@ async function checkNewOrdersForAccount(
         const itemData = typeof firstItem?.item === "object" && firstItem.item !== null
           ? firstItem.item
           : {};
-        
-        const title = itemData?.title || 
+
+        const title = itemData?.title ||
           orderItems.find((item: any) => item?.item?.title)?.item?.title ||
-          order.title || 
+          order.title ||
           "Pedido";
 
         results.push({
@@ -113,8 +114,12 @@ async function checkNewOrdersForAccount(
           accountNickname: account.nickname,
           accountId: account.id
         });
+
+        console.log(`[meli][check] ✅ Venda nova detectada: ${orderId} - ${title.substring(0, 40)}...`);
       }
     }
+
+    console.log(`[meli][check] Página concluída: ${results.length} vendas novas na página, ${orders.length} vendas totais na página`);
 
     const fetched = orders.length;
     offset += fetched;
@@ -125,6 +130,8 @@ async function checkNewOrdersForAccount(
     // Parar apenas se não há mais vendas ou atingiu o total
     if (fetched === 0 || offset >= total) break;
   }
+
+  console.log(`[meli][check] 🎯 RESULTADO FINAL - Conta ${account.ml_user_id} (${account.nickname}): ${results.length} vendas novas de ${expectedTotal} vendas das últimas 48h`);
 
   return { newOrders: results, expectedTotal };
 }
@@ -223,13 +230,21 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  console.log(`[meli][check] ========================================`);
+  console.log(`[meli][check] 📊 RESUMO FINAL DA VERIFICAÇÃO`);
+  console.log(`[meli][check] Total de contas verificadas: ${accounts.length}`);
+  console.log(`[meli][check] Total de vendas novas encontradas: ${newOrders.length}`);
+  console.log(`[meli][check] Total de erros: ${errors.length}`);
+  console.log(`[meli][check] Vendas novas por conta:`, newOrdersByAccount);
+  console.log(`[meli][check] ========================================`);
+
   return NextResponse.json({
     checkedAt: new Date().toISOString(),
     accounts: summaries,
     newOrders,
     errors,
-    totals: { 
-      expected: totalExpectedOrders, 
+    totals: {
+      expected: totalExpectedOrders,
       new: newOrders.length
     },
     newOrdersByAccount,

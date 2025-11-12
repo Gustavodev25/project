@@ -33,15 +33,18 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
   const shouldReconnectRef = useRef(false);
 
   const connect = useCallback(() => {
+    console.log('[SSE useVendasSyncProgress] 🔌 Função connect() chamada');
+
     if (eventSourceRef.current) {
-      console.log('[SSE] Fechando conexão existente antes de criar nova');
+      console.log('[SSE useVendasSyncProgress] Fechando conexão existente antes de criar nova');
       eventSourceRef.current.close();
     }
 
     // Enable reconnection flag
     shouldReconnectRef.current = true;
+    console.log('[SSE useVendasSyncProgress] Flag shouldReconnect ativada');
 
-    console.log('[SSE] Criando nova conexão EventSource');
+    console.log('[SSE useVendasSyncProgress] Criando nova conexão EventSource para /api/meli/vendas/sync-progress');
 
     let eventSource: EventSource;
     try {
@@ -49,40 +52,56 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
         withCredentials: true
       });
       eventSourceRef.current = eventSource;
+      console.log('[SSE useVendasSyncProgress] EventSource criado com sucesso, readyState:', eventSource.readyState);
     } catch (error) {
-      console.error('[SSE] Erro ao criar EventSource:', error);
+      console.error('[SSE useVendasSyncProgress] ❌ Erro ao criar EventSource:', error);
       setIsConnected(false);
       return;
     }
 
     eventSource.onopen = () => {
+      console.log('[SSE useVendasSyncProgress] ✅ onopen disparado - conexão estabelecida!');
       setIsConnected(true);
       reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful connection
-      console.log('[SSE] Conexão estabelecida para progresso de vendas');
+      console.log('[SSE useVendasSyncProgress] Estado atualizado: isConnected=true, reconnectAttempts=0');
     };
 
     eventSource.onmessage = (event) => {
+      console.log('[SSE useVendasSyncProgress] 📨 Mensagem recebida:', event.data);
       try {
         const progressData: VendasSyncProgress = JSON.parse(event.data);
+        console.log('[SSE useVendasSyncProgress] Dados parseados:', progressData);
         setProgress(progressData);
-        
+
         // Log para debug
         if (progressData.type === "sync_progress") {
-          console.log('[SSE] Progresso recebido:', progressData.message);
+          console.log('[SSE useVendasSyncProgress] Progresso recebido:', progressData.message);
+        } else {
+          console.log('[SSE useVendasSyncProgress] Evento recebido:', progressData.type);
         }
       } catch (error) {
-        console.error('[SSE] Erro ao processar progresso:', error);
+        console.error('[SSE useVendasSyncProgress] ❌ Erro ao processar progresso:', error);
       }
     };
 
     eventSource.onerror = (error) => {
+      console.log('[SSE useVendasSyncProgress] ⚠️ onerror disparado');
+      console.log('[SSE useVendasSyncProgress] Objeto de erro:', error);
+
       // EventSource error objects are often empty, check readyState for more info
       const readyState = eventSource.readyState;
       const stateNames = ['CONNECTING', 'OPEN', 'CLOSED'];
 
+      console.log('[SSE useVendasSyncProgress] Estado da conexão:', {
+        readyState: stateNames[readyState] || readyState,
+        readyStateNumero: readyState,
+        shouldReconnect: shouldReconnectRef.current,
+        reconnectAttempt: reconnectAttemptsRef.current
+      });
+
       // Só loga erro se não for uma desconexão normal (quando shouldReconnect é false)
       if (shouldReconnectRef.current) {
-        console.warn('[SSE] Erro na conexão:', {
+        console.warn('[SSE useVendasSyncProgress] Erro na conexão:', {
           readyState: stateNames[readyState] || readyState,
           tentativa: reconnectAttemptsRef.current + 1
         });
@@ -90,6 +109,7 @@ export function useVendasSyncProgress(): UseVendasSyncProgressReturn {
 
       // Only disconnect if the connection is closed
       if (readyState === EventSource.CLOSED) {
+        console.log('[SSE useVendasSyncProgress] Conexão FECHADA, atualizando estado');
         setIsConnected(false);
 
         // Try to reconnect if enabled and within retry limit

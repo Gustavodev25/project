@@ -171,6 +171,7 @@ export function useVendas(platform: string = "Mercado Livre") {
   const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>) => {
     try {
       console.log(`[useVendas] 🚀 Iniciando sincronização de vendas para ${platform}`);
+      console.log(`[useVendas] Parâmetros recebidos:`, { accountIds, orderIdsByAccount });
       setIsSyncing(true);
       setIsTableLoading(true);
       setSyncProgress({ fetched: 0, expected: 0 });
@@ -179,17 +180,20 @@ export function useVendas(platform: string = "Mercado Livre") {
       // SSE já deve estar conectado pelo botão (com delay de 500ms)
       // Apenas garantir que está conectado
       if (platform === "Mercado Livre" || platform === "Shopee") {
+        console.log(`[useVendas] Status SSE antes de conectar: isConnected=${isConnected}`);
         if (!isConnected) {
-          console.log('[Sync] SSE não está conectado, conectando agora...');
+          console.log('[useVendas] SSE não está conectado, conectando agora...');
           try {
             connect();
+            console.log('[useVendas] Função connect() chamada, aguardando 500ms...');
             // Aguardar conexão estabelecer
             await new Promise(resolve => setTimeout(resolve, 500));
+            console.log('[useVendas] Aguardo de 500ms concluído');
           } catch (error) {
-            console.warn('[Sync] SSE não disponível, continuando sem progresso em tempo real:', error);
+            console.warn('[useVendas] SSE não disponível, continuando sem progresso em tempo real:', error);
           }
         } else {
-          console.log('[Sync] SSE já está conectado ✓');
+          console.log('[useVendas] SSE já está conectado ✓');
         }
       }
 
@@ -202,8 +206,9 @@ export function useVendas(platform: string = "Mercado Livre") {
         if (orderIdsByAccount) {
           body.orderIdsByAccount = orderIdsByAccount;
         }
-        
-        res = await fetch("/api/meli/vendas/sync", { 
+
+        console.log(`[useVendas] Chamando API /api/meli/vendas/sync com body:`, body);
+        res = await fetch("/api/meli/vendas/sync", {
           method: "POST",
           cache: "no-store",
           credentials: "include",
@@ -212,6 +217,7 @@ export function useVendas(platform: string = "Mercado Livre") {
           },
           body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
+        console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
       } else if (platform === "Shopee") {
         const body: any = {};
         if (accountIds && accountIds.length > 0) {
@@ -286,12 +292,16 @@ export function useVendas(platform: string = "Mercado Livre") {
           const apiMsg = (errJson?.errors && errJson.errors[0]?.message) || errJson?.error || errJson?.message;
           if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
         } catch {}
+        console.error(`[useVendas] Erro na resposta da API sync:`, message);
         throw new Error(message);
       }
 
+      console.log(`[useVendas] Parseando resposta JSON da API sync...`);
       const payload: MeliOrdersResponse & { totals?: { expected?: number; fetched?: number; saved?: number } } = await res.json();
+      console.log(`[useVendas] Payload recebido:`, payload);
       const realTotals = payload.totals || { fetched: 0, expected: 0 };
-      
+      console.log(`[useVendas] Totais extraídos:`, realTotals);
+
       setSyncProgress({
         fetched: realTotals.fetched || 0,
         expected: realTotals.expected || realTotals.fetched || 0
@@ -299,8 +309,10 @@ export function useVendas(platform: string = "Mercado Livre") {
       setLastSyncedAt(payload.syncedAt ?? null);
       setSyncErrors(payload.errors ?? []);
 
+      console.log(`[useVendas] Sincronização concluída, recarregando vendas do banco...`);
       // Carregar vendas atualizadas do banco (vai atualizar cache automaticamente)
       await loadVendasFromDatabase();
+      console.log(`[useVendas] Vendas recarregadas do banco com sucesso`);
       
     } catch (error) {
       console.error("Erro ao sincronizar vendas:", error);

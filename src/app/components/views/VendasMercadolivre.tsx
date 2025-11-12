@@ -74,19 +74,37 @@ const HeaderVendasMercadolivre = ({
   // Função para verificar novas vendas (para auto-sync)
   const handleCheckNewOrders = async (silent = false) => {
     try {
-      const res = await fetch("/api/meli/vendas/check", { 
+      console.log("[VendasML] Verificando vendas novas...");
+      const res = await fetch("/api/meli/vendas/check", {
         cache: "no-store",
         credentials: "include"
       });
       if (!res.ok) {
         throw new Error(`Erro ${res.status}`);
       }
-      
+
       const result = await res.json();
+      console.log("[VendasML] Resultado da verificação:", result);
       const newCount = result.totals?.new || 0;
+      console.log("[VendasML] Vendas novas encontradas:", newCount);
       setNewOrdersCount(newCount);
+
+      if (!silent && newCount > 0) {
+        toast({
+          title: "Vendas novas encontradas!",
+          description: `${newCount} venda${newCount > 1 ? 's' : ''} nova${newCount > 1 ? 's' : ''} disponível${newCount > 1 ? 'eis' : ''} para sincronizar.`,
+          variant: "success"
+        });
+      }
     } catch (error) {
-      console.error("Erro ao verificar vendas:", error);
+      console.error("[VendasML] Erro ao verificar vendas:", error);
+      if (!silent) {
+        toast({
+          title: "Erro ao verificar vendas",
+          description: error instanceof Error ? error.message : "Erro desconhecido",
+          variant: "destructive"
+        });
+      }
     }
   };
 
@@ -320,10 +338,10 @@ const HeaderVendasMercadolivre = ({
 
       {/* Botão de Sincronização */}
       <button
-        onClick={handleOpenSyncModal}
-        className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700"
-        disabled={isSyncing}
-      >
+          onClick={handleOpenSyncModal}
+          className="inline-flex items-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700"
+          disabled={isSyncing}
+        >
         {/* Ícone */}
         <div className="flex items-center relative">
           {isSyncing ? (

@@ -13,7 +13,7 @@ import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutos de tempo de execução máximo (limite do plano hobby)
-const MAX_VENDAS_POR_CONTA = 5000; // Limite de 5.000 vendas por conta para melhor performance
+const MAX_VENDAS_POR_CONTA = 10000; // Limite de 10.000 vendas por conta
 
 // Tipos auxiliares
 type SyncError = { accountId: string; shopId: string; message: string; };
@@ -165,6 +165,9 @@ async function fetchAndEnrichShopeeOrders(
     results.forEach(res => {
       if (res.status === 'fulfilled') {
         enrichedOrders.push(res.value);
+      } else {
+        // Se Promise.allSettled retornar rejected, ainda assim adicionar o pedido sem escrow
+        console.warn(`[Shopee Sync] Pedido rejeitado ao buscar escrow, adicionando sem detalhes de pagamento`);
       }
     });
     // Delay removido para aumentar velocidade
@@ -181,13 +184,13 @@ async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string;
   let windowStart = since;
 
   while (windowStart < now) {
-    // Verificar se atingiu o limite de 5.000 vendas
+    // Verificar se atingiu o limite de 10.000 vendas
     if (allOrders.length >= MAX_VENDAS_POR_CONTA) {
       console.log(`[Shopee Sync] Limite de ${MAX_VENDAS_POR_CONTA} vendas atingido para conta ${account.shop_id}. Parando busca.`);
 
       sendProgressToUser(userId, {
         type: "sync_warning",
-        message: `Limite de 5.000 vendas por conta atingido para loja ${account.shop_id}. As vendas mais recentes foram priorizadas.`,
+        message: `Limite de 10.000 vendas por conta atingido para loja ${account.shop_id}. As vendas mais recentes foram priorizadas.`,
         errorCode: "MAX_VENDAS_REACHED"
       });
 
@@ -217,7 +220,21 @@ async function fetchAllShopeeOrdersSince(account: { id: string; shop_id: string;
         break;
       }
     } catch (error) {
-      console.error(`[Shopee Sync] Erro ao buscar janela para conta ${account.shop_id}:`, error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[Shopee Sync] Erro ao buscar janela para conta ${account.shop_id}:`, errorMsg);
+
+      // Tentar enviar aviso, mas não falhar se SSE falhar
+      try {
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro ao buscar vendas da janela ${windowStart.toISOString().split('T')[0]} para loja ${account.shop_id}. Continuando com próxima janela...`,
+          errorCode: "WINDOW_FETCH_ERROR"
+        });
+      } catch (sseError) {
+        console.warn(`[Shopee Sync] Erro ao enviar aviso SSE (não crítico):`, sseError);
+      }
+
+      // Continuar com a próxima janela mesmo se houver erro
     }
 
     windowStart = new Date(windowEnd.getTime() + 1);
@@ -566,49 +583,71 @@ export async function POST(req: NextRequest) {
         const SAVE_BATCH_SIZE = 100;
         for (let i = 0; i < vendaRecords.length; i += SAVE_BATCH_SIZE) {
           const batch = vendaRecords.slice(i, i + SAVE_BATCH_SIZE);
-          await Promise.all(
+
+          // Usar Promise.allSettled para garantir que erros parciais não parem tudo
+          const results = await Promise.allSettled(
             batch.map(async (record, batchIndex) => {
-              await prisma.shopeeVenda.upsert({
-                where: { orderId: record.orderId },
-                update: {
-                  dataVenda: record.dataVenda,
-                  status: record.status,
-                  conta: record.conta,
-                  valorTotal: record.valorTotal,
-                  quantidade: record.quantidade,
-                  unitario: record.unitario,
-                  taxaPlataforma: record.taxaPlataforma,
-                  frete: record.frete,
-                  margemContribuicao: record.margemContribuicao,
-                  isMargemReal: record.isMargemReal,
-                  titulo: record.titulo,
-                  sku: record.sku,
-                  comprador: record.comprador,
-                  shippingId: record.shippingId,
-                  shippingStatus: record.shippingStatus,
-                  plataforma: record.plataforma,
-                  canal: record.canal,
-                  rawData: record.rawData,
-                  paymentDetails: record.paymentDetails,
-                  shipmentDetails: record.shipmentDetails,
-                  atualizadoEm: record.atualizadoEm,
-                },
-                create: record,
-              });
-              
-              // Enviar progresso em tempo real após cada venda salva
-              const currentProgress = i + batchIndex + 1;
-              sendProgressToUser(userId, {
-                type: "sync_progress",
-                message: `Salvando no banco de dados: ${currentProgress} de ${vendaRecords.length} vendas`,
-                current: currentProgress,
-                total: vendaRecords.length,
-                fetched: currentProgress,
-                expected: vendaRecords.length
-              });
+              try {
+                await prisma.shopeeVenda.upsert({
+                  where: { orderId: record.orderId },
+                  update: {
+                    dataVenda: record.dataVenda,
+                    status: record.status,
+                    conta: record.conta,
+                    valorTotal: record.valorTotal,
+                    quantidade: record.quantidade,
+                    unitario: record.unitario,
+                    taxaPlataforma: record.taxaPlataforma,
+                    frete: record.frete,
+                    margemContribuicao: record.margemContribuicao,
+                    isMargemReal: record.isMargemReal,
+                    titulo: record.titulo,
+                    sku: record.sku,
+                    comprador: record.comprador,
+                    shippingId: record.shippingId,
+                    shippingStatus: record.shippingStatus,
+                    plataforma: record.plataforma,
+                    canal: record.canal,
+                    rawData: record.rawData,
+                    paymentDetails: record.paymentDetails,
+                    shipmentDetails: record.shipmentDetails,
+                    atualizadoEm: record.atualizadoEm,
+                  },
+                  create: record,
+                });
+
+                // Enviar progresso em tempo real após cada venda salva
+                const currentProgress = i + batchIndex + 1;
+                try {
+                  sendProgressToUser(userId, {
+                    type: "sync_progress",
+                    message: `Salvando no banco de dados: ${currentProgress} de ${vendaRecords.length} vendas`,
+                    current: currentProgress,
+                    total: vendaRecords.length,
+                    fetched: currentProgress,
+                    expected: vendaRecords.length
+                  });
+                } catch (sseError) {
+                  console.warn(`[Shopee Sync] Erro ao enviar progresso SSE (não crítico):`, sseError);
+                }
+
+                return { success: true, orderId: record.orderId };
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.error(`[Shopee Sync] Erro ao salvar venda ${record.orderId}:`, errorMsg);
+                return { success: false, orderId: record.orderId, error: errorMsg };
+              }
             })
           );
-          totalSaved += batch.length;
+
+          // Contar sucessos
+          const successes = results.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+          totalSaved += successes;
+
+          const failures = batch.length - successes;
+          if (failures > 0) {
+            console.warn(`[Shopee Sync] ${failures} vendas falharam ao salvar no lote ${Math.floor(i / SAVE_BATCH_SIZE) + 1}`);
+          }
         }
 
       } catch (error) {

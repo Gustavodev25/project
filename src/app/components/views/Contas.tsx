@@ -56,7 +56,7 @@ export default function Contas() {
         title: "Conta Mercado Livre conectada!",
         message: `Sua conta ${accountName} foi conectada com sucesso. Agora você pode sincronizar suas vendas.`,
         actionLabel: "Sincronizar Vendas",
-        actionHref: "/vendas/geral",
+        actionHref: "/vendas/mercado-livre",
         duration: 8000,
       });
 
@@ -94,7 +94,7 @@ export default function Contas() {
         title: "Conta Shopee conectada!",
         message: `${accountLabel} foi conectada com sucesso. Agora você pode sincronizar suas vendas.`,
         actionLabel: "Sincronizar Vendas",
-        actionHref: "/vendas/geral",
+        actionHref: "/vendas/shopee",
         duration: 8000,
       });
 

@@ -589,33 +589,61 @@ export default function ModalSyncVendas({
             {step === "select" && (
               <div className="space-y-4">
                 {/* Resultado da verificação */}
-                <div className="rounded-lg bg-blue-50 p-4 text-center">
-                  <div className="flex items-center justify-center gap-2 mb-1">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="text-blue-600"
-                    >
-                      <path
-                        stroke="none"
-                        d="M0 0h24v24H0z"
+                <div className="rounded-lg bg-blue-50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
                         fill="none"
-                      />
-                      <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
-                      <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
-                    </svg>
-                    <span className="text-2xl font-bold text-blue-900">
-                      {totalNew}
-                    </span>
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="text-blue-600"
+                      >
+                        <path
+                          stroke="none"
+                          d="M0 0h24v24H0z"
+                          fill="none"
+                        />
+                        <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
+                        <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
+                      </svg>
+                      <span className="text-2xl font-bold text-blue-900">
+                        {totalNew}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setStep("verify");
+                        handleVerify();
+                      }}
+                      disabled={isChecking}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-white hover:bg-blue-100 border border-blue-300 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Reverificar vendas novas"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className={isChecking ? "animate-spin" : ""}
+                      >
+                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                        <path d="M21 3v5h-5" />
+                      </svg>
+                      Reverificar
+                    </button>
                   </div>
-                  <p className="text-sm font-medium text-blue-700">
+                  <p className="text-sm font-medium text-blue-700 text-center">
                     {totalNew === 0
                       ? "Nenhuma venda nova encontrada"
                       : totalNew === 1
