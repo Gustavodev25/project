@@ -1341,11 +1341,11 @@ async function buildSkuCache(
   return cache;
 }
 
-// Função para salvar vendas em lotes
+// Função para salvar vendas em lotes - OTIMIZADA
 async function saveVendasBatch(
   orders: MeliOrderPayload[],
   userId: string,
-  batchSize: number = 10
+  batchSize: number = 50 // AUMENTADO de 10 para 50
 ): Promise<{ saved: number; errors: number }> {
   let saved = 0;
   let errors = 0;
@@ -1353,7 +1353,7 @@ async function saveVendasBatch(
   try {
     const skuCache = await buildSkuCache(orders, userId);
 
-    // Processar em lotes
+    // Processar em lotes maiores para ser mais rápido
     for (let i = 0; i < orders.length; i += batchSize) {
       const batch = orders.slice(i, i + batchSize);
 
@@ -1367,22 +1367,6 @@ async function saveVendasBatch(
             errors++;
           }
 
-          // Enviar progresso em tempo real após cada venda salva
-          const currentProgress = i + batchIndex + 1;
-          try {
-            sendProgressToUser(userId, {
-              type: "sync_progress",
-              message: `Salvando no banco de dados: ${currentProgress} de ${orders.length} vendas`,
-              current: currentProgress,
-              total: orders.length,
-              fetched: currentProgress,
-              expected: orders.length
-            });
-          } catch (sseError) {
-            // Ignorar erros de SSE - não são críticos
-            console.warn(`[Sync] Erro ao enviar progresso SSE (não crítico):`, sseError);
-          }
-
           return { success: result, orderId: (order.order as any)?.id || 'UNKNOWN' };
         } catch (error) {
           errors++;
@@ -1394,10 +1378,23 @@ async function saveVendasBatch(
 
       await Promise.allSettled(batchPromises);
 
-      // Pequena pausa entre lotes para não sobrecarregar o banco
-      if (i + batchSize < orders.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+      // Enviar progresso SSE apenas a cada lote (não a cada venda) para reduzir overhead
+      const currentProgress = Math.min(i + batchSize, orders.length);
+      try {
+        sendProgressToUser(userId, {
+          type: "sync_progress",
+          message: `Salvando no banco de dados: ${currentProgress} de ${orders.length} vendas`,
+          current: currentProgress,
+          total: orders.length,
+          fetched: currentProgress,
+          expected: orders.length
+        });
+      } catch (sseError) {
+        // Ignorar erros de SSE - não são críticos
+        console.warn(`[Sync] Erro ao enviar progresso SSE (não crítico):`, sseError);
       }
+
+      // SEM DELAY - Processar o mais rápido possível
     }
   } catch (error) {
     console.error(`[Sync] Erro crítico em saveVendasBatch:`, error);

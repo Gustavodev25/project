@@ -1,88 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // Apenas para iniciar o processo
+export const maxDuration = 60; // Apenas retorna imediatamente
 
 /**
- * ENDPOINT DE SINCRONIZAÇÃO ASSÍNCRONA
+ * ENDPOINT DE SINCRONIZAÇÃO ASSÍNCRONA - VERSÃO SIMPLIFICADA
  *
- * Este endpoint apenas INICIA a sincronização e retorna imediatamente.
- * A sincronização continua em background e envia progresso via SSE.
+ * PROBLEMA: No Vercel, não existe "background processing" real.
+ * Fetch interno também está sujeito ao maxDuration.
  *
- * Isso resolve o problema de timeout do Vercel.
+ * SOLUÇÃO: Este endpoint apenas retorna sucesso imediatamente.
+ * O processamento real acontece no endpoint /sync que deve ser otimizado
+ * para processar dentro do limite de 5 minutos.
+ *
+ * O frontend mantém isSyncing=true até receber sync_complete via SSE.
  */
 
 export async function POST(req: NextRequest) {
-  const sessionCookie = req.cookies.get("session")?.value;
-  let session;
   try {
-    session = await assertSessionToken(sessionCookie);
-  } catch {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
-
-  const userId = session.sub;
-
-  // Ler body para contas selecionadas
-  let requestBody: {
-    accountIds?: string[];
-  } = {};
-
-  try {
-    const bodyText = await req.text();
-    if (bodyText) {
-      requestBody = JSON.parse(bodyText);
+    const sessionCookie = req.cookies.get("session")?.value;
+    let session;
+    try {
+      session = await assertSessionToken(sessionCookie);
+    } catch {
+      return new NextResponse("Unauthorized", { status: 401 });
     }
+
+    // Ler body para contas selecionadas
+    let requestBody: {
+      accountIds?: string[];
+      orderIdsByAccount?: Record<string, string[]>;
+    } = {};
+
+    try {
+      const bodyText = await req.text();
+      if (bodyText) {
+        requestBody = JSON.parse(bodyText);
+      }
+    } catch (error) {
+      console.error('[Sync Async] Erro ao parsear body:', error);
+    }
+
+    console.log(`[Sync Async] Redirecionando para sincronização síncrona com SSE`);
+
+    // MUDANÇA: Chamar endpoint /sync diretamente e aguardar
+    // Isso garante que o processamento acontece dentro do maxDuration configurado
+    const syncUrl = new URL('/api/meli/vendas/sync', req.url);
+
+    const syncResponse = await fetch(syncUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': `session=${sessionCookie}`
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!syncResponse.ok) {
+      const errorText = await syncResponse.text();
+      console.error('[Sync Async] Erro na sincronização:', errorText);
+      return NextResponse.json({
+        success: false,
+        message: `Erro na sincronização: ${syncResponse.status}`
+      }, { status: syncResponse.status });
+    }
+
+    const result = await syncResponse.json();
+
+    return NextResponse.json({
+      success: true,
+      message: 'Sincronização concluída',
+      ...result
+    });
+
   } catch (error) {
-    console.error('[Sync Async] Erro ao parsear body:', error);
-  }
-
-  // Buscar contas
-  const accountsWhere: any = { userId: session.sub };
-  if (requestBody.accountIds && requestBody.accountIds.length > 0) {
-    accountsWhere.id = { in: requestBody.accountIds };
-  }
-
-  const accounts = await prisma.meliAccount.findMany({
-    where: accountsWhere,
-    orderBy: { created_at: "desc" },
-  });
-
-  if (accounts.length === 0) {
+    console.error('[Sync Async] Erro:', error);
     return NextResponse.json({
       success: false,
-      message: "Nenhuma conta encontrada"
-    });
+      message: error instanceof Error ? error.message : 'Erro desconhecido'
+    }, { status: 500 });
   }
-
-  // IMPORTANTE: Iniciar sincronização em background usando fetch interno
-  // Isso permite que a sincronização continue mesmo após retornar a resposta
-  const syncUrl = new URL('/api/meli/vendas/sync', req.url);
-
-  // Fazer chamada assíncrona (não aguardar)
-  fetch(syncUrl.toString(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cookie': `session=${sessionCookie}`
-    },
-    body: JSON.stringify(requestBody),
-  }).catch(error => {
-    console.error('[Sync Async] Erro ao iniciar sincronização:', error);
-  });
-
-  console.log(`[Sync Async] Sincronização iniciada em background para ${accounts.length} conta(s)`);
-
-  // Retornar imediatamente
-  return NextResponse.json({
-    success: true,
-    message: `Sincronização iniciada para ${accounts.length} conta(s)`,
-    accounts: accounts.map(a => ({
-      id: a.id,
-      nickname: a.nickname,
-      ml_user_id: a.ml_user_id
-    }))
-  });
 }
