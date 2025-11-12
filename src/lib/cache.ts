@@ -9,6 +9,7 @@ interface CacheEntry<T> {
 }
 
 class MemoryCache {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cache = new Map<string, CacheEntry<any>>();
   private defaultTTL = 60000; // 1 minuto padrão
 

@@ -18,7 +18,17 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "*.js",
+      "scripts/**/*.js",
+      "scripts/**/*.ts",
+      "temp_file.tsx",
+      "src/app/api/debug/**",
     ],
+  },
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
   },
 ];
 

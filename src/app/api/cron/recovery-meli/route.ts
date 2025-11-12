@@ -4,7 +4,7 @@ import { recoverAllInvalidAccounts } from "@/lib/meli";
 export const runtime = "nodejs";
 
 // Executar a cada 30 minutos
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
     console.log(`[cron][recovery] Iniciando recuperação automática de contas MELI...`);
     

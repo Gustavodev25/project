@@ -168,7 +168,7 @@ export async function POST(request: Request) {
       progressLabel: "Carregando categorias"
     });
 
-    let categoriasMap = new Map<string, string>();
+    const categoriasMap = new Map<string, string>();
     try {
       const categorias = await (await import("@/lib/bling")).getBlingCategorias(
         refreshedAccount.access_token,
@@ -287,7 +287,7 @@ export async function POST(request: Request) {
             } catch {}
           }
 
-        let formaBlingId =
+        const formaBlingId =
           item?.formaPagamento?.id?.toString?.() ||
           item?.formaPagamentoId?.toString?.() ||
           item?.idFormaPagamento?.toString?.() ||

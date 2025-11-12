@@ -294,7 +294,7 @@ export function getLocalStorageUsage(): {
   let vendasCacheSize = 0;
 
   // Calcular tamanho total
-  for (let key in localStorage) {
+  for (const key in localStorage) {
     if (localStorage.hasOwnProperty(key)) {
       const itemSize = (localStorage.getItem(key) || '').length;
       totalSize += itemSize;

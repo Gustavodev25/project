@@ -1407,7 +1407,7 @@ export default function TabelaGestaoSKU({
                     : "Deseja ativar este SKU? Ele voltará a aparecer nas listagens."}
                 </p>
                 <p className="mt-2 text-sm font-medium text-gray-900">
-                  "{selectedSKU.sku} - {selectedSKU.produto}"
+                  &quot;{selectedSKU.sku} - {selectedSKU.produto}&quot;
                 </p>
               </div>
             </div>

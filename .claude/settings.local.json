@@ -43,7 +43,9 @@
       "Bash(Select-String -Pattern \"ImportSKU|sku/import|sku/export|sku/template|GestaoSKU\" -Context 0,2)",
       "Bash(npx tsx:*)",
       "Bash(.gitignore)",
-      "Bash(Get-Content \"nul\")"
+      "Bash(Get-Content \"nul\")",
+      "Bash(npm run lint)",
+      "Bash(npm run lint:*)"
     ],
     "deny": [],
     "ask": []

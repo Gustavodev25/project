@@ -69,7 +69,7 @@ export default function DeleteModal({
             </p>
             {itemName && (
               <p className="mt-2 text-sm font-medium text-gray-900">
-                "{itemName}"
+                &quot;{itemName}&quot;
               </p>
             )}
             <p className="mt-2 text-sm text-red-600 font-medium">

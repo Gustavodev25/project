@@ -23,7 +23,7 @@ export async function PUT(
     const { conta, aliquota, dataInicio, dataFim, descricao, ativo } = body;
 
     // Verificar se a alíquota existe e pertence ao usuário
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     const aliquotaExistente = await prisma.aliquotaImposto.findUnique({
       where: { id },
     });
@@ -54,7 +54,7 @@ export async function PUT(
       }
     }
 
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     const aliquotaAtualizada = await prisma.aliquotaImposto.update({
       where: { id },
       data: {
@@ -94,7 +94,7 @@ export async function DELETE(
     const { id } = params;
 
     // Verificar se a alíquota existe e pertence ao usuário
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     const aliquota = await prisma.aliquotaImposto.findUnique({
       where: { id },
     });
@@ -106,7 +106,7 @@ export async function DELETE(
       );
     }
 
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     await prisma.aliquotaImposto.delete({
       where: { id },
     });

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import type { MeliAccount } from "@prisma/client";
 import prisma from "@/lib/prisma";
-import { retryWithBackoff, isRecoverableError } from "./retry";
+import { retryWithBackoff } from "./retry";
 import { isAccountMarkedAsInvalid, markAccountAsInvalid, clearAccountInvalidMark } from "./account-status";
 
 const MELI_API_BASE_URL =

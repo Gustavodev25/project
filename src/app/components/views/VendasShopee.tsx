@@ -194,7 +194,7 @@ const HeaderVendasShopee = ({
         autoSyncIntervalRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [autoSyncEnabled]);
 
   const formatDate = (dateString: string) => {

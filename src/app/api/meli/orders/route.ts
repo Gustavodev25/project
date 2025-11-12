@@ -519,7 +519,7 @@ async function fetchOrdersForAccount(
     return { orders: results, expectedTotal: 0 };
   }
 
-  let expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
+  const expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
   console.log(
     `[meli][orders] Conta ${account.ml_user_id}: ${ranges.length} janela(s) necessarias para cobrir o periodo. Total estimado: ${expectedTotal}.`,
   );

@@ -1,5 +1,3 @@
-import prisma from "@/lib/prisma";
-
 export interface TokenRefreshNotification {
   userId: string;
   platform: 'Mercado Livre' | 'Shopee' | 'Bling';

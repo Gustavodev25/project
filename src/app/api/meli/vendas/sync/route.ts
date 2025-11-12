@@ -657,7 +657,7 @@ async function fetchAllOrdersForAccount(
     console.log(`[Sync] 📅 Venda mais antiga baixada: ${oldestDate.toISOString().split('T')[0]}`);
 
     // Buscar vendas mais antigas em blocos de 1 mês
-    let currentMonthStart = new Date(oldestDate);
+    const currentMonthStart = new Date(oldestDate);
     currentMonthStart.setDate(1); // Primeiro dia do mês
     currentMonthStart.setHours(0, 0, 0, 0);
     currentMonthStart.setMonth(currentMonthStart.getMonth() - 1); // Começar do mês anterior

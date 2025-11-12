@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     const aliquotas = await prisma.aliquotaImposto.findMany({
       where: { userId: session.sub },
       orderBy: { createdAt: "desc" },
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // @ts-ignore - modelo será disponível após executar migration
+    // @ts-expect-error - modelo será disponível após executar migration
     const novaAliquota = await prisma.aliquotaImposto.create({
       data: {
         userId: session.sub,

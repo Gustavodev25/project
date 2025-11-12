@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, RefObject } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 export interface DropdownPosition {
   top?: number;
@@ -38,7 +38,7 @@ export function useSmartDropdown<T extends HTMLElement = HTMLElement>({
       height: window.innerHeight
     };
 
-    let newPosition: DropdownPosition = {};
+    const newPosition: DropdownPosition = {};
 
     // Determinar posição vertical (absoluta na tela com position:fixed)
     const spaceBelow = viewport.height - trigger.bottom - offset;

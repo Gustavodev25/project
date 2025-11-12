@@ -222,7 +222,7 @@ export default function Aliquotas() {
   const handleEditSave = async (data: any) => {
     try {
       // Converter mesAno para dataInicio e dataFim se fornecido
-      let dataToSend = { ...data };
+      const dataToSend = { ...data };
       if (data.mesAno && data.mesAno.match(/^\d{4}-\d{2}$/)) {
         const [year, month] = data.mesAno.split('-').map(Number);
         dataToSend.dataInicio = new Date(year, month - 1, 1).toISOString();

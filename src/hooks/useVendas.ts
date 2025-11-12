@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useVendasSyncProgress } from "@/hooks/useVendasSyncProgress";
-import { 
-  loadVendasFromCache, 
-  saveVendasToCache, 
-  hasCachedVendas,
-  clearVendasCache 
+import {
+  loadVendasFromCache,
+  saveVendasToCache
 } from "@/lib/vendasCache";
 
 // Re-exportar funções de cache para uso externo
@@ -100,6 +98,7 @@ export function useVendas(platform: string = "Mercado Livre") {
   // Ref para rastrear se sync_complete já foi processado
   const syncCompleteProcessedRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingAccountsRef = useRef(0);
 
   // Resetar flag quando começar nova sincronização
   useEffect(() => {
@@ -151,22 +150,32 @@ export function useVendas(platform: string = "Mercado Livre") {
           expected
         });
         console.log(`[useVendas] Progresso atualizado: ${fetched}/${expected}`);
-      } else if (progress.type === "sync_complete" && !syncCompleteProcessedRef.current) {
-        console.log('[useVendas] Sincronização completa - processando apenas uma vez');
-        syncCompleteProcessedRef.current = true; // Marcar como processado
-        
-        // Recarregar vendas do banco após sincronização completa
-        loadVendasFromDatabase().catch(err => {
-          console.error('[useVendas] Erro ao recarregar vendas após sync_complete:', err);
-        });
-        
-        // Resetar estados de loading
-        setIsSyncing(false);
-        
-        // Desconectar SSE após um delay
-        setTimeout(() => {
-          disconnect();
-        }, 2000);
+      } else if (progress.type === "sync_complete") {
+        if (pendingAccountsRef.current > 1) {
+          pendingAccountsRef.current -= 1;
+          console.log(`[useVendas] Sync parcial concluído - aguardando contas restantes (${pendingAccountsRef.current}).`);
+          return;
+        }
+
+        if (!syncCompleteProcessedRef.current) {
+          console.log('[useVendas] Sincronização completa - processando apenas uma vez');
+          syncCompleteProcessedRef.current = true; // Marcar como processado
+          pendingAccountsRef.current = 0;
+          
+          // Recarregar vendas do banco após sincronização completa
+          loadVendasFromDatabase().catch(err => {
+            console.error('[useVendas] Erro ao recarregar vendas após sync_complete:', err);
+          });
+          
+          // Resetar estados de loading
+          setIsSyncing(false);
+          setIsTableLoading(false);
+          
+          // Desconectar SSE após um delay
+          setTimeout(() => {
+            disconnect();
+          }, 2000);
+        }
       } else if (progress.type === "sync_error") {
         console.error('[useVendas] Erro na sincronização:', progress);
         setIsSyncing(false);
@@ -228,53 +237,91 @@ export function useVendas(platform: string = "Mercado Livre") {
 
       let res: Response;
       if (platform === "Mercado Livre") {
-        const body: any = {};
-        if (accountIds && accountIds.length > 0) {
-          body.accountIds = accountIds;
-        }
+        const selectedAccounts = new Set<string>();
+        (accountIds ?? []).filter(Boolean).forEach((id) => selectedAccounts.add(id));
+
         if (orderIdsByAccount) {
-          body.orderIdsByAccount = orderIdsByAccount;
+          Object.keys(orderIdsByAccount).forEach((id) => {
+            if (id) selectedAccounts.add(id);
+          });
         }
 
-        console.log(`[useVendas] Chamando API /api/meli/vendas/sync DIRETAMENTE com body:`, body);
-        // MUDANÇA FINAL: Chamar /sync diretamente (com SSE)
-        // O sync já tem maxDuration=300s e envia progresso via SSE
-        res = await fetch("/api/meli/vendas/sync", {
-          method: "POST",
-          cache: "no-store",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
-        });
-        console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
-
-        // Processar resposta
-        if (!res.ok) {
-          let message = `Erro ${res.status}`;
-          try {
-            const errJson = await res.json();
-            const apiMsg = (errJson?.errors && errJson.errors[0]?.message) || errJson?.error || errJson?.message;
-            if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
-          } catch {}
-          throw new Error(message);
+        if (selectedAccounts.size === 0 && contasConectadas.length > 0) {
+          contasConectadas.forEach((conta) => {
+            if (conta.id) selectedAccounts.add(conta.id);
+          });
         }
 
-        const payload: MeliOrdersResponse & { totals?: { expected?: number; fetched?: number; saved?: number } } = await res.json();
-        const realTotals = payload.totals || { fetched: 0, expected: 0 };
+        const accountsToSync = Array.from(selectedAccounts);
 
-        setSyncProgress({
-          fetched: realTotals.fetched || 0,
-          expected: realTotals.expected || realTotals.fetched || 0
-        });
-        setLastSyncedAt(payload.syncedAt ?? null);
-        setSyncErrors(payload.errors ?? []);
+        if (accountsToSync.length === 0) {
+          throw new Error("Nenhuma conta do Mercado Livre conectada para sincronizar.");
+        }
 
-        // Carregar vendas atualizadas do banco
+        pendingAccountsRef.current = accountsToSync.length;
+
+        let aggregatedErrors: MeliOrdersResponse["errors"] = [];
+        let aggregatedFetched = 0;
+        let aggregatedExpected = 0;
+
+        for (const accountId of accountsToSync) {
+          const body: any = { accountIds: [accountId] };
+          if (orderIdsByAccount?.[accountId]?.length) {
+            body.orderIdsByAccount = { [accountId]: orderIdsByAccount[accountId] };
+          }
+
+          console.log(`[useVendas] Chamando API /api/meli/vendas/sync DIRETAMENTE com body:`, body);
+          res = await fetch("/api/meli/vendas/sync", {
+            method: "POST",
+            cache: "no-store",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          });
+          console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
+
+          if (!res.ok) {
+            let message = `Erro ${res.status}`;
+            try {
+              const errJson = await res.json();
+              const apiMsg =
+                (errJson?.errors && errJson.errors[0]?.message) ||
+                errJson?.error ||
+                errJson?.message;
+              if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
+            } catch {}
+            throw new Error(message);
+          }
+
+          const payload: MeliOrdersResponse & {
+            totals?: { expected?: number; fetched?: number; saved?: number };
+          } = await res.json();
+
+          const realTotals = payload.totals || {
+            fetched: payload.orders?.length || 0,
+            expected: payload.orders?.length || 0,
+          };
+
+          aggregatedFetched += realTotals.fetched || 0;
+          aggregatedExpected += realTotals.expected || realTotals.fetched || 0;
+
+          if (payload.errors?.length) {
+            aggregatedErrors = [...aggregatedErrors, ...payload.errors];
+          }
+
+          setSyncProgress({
+            fetched: aggregatedFetched,
+            expected: aggregatedExpected || aggregatedFetched,
+          });
+          setLastSyncedAt(payload.syncedAt ?? null);
+        }
+
+        setSyncErrors(aggregatedErrors);
+
         await loadVendasFromDatabase();
 
-        // Finalizar
         return;
       } else if (platform === "Shopee") {
         const body: any = {};
@@ -350,10 +397,12 @@ export function useVendas(platform: string = "Mercado Livre") {
       // Em caso de erro, parar o syncing
       setIsSyncing(false);
       setIsTableLoading(false);
+      pendingAccountsRef.current = 0;
     } finally {
       // Marcar como concluído para todas as plataformas
       setIsSyncing(false);
       setIsTableLoading(false);
+      pendingAccountsRef.current = 0;
     }
   };
 
@@ -522,3 +571,4 @@ export function useVendas(platform: string = "Mercado Livre") {
     disconnect,
   };
 }
+

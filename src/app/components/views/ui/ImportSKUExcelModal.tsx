@@ -301,7 +301,7 @@ export function ImportSKUExcelModal({
                 <li>• Use o template baixado para garantir o formato correto</li>
                 <li>• A primeira linha deve conter os cabeçalhos das colunas</li>
                 <li>• Campos obrigatórios: SKU e Produto</li>
-                <li>• Tipo pode ser "Individual" ou "Kit"</li>
+                <li>• Tipo pode ser &quot;Individual&quot; ou &quot;Kit&quot;</li>
                 <li>• Valores monetários devem usar ponto como separador decimal</li>
                 <li>• SKUs duplicados serão ignorados automaticamente</li>
                 <li>• Para Kits, separe os SKUs Filhos por vírgula</li>
