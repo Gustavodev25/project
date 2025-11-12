@@ -117,10 +117,13 @@ Isso garante tempo suficiente para sincronizar TODAS as vendas.
 
 #### Sincronização Completa do Mercado Livre
 A nova implementação busca **TODAS as vendas sem limite**:
+- **Sincronização Assíncrona**: Usa `/api/meli/vendas/sync-async` que retorna imediatamente
+- Processamento continua em background, evitando timeouts
 - Busca até 9.950 vendas por paginação direta
 - Automaticamente divide por períodos mensais se necessário
 - Respeita limite de offset da API (evita erro 400)
-- Progresso em tempo real via SSE
+- Progresso em tempo real via Server-Sent Events (SSE)
+- **Não para no meio**: Funciona mesmo em planos com limite de tempo
 
 ### Deploy Alternativo no Render
 
