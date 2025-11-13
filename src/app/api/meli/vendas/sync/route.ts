@@ -711,13 +711,14 @@ async function fetchAllOrdersForAccount(
   quickMode: boolean = false, // Novo parâmetro para controle de modo
 ): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
   const startTime = Date.now();
-  // MUDANÇA CRÍTICA: Em quickMode (sync inicial), limitar a 30s para retornar rápido
-  // Em background mode, pode usar até 58s
-  const MAX_EXECUTION_TIME = quickMode ? 30000 : 58000; // 30s quick ou 58s background
+  // MUDANÇA CRÍTICA: Em quickMode, buscar em 20s e deixar 40s para salvar no banco (total 60s)
+  // Salvamento de 500 vendas ~5s, mas com margem de segurança para contas grandes
+  // Em background mode, pode usar até 45s de busca (deixa 15s para salvar ~1500 vendas)
+  const MAX_EXECUTION_TIME = quickMode ? 20000 : 45000; // 20s quick ou 45s background
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
 
-  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${quickMode ? 'QUICK (30s)' : 'BACKGROUND (58s)'}`);
+  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${quickMode ? 'QUICK (20s busca + 40s salvar)' : 'BACKGROUND (45s busca + 15s salvar)'}`);
 
   // Verificar venda mais antiga já sincronizada para continuar de onde parou
   const oldestSyncedOrder = await prisma.meliVenda.findFirst({
@@ -737,9 +738,10 @@ async function fetchAllOrdersForAccount(
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  // MUDANÇA: Em quickMode, buscar apenas 1000 vendas recentes para retornar rápido
-  // Em background, buscar 2500
-  let maxOffsetToFetch = quickMode ? Math.min(MAX_OFFSET, 1000) : Math.min(MAX_OFFSET, 2500);
+  // MUDANÇA CRÍTICA: Em quickMode, buscar apenas 500 vendas para garantir tempo de salvar no banco
+  // Salvamento de ~10k vendas demora ~30s, então limitar busca para caber em 60s total
+  // Em background, buscar 1500 vendas (mais conservador para evitar timeout)
+  let maxOffsetToFetch = quickMode ? Math.min(MAX_OFFSET, 500) : Math.min(MAX_OFFSET, 1500);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
