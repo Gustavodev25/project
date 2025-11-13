@@ -690,7 +690,7 @@ async function fetchAllOrdersForAccount(
       break;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // SEM DELAY - Processar o mais rápido possível
   }
 
   // PASSO 2: Se total > 9.950, buscar vendas antigas por período mensal
@@ -865,9 +865,6 @@ async function fetchOrdersInDateRange(
       // Avançar para próximo sub-período
       currentStart = new Date(currentEnd);
       currentStart.setDate(currentStart.getDate() + 1); // Próximo dia após o fim
-
-      // Pequeno delay entre sub-períodos
-      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     console.log(`[Sync] 🎉 Período completo: ${results.length} vendas de ${totalInPeriod} totais`);
@@ -946,8 +943,6 @@ async function fetchOrdersInDateRange(
         console.log(`[Sync] ⚠️ Atingiu ${offset} vendas no período - parando antes do limite`);
         break;
       }
-
-      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (error) {
       console.error(`[Sync] Erro ao buscar período:`, error);
       break;
