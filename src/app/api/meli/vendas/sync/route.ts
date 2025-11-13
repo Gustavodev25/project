@@ -5,7 +5,7 @@
  * ============================
  *
  * 1. SINCRONIZAÇÃO INCREMENTAL:
- *    - Busca até 5.000 vendas mais recentes por sincronização (limite de segurança contra timeout)
+ *    - Busca até 2.500 vendas mais recentes por sincronização (limite conservador para garantir 60s)
  *    - Para contas com mais vendas: execute múltiplas sincronizações
  *    - Vendas já existentes são atualizadas (UPDATE), não duplicadas
  *
@@ -34,18 +34,27 @@
  *
  * 6. GESTÃO DE TIMEOUT (Vercel Pro):
  *    - Limite de 60 segundos por função
- *    - Máximo de 5.000 vendas por sincronização
+ *    - Máximo de 2.500 vendas por sincronização (conservador, garante completion)
  *    - Processamento paralelo de detalhes de ordem
  *    - Para histórico completo: execute sincronização múltiplas vezes
  *
  * COMO FUNCIONA:
  * ==============
- * 1. Busca até 5.000 vendas mais recentes com paginação
- * 2. Se total > 9.950, busca vendas antigas por períodos mensais (até atingir 5k)
+ * 1. Busca até 2.500 vendas mais recentes com paginação
+ * 2. Se total > 9.950, busca vendas antigas por períodos mensais (até atingir 2.5k)
  * 3. Se um mês tem > 9.950 vendas, divide em períodos de 7-14 dias automaticamente
  * 4. Salva todas as vendas em lotes de 50 no banco de dados
  * 5. Envia progresso em tempo real via SSE
- * 6. Para contas com >5k vendas: Execute novamente para buscar mais vendas antigas
+ * 6. Para contas com >2.5k vendas: Execute novamente para buscar mais vendas antigas
+ *
+ * EXEMPLO DE USO (conta com 12k vendas):
+ * ======================================
+ * Sync 1: Vendas 1-2.500 (40s)
+ * Sync 2: Vendas 2.501-5.000 (40s)
+ * Sync 3: Vendas 5.001-7.500 (40s)
+ * Sync 4: Vendas 7.501-10.000 (40s)
+ * Sync 5: Vendas 10.001-12.000 (35s)
+ * Total: 5 sincronizações de ~40s cada = histórico completo em ~3-4 minutos
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -65,7 +74,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
-const MAX_VENDAS_POR_SYNC = 5000; // Limite por sincronização para evitar timeout de 60s
+const MAX_VENDAS_POR_SYNC = 2500; // Limite CONSERVADOR para garantir que complete em 60s (inclui tempo de salvar no DB)
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
