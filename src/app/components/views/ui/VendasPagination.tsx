@@ -6,6 +6,7 @@ interface VendasPaginationProps {
   totalItems: number;
   itemsPerPage: number;
   onPageChange: (page: number) => void;
+  resumoPorConta?: Array<{ conta: string; total: number }>;
 }
 
 export default function VendasPagination({
@@ -13,21 +14,45 @@ export default function VendasPagination({
   totalPages,
   totalItems,
   itemsPerPage,
-  onPageChange
+  onPageChange,
+  resumoPorConta
 }: VendasPaginationProps) {
+  const formatNumber = (n: number) => new Intl.NumberFormat("pt-BR").format(n);
   return (
     <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="text-sm text-gray-600">
-        Mostrando
-        <span className="font-medium text-gray-900 ml-1">
-          {totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}
-        </span>
-        <span className="mx-1">-</span>
-        <span className="font-medium text-gray-900">
-          {Math.min(currentPage * itemsPerPage, totalItems)}
-        </span>
-        <span className="ml-1">de</span>
-        <span className="font-medium text-gray-900 ml-1">{totalItems}</span>
+        <div>
+          Mostrando
+          <span className="font-medium text-gray-900 ml-1">
+            {totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}
+          </span>
+          <span className="mx-1">-</span>
+          <span className="font-medium text-gray-900">
+            {Math.min(currentPage * itemsPerPage, totalItems)}
+          </span>
+          <span className="ml-1">de</span>
+          <span className="font-medium text-gray-900 ml-1">{totalItems}</span>
+        </div>
+        {Array.isArray(resumoPorConta) && resumoPorConta.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {resumoPorConta.map((item) => (
+              <span
+                key={item.conta || "sem-conta"}
+                className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+                title={`${item.conta || "Sem conta"} - ${formatNumber(item.total)} vendas`}
+              >
+                <span className="font-medium">{item.conta || "Sem conta"}</span>
+                <span>-</span>
+                <span>{formatNumber(item.total)} vendas</span>
+              </span>
+            ))}
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2.5 py-1 text-xs text-gray-800">
+              <span className="font-semibold">Total</span>
+              <span>-</span>
+              <span>{formatNumber(totalItems)} vendas</span>
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-center gap-2">

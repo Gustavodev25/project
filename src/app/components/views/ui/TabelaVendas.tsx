@@ -418,6 +418,15 @@ export default function TabelaVendas({
 
   const totalPages = Math.max(1, Math.ceil(vendasFiltradas.length / ITEMS_PER_PAGE));
 
+  const resumoPorConta = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of vendasFiltradas) {
+      const contaNome = (item as any)?.venda?.conta ?? "Sem conta";
+      counts.set(contaNome, (counts.get(contaNome) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([conta, total]) => ({ conta, total }));
+  }, [vendasFiltradas]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [platform, filtroAtivo, periodoAtivo]);
@@ -637,6 +646,7 @@ export default function TabelaVendas({
               totalItems={vendasFiltradas.length}
               itemsPerPage={ITEMS_PER_PAGE}
               onPageChange={setCurrentPage}
+              resumoPorConta={resumoPorConta}
             />
           </div>
         </div>
