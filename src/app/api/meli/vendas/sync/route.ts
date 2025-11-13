@@ -708,13 +708,16 @@ async function fetchAllOrdersForAccount(
   account: MeliAccount,
   headers: Record<string, string>,
   userId: string,
+  quickMode: boolean = false, // Novo parâmetro para controle de modo
 ): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
   const startTime = Date.now();
-  const MAX_EXECUTION_TIME = 58000; // 58 segundos (deixa 2s de margem)
+  // MUDANÇA CRÍTICA: Em quickMode (sync inicial), limitar a 30s para retornar rápido
+  // Em background mode, pode usar até 58s
+  const MAX_EXECUTION_TIME = quickMode ? 30000 : 58000; // 30s quick ou 58s background
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
 
-  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname})`);
+  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${quickMode ? 'QUICK (30s)' : 'BACKGROUND (58s)'}`);
 
   // Verificar venda mais antiga já sincronizada para continuar de onde parou
   const oldestSyncedOrder = await prisma.meliVenda.findFirst({
@@ -734,7 +737,9 @@ async function fetchAllOrdersForAccount(
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  let maxOffsetToFetch = Math.min(MAX_OFFSET, 2500); // Limitar a 2500 vendas recentes por vez
+  // MUDANÇA: Em quickMode, buscar apenas 1000 vendas recentes para retornar rápido
+  // Em background, buscar 2500
+  let maxOffsetToFetch = quickMode ? Math.min(MAX_OFFSET, 1000) : Math.min(MAX_OFFSET, 2500);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
@@ -2166,8 +2171,9 @@ export async function POST(req: NextRequest) {
   let requestBody: {
     accountIds?: string[];
     orderIdsByAccount?: Record<string, string[]>;
+    quickMode?: boolean; // NOVO: indica se deve retornar rápido (30s) ou não
   } = {};
-  
+
   try {
     const bodyText = await req.text();
     if (bodyText) {
@@ -2177,9 +2183,13 @@ export async function POST(req: NextRequest) {
     console.error('[Sync] Erro ao parsear body:', error);
   }
 
+  // Por padrão, usar quickMode=true para evitar timeout
+  const quickMode = requestBody.quickMode !== false; // true por padrão, false apenas se explicitamente passado
+
   console.log(`[Sync] Iniciando sincronização para usuário ${userId}`, {
     accountIds: requestBody.accountIds,
-    hasOrderIds: !!requestBody.orderIdsByAccount
+    hasOrderIds: !!requestBody.orderIdsByAccount,
+    quickMode: quickMode // Log do modo
   });
 
   // Dar um delay para garantir que o SSE está conectado
@@ -2460,6 +2470,7 @@ export async function POST(req: NextRequest) {
             current,
             headers,
             userId,
+            quickMode, // NOVO: passa o modo de sincronização
           );
           allOrders = result.orders;
           expectedTotal = result.expectedTotal;
@@ -2551,14 +2562,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Verificar se há mais vendas antigas para sincronizar (quando em quickMode)
+  const hasMoreToSync = quickMode && totalFetchedOrders < totalExpectedOrders;
+
   // Enviar evento de conclusão da sincronização
   sendProgressToUser(userId, {
     type: "sync_complete",
-    message: `Sincronização concluída! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
+    message: quickMode
+      ? `Vendas recentes sincronizadas! ${totalSavedOrders} vendas processadas${hasMoreToSync ? '. Sincronizando vendas antigas em background...' : ''}`
+      : `Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
     current: totalSavedOrders,
     total: totalExpectedOrders,
     fetched: totalSavedOrders,
-    expected: totalExpectedOrders
+    expected: totalExpectedOrders,
+    hasMoreToSync // NOVO: indica se há mais vendas antigas
   });
 
   // Invalidar cache de vendas após sincronização
@@ -2575,10 +2592,12 @@ export async function POST(req: NextRequest) {
     accounts: summaries,
     orders: [] as MeliOrderPayload[],
     errors,
-    totals: { 
-      expected: totalExpectedOrders, 
+    totals: {
+      expected: totalExpectedOrders,
       fetched: totalFetchedOrders,
       saved: totalSavedOrders
     },
+    hasMoreToSync, // NOVO: flag indicando se há vendas antigas pendentes
+    quickMode, // NOVO: indica qual modo foi usado
   });
 }
