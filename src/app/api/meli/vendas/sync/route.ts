@@ -658,41 +658,28 @@ async function fetchOrdersPage({
     }`,
   );
 
-  const [orderDetailsResults, shipmentDetailsResults] = await Promise.all([
-    Promise.allSettled(
-      orders.map(async (order: any) => {
-        const id = order?.id;
-        if (!id) return order;
-        try {
-          const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${id}`, { headers }, 3, userId);
-          if (!res.ok) return order;
-          return await res.json();
-        } catch {
-          return order;
-        }
-      }),
-    ),
-    Promise.allSettled(
-      orders.map(async (order: any) => {
-        const shippingId = order?.shipping?.id;
-        if (!shippingId) return null;
-        try {
-          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-          if (!res.ok) return null;
-          return await res.json();
-        } catch {
-          return null;
-        }
-      }),
-    ),
-  ]);
-
-  const detailedOrders = orderDetailsResults.map((entry, idx) =>
-    entry.status === "fulfilled" ? entry.value : orders[idx],
+  const shipmentDetailsResults = await Promise.allSettled(
+    orders.map(async (order: any) => {
+      const shippingId = order?.shipping?.id;
+      if (!shippingId) {
+        return typeof order?.shipping === "object" ? order.shipping : null;
+      }
+      try {
+        const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }),
   );
-  const shipments = shipmentDetailsResults.map((entry) => (entry.status === "fulfilled" ? entry.value : null));
 
-  result.orders = detailedOrders
+  const shipments = shipmentDetailsResults.map((entry, idx) => {
+    if (entry.status === "fulfilled" && entry.value) return entry.value;
+    return typeof orders[idx]?.shipping === "object" ? orders[idx].shipping : null;
+  });
+
+  result.orders = orders
     .map((order: any, idx: number) => {
       if (!order) return null;
       const shipment = shipments[idx] ?? undefined;
