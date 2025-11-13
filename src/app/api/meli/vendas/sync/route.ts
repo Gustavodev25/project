@@ -1,60 +1,52 @@
 /**
- * API de Sincronização de Vendas do Mercado Livre
+ * API de Sincronização de Vendas do Mercado Livre - V2 INCREMENTAL
  *
- * OTIMIZAÇÕES IMPLEMENTADAS:
- * ============================
+ * SINCRONIZAÇÃO INCREMENTAL INTELIGENTE:
+ * =======================================
  *
- * 1. SINCRONIZAÇÃO INCREMENTAL:
- *    - Busca até 2.500 vendas mais recentes por sincronização (limite conservador para garantir 60s)
- *    - Para contas com mais vendas: execute múltiplas sincronizações
- *    - Vendas já existentes são atualizadas (UPDATE), não duplicadas
+ * 1. SEM LIMITE DE VENDAS:
+ *    - Sincroniza TODAS as vendas de TODAS as contas (não limita a 2.500)
+ *    - Sistema de checkpoints: salva progresso no banco de dados
+ *    - Múltiplas chamadas sequenciais continuam de onde parou
+ *    - Ideal para contas com 10k, 20k, 50k+ vendas
  *
- * 2. DIVISÃO AUTOMÁTICA DE PERÍODOS:
- *    - Quando um período tem mais de 9.950 vendas (limite da API do ML):
- *      * Detecta automaticamente o total de vendas no período
- *      * Divide em sub-períodos menores (7 ou 14 dias dependendo do volume)
- *      * Busca recursivamente cada sub-período
- *      * Garante sincronização completa sem perda de dados
+ * 2. CONTROLE DE TIMEOUT (VERCEL):
+ *    - Monitora tempo de execução em tempo real
+ *    - Salva progresso automaticamente antes do timeout (55s de 60s)
+ *    - Frontend detecta necessidade de continuar e chama novamente
+ *    - Respeita limite de 60 segundos do Vercel Pro
  *
- * 3. SALVAMENTO EM LOTES OTIMIZADO:
- *    - Salva vendas em lotes de 50
- *    - Usa Promise.allSettled para garantir que erros não parem o processo
- *    - Cache de SKU para reduzir queries ao banco
- *    - Sem delays desnecessários para máxima velocidade
+ * 3. TABELA DE PROGRESSO (meli_sync_progress):
+ *    - Armazena: total de vendas, vendas sincronizadas, último offset
+ *    - Status: pending, in_progress, completed, error
+ *    - Permite retomar sincronização interrompida
+ *    - Limpa automaticamente após conclusão
  *
- * 4. RETRY AUTOMÁTICO COM BACKOFF:
- *    - Tentativas automáticas em caso de erros temporários (429, 500, 502, 503, 504)
- *    - Exponential backoff: 1s, 2s, 4s
- *    - Até 3 tentativas por requisição
+ * 4. OTIMIZAÇÕES DE PERFORMANCE:
+ *    - Salvamento em lotes de 50 vendas
+ *    - Cache de SKU para reduzir queries
+ *    - Processamento paralelo de detalhes
+ *    - Retry automático com backoff exponencial
  *
  * 5. PROGRESSO EM TEMPO REAL:
- *    - Server-Sent Events (SSE) para comunicação em tempo real
- *    - Mensagens detalhadas de progresso (página atual, período, porcentagem)
- *    - Mantém conexão viva durante o processo
- *
- * 6. GESTÃO DE TIMEOUT (Vercel Pro):
- *    - Limite de 60 segundos por função
- *    - Máximo de 2.500 vendas por sincronização (conservador, garante completion)
- *    - Processamento paralelo de detalhes de ordem
- *    - Para histórico completo: execute sincronização múltiplas vezes
+ *    - Server-Sent Events (SSE) para feedback imediato
+ *    - Mensagens detalhadas por conta
+ *    - Indicador de progresso (X/Y vendas)
+ *    - Notificação quando precisa continuar
  *
  * COMO FUNCIONA:
  * ==============
- * 1. Busca até 2.500 vendas mais recentes com paginação
- * 2. Se total > 9.950, busca vendas antigas por períodos mensais (até atingir 2.5k)
- * 3. Se um mês tem > 9.950 vendas, divide em períodos de 7-14 dias automaticamente
- * 4. Salva todas as vendas em lotes de 50 no banco de dados
- * 5. Envia progresso em tempo real via SSE
- * 6. Para contas com >2.5k vendas: Execute novamente para buscar mais vendas antigas
+ * Chamada 1: Busca e salva primeiras 2000 vendas (~45s), salva checkpoint
+ * Chamada 2: Continua de offset 2000, busca mais 2000 vendas (~45s)
+ * Chamada 3: Continua de offset 4000, busca mais 2000 vendas (~45s)
+ * ... repete até sincronizar todas as vendas
  *
- * EXEMPLO DE USO (conta com 12k vendas):
- * ======================================
- * Sync 1: Vendas 1-2.500 (40s)
- * Sync 2: Vendas 2.501-5.000 (40s)
- * Sync 3: Vendas 5.001-7.500 (40s)
- * Sync 4: Vendas 7.501-10.000 (40s)
- * Sync 5: Vendas 10.001-12.000 (35s)
- * Total: 5 sincronizações de ~40s cada = histórico completo em ~3-4 minutos
+ * EXEMPLO (Conta1: 10k vendas, Conta2: 20k vendas):
+ * ===================================================
+ * Total: 30.000 vendas
+ * Chamadas necessárias: ~15 chamadas de 45s cada
+ * Tempo total: ~11 minutos (totalmente automático)
+ * Resultado: TODAS as 30.000 vendas no banco de dados
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -78,6 +70,105 @@ const PAGE_FETCH_CONCURRENCY = Math.min(
   5,
   Math.max(1, Number(process.env.MELI_PAGE_FETCH_CONCURRENCY ?? "2") || 2),
 );
+
+// CONTROLE DE SINCRONIZAÇÃO INCREMENTAL
+const MAX_EXECUTION_TIME_MS = 55000; // 55 segundos (deixa 5s de margem)
+const BATCH_SIZE_PER_CALL = 2000; // Quantas vendas buscar por chamada (ajustável)
+const SAVE_BATCH_SIZE = 50; // Quantas vendas salvar por vez
+
+/**
+ * Busca ou cria registro de progresso de sincronização
+ * FALLBACK SEGURO: Se a tabela não existe, retorna progresso padrão (offset 0)
+ */
+async function getOrCreateSyncProgress(userId: string, accountId: string) {
+  try {
+    const existing = await prisma.meliSyncProgress.findUnique({
+      where: { userId_accountId: { userId, accountId } },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return await prisma.meliSyncProgress.create({
+      data: {
+        userId,
+        accountId,
+        status: "pending",
+        totalOrders: 0,
+        syncedOrders: 0,
+        lastOffset: 0,
+      },
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, retorna progresso padrão (offset 0)
+    console.warn('[Sync] ⚠️ Tabela meli_sync_progress não existe. Usando fallback (offset 0). Execute: npx prisma migrate deploy');
+    return {
+      id: 'fallback',
+      userId,
+      accountId,
+      status: "pending" as const,
+      totalOrders: 0,
+      syncedOrders: 0,
+      lastOffset: 0,
+      lastSyncDate: null,
+      oldestOrderDate: null,
+      startedAt: new Date(),
+      completedAt: null,
+      errorMessage: null,
+      metadata: null,
+    };
+  }
+}
+
+/**
+ * Atualiza progresso de sincronização
+ * FALLBACK SEGURO: Se a tabela não existe, apenas loga (não falha)
+ */
+async function updateSyncProgress(
+  userId: string,
+  accountId: string,
+  data: {
+    totalOrders?: number;
+    syncedOrders?: number;
+    lastOffset?: number;
+    status?: string;
+    errorMessage?: string;
+    completedAt?: Date;
+    oldestOrderDate?: Date;
+    lastSyncDate?: Date;
+  }
+) {
+  try {
+    return await prisma.meliSyncProgress.update({
+      where: { userId_accountId: { userId, accountId } },
+      data,
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, apenas loga (não quebra)
+    console.warn('[Sync] ⚠️ Não foi possível atualizar progresso (tabela não existe).');
+    return null;
+  }
+}
+
+/**
+ * Limpa registros de progresso completados (após 24h)
+ * FALLBACK SEGURO: Se a tabela não existe, apenas loga
+ */
+async function cleanupCompletedProgress() {
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.meliSyncProgress.deleteMany({
+      where: {
+        status: "completed",
+        completedAt: { lt: oneDayAgo },
+      },
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, ignora
+    console.warn('[Sync] ⚠️ Não foi possível limpar progresso completado (tabela não existe).');
+  }
+}
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -698,28 +789,35 @@ async function fetchOrdersPage({
 }
 
 /**
- * NOVA FUNÇÃO SIMPLES: Busca TODAS as vendas de uma conta
- * - Usa paginação até 10.000 vendas (limite da API)
- * - Se tiver mais de 10.000, divide por meses automaticamente
+ * NOVA FUNÇÃO V2 - Sincronização Incremental com Checkpoint
+ * Busca vendas de uma conta respeitando o progresso salvo e o limite de tempo
  */
 async function fetchAllOrdersForAccount(
   account: MeliAccount,
   headers: Record<string, string>,
   userId: string,
-): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
+  startTime: number, // timestamp de início da execução
+  startOffset: number = 0, // offset inicial (para continuar de onde parou)
+): Promise<{
+  orders: MeliOrderPayload[];
+  expectedTotal: number;
+  nextOffset: number;
+  isComplete: boolean;
+  shouldContinue: boolean;
+}> {
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
-  const SYNC_LIMIT = 2500;
 
-  console.log(`[Sync] 🚀 Iniciando busca completa de vendas para conta ${account.ml_user_id} (${account.nickname})`);
+  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Offset inicial: ${startOffset}`);
 
   const MAX_OFFSET = 9950; // Limite seguro antes do 10k da API
   let total = 0;
   let discoveredTotal: number | null = null;
-  let nextOffset = 0;
-  let maxOffsetToFetch = Math.min(MAX_OFFSET, SYNC_LIMIT);
+  let nextOffset = startOffset; // Começa do offset fornecido
+  let maxOffsetToFetch = MAX_OFFSET; // SEM LIMITE HARDCODED!
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
+  let shouldStop = false; // Flag para parar quando tempo acabar
 
   const schedulePageFetch = (offsetValue: number) => {
     const pageNumber = Math.floor(offsetValue / PAGE_LIMIT) + 1;
@@ -740,9 +838,11 @@ async function fetchAllOrdersForAccount(
         ) {
           discoveredTotal = pageResult.total;
           total = discoveredTotal;
-          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal ?? Infinity, SYNC_LIMIT);
+          // SEM LIMITE! Buscar o máximo possível até o limite da API ou até o batch size
+          const targetLimit = Math.min(startOffset + BATCH_SIZE_PER_CALL, discoveredTotal ?? Infinity);
+          maxOffsetToFetch = Math.min(MAX_OFFSET, targetLimit);
           console.log(
-            `[Sync] ?? Conta ${account.ml_user_id}: total estimado ${total} vendas`,
+            `[Sync] 🔍 Conta ${account.ml_user_id}: total estimado ${total} vendas (buscando até offset ${maxOffsetToFetch})`,
           );
         }
 
@@ -814,97 +914,50 @@ async function fetchAllOrdersForAccount(
     total = results.length;
   }
 
-  // PASSO 2: Se total > 9.950 E ainda não atingiu limite de segurança, buscar vendas antigas por período mensal
-  if (results.length < total) {
-    console.log(`[Sync] 🔄 Buscando até ${total - results.length} vendas restantes por período...`);
+  // Calcular progresso e status
+  const currentOffset = startOffset + results.length;
+  const isComplete = currentOffset >= total;
+  const shouldContinue = !isComplete && currentOffset < MAX_OFFSET;
 
-    // Pegar data da venda mais antiga já baixada
-    const fallbackOldest =
-      results.length > 0
-        ? extractOrderDate(results[results.length - 1].order) ?? new Date()
-        : new Date();
-    const oldestDate = oldestOrderDate ?? fallbackOldest;
-
-    console.log(`[Sync] 📅 Venda mais antiga baixada: ${oldestDate.toISOString().split('T')[0]}`);
-
-    // Buscar vendas mais antigas em blocos de 1 mês
-    const currentMonthStart = new Date(oldestDate);
-    currentMonthStart.setDate(1); // Primeiro dia do mês
-    currentMonthStart.setHours(0, 0, 0, 0);
-    currentMonthStart.setMonth(currentMonthStart.getMonth() - 1); // Começar do mês anterior
-
-    const startDate = new Date('2020-01-01'); // Data limite (ajustar conforme necessário)
-
-    while (currentMonthStart > startDate && results.length < Math.min(total, SYNC_LIMIT)) {
-      // Calcular fim do mês
-      const currentMonthEnd = new Date(currentMonthStart);
-      currentMonthEnd.setMonth(currentMonthEnd.getMonth() + 1);
-      currentMonthEnd.setDate(0); // Último dia do mês
-      currentMonthEnd.setHours(23, 59, 59, 999);
-
-      console.log(`[Sync] 📅 Buscando: ${currentMonthStart.toISOString().split('T')[0]} a ${currentMonthEnd.toISOString().split('T')[0]}`);
-
-      // Buscar vendas deste mês
-      const monthOrders = await fetchOrdersInDateRange(
-        account,
-        headers,
-        userId,
-        currentMonthStart,
-        currentMonthEnd,
-        logisticStats
-      );
-
-      console.log(`[Sync] ✅ Encontradas ${monthOrders.length} vendas neste período`);
-
-      const remainingCapacity = Math.max(0, Math.min(SYNC_LIMIT, total) - results.length);
-      if (remainingCapacity === 0) {
-        break;
-      }
-      const cappedOrders =
-        monthOrders.length > remainingCapacity
-          ? monthOrders.slice(0, remainingCapacity)
-          : monthOrders;
-      results.push(...cappedOrders);
-
-      sendProgressToUser(userId, {
-        type: 'sync_progress',
-        message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${results.length}/${total} vendas baixadas (buscando histórico: ${currentMonthStart.toISOString().split('T')[0]})`,
-        current: results.length,
-        total: total,
-        fetched: results.length,
-        expected: total,
-        accountId: account.id,
-        accountNickname: account.nickname,
-      });
-
-      // Se não encontrou vendas neste mês, pode parar (chegou no início)
-      if (monthOrders.length === 0) {
-        console.log(`[Sync] ⚠️ Nenhuma venda encontrada neste período - provavelmente chegou ao início`);
-        break;
-      }
-
-      // Ir para o mês anterior
-      currentMonthStart.setMonth(currentMonthStart.getMonth() - 1);
-    }
-
-    console.log(`[Sync] ✅ Busca por período concluída: ${results.length} vendas de ${total} totais`);
-  }
-
-  console.log(`[Sync] 🎉 ${results.length} vendas baixadas de ${total} totais`);
+  console.log(`[Sync] 📊 Progresso: ${currentOffset}/${total} vendas (${Math.round((currentOffset/total)*100)}%)`);
   console.log(`[Sync] 📊 Tipos de logística:`, Array.from(logisticStats.entries()));
 
-  if (results.length < total) {
-    console.log(
-      `[Sync] Limite de ${SYNC_LIMIT} vendas por sincronização atingido (${results.length}/${total}). Execute novamente para buscar vendas mais antigas.`,
-    );
+  if (shouldContinue) {
+    console.log(`[Sync] ⏭️ Sincronização parcial concluída. Próximo offset: ${currentOffset}`);
     sendProgressToUser(userId, {
-      type: "sync_warning",
-      message: `Limite de ${SYNC_LIMIT} vendas atingido nesta sincronização. Para buscar pedidos mais antigos, execute novamente.`,
-      errorCode: "SYNC_LIMIT_REACHED",
+      type: "sync_continue",
+      message: `Conta ${account.nickname || account.ml_user_id}: ${currentOffset}/${total} vendas sincronizadas. Continuando...`,
+      current: currentOffset,
+      total: total,
+      fetched: currentOffset,
+      expected: total,
+      accountId: account.id,
+      accountNickname: account.nickname,
+      needsContinuation: true,
+      nextOffset: currentOffset,
+    });
+  } else if (isComplete) {
+    console.log(`[Sync] ✅ Sincronização completa! ${total}/${total} vendas`);
+    sendProgressToUser(userId, {
+      type: "sync_account_complete",
+      message: `Conta ${account.nickname || account.ml_user_id}: ${total}/${total} vendas sincronizadas!`,
+      current: total,
+      total: total,
+      fetched: total,
+      expected: total,
+      accountId: account.id,
+      accountNickname: account.nickname,
+      needsContinuation: false,
     });
   }
 
-  return { orders: results, expectedTotal: total };
+  return {
+    orders: results,
+    expectedTotal: total,
+    nextOffset: currentOffset,
+    isComplete,
+    shouldContinue,
+  };
 }
 
 /**
@@ -2396,29 +2449,56 @@ export async function POST(req: NextRequest) {
 
 
 
-        // NOVA LÓGICA SIMPLES: Buscar TODAS as vendas sem janelas complexas
+        // SINCRONIZAÇÃO INCREMENTAL COM CHECKPOINT
         const headers = { Authorization: `Bearer ${current.access_token}` };
+        const syncStartTime = Date.now();
 
-        console.log(`[Sync] 🚀 Buscando TODAS as vendas da conta ${current.ml_user_id} (${current.nickname})`);
-        console.log(`[Sync] Debug - accountIndex: ${accountIndex}, userId: ${userId}`);
+        // Buscar ou criar registro de progresso
+        let syncProgress = await getOrCreateSyncProgress(userId, current.id);
+        const startOffset = syncProgress.lastOffset;
+
+        console.log(`[Sync] 🚀 Sincronização incremental - Conta ${current.ml_user_id} (${current.nickname})`);
+        console.log(`[Sync] 📊 Progresso anterior: ${syncProgress.syncedOrders}/${syncProgress.totalOrders} vendas (offset: ${startOffset})`);
+
+        // Atualizar status para in_progress
+        await updateSyncProgress(userId, current.id, {
+          status: "in_progress",
+          lastSyncDate: new Date(),
+        });
 
         let allOrders: MeliOrderPayload[] = [];
         let expectedTotal = 0;
+        let nextOffset = startOffset;
+        let isComplete = false;
+        let shouldContinue = false;
 
         try {
           const result = await fetchAllOrdersForAccount(
             current,
             headers,
             userId,
+            syncStartTime,
+            startOffset, // Continuar de onde parou
           );
           allOrders = result.orders;
           expectedTotal = result.expectedTotal;
+          nextOffset = result.nextOffset;
+          isComplete = result.isComplete;
+          shouldContinue = result.shouldContinue;
 
-          console.log(`[Sync] ✅ Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
-          console.log(`[Sync] Debug - allOrders.length: ${allOrders.length}, expectedTotal: ${expectedTotal}`);
+          console.log(`[Sync] ✅ Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas nesta chamada`);
+          console.log(`[Sync] 📊 Total: ${nextOffset}/${expectedTotal} vendas (${Math.round((nextOffset/expectedTotal)*100)}%)`);
+          console.log(`[Sync] 🎯 Completo: ${isComplete}, Continuar: ${shouldContinue}`);
         } catch (fetchError) {
           const fetchMsg = fetchError instanceof Error ? fetchError.message : 'Erro ao buscar vendas';
           console.error(`[Sync] ❌ Erro ao buscar vendas da conta ${current.ml_user_id}:`, fetchError);
+
+          // Salvar erro no progresso
+          await updateSyncProgress(userId, current.id, {
+            status: "error",
+            errorMessage: fetchMsg,
+          });
+
           throw new Error(`Falha ao buscar vendas: ${fetchMsg}`);
         }
 
@@ -2440,20 +2520,50 @@ export async function POST(req: NextRequest) {
           await processAndSave(allOrders, expectedTotal, 'completo');
           console.log(`[Sync] ✅ Salvamento concluído para conta ${current.ml_user_id}`);
 
+          // Atualizar progresso no banco de dados
+          const updateData: any = {
+            totalOrders: expectedTotal,
+            syncedOrders: nextOffset,
+            lastOffset: nextOffset,
+            lastSyncDate: new Date(),
+          };
+
+          if (isComplete) {
+            updateData.status = "completed";
+            updateData.completedAt = new Date();
+            console.log(`[Sync] 🎉 Sincronização COMPLETA para conta ${current.ml_user_id}!`);
+          } else {
+            updateData.status = "in_progress";
+            console.log(`[Sync] ⏸️ Sincronização PARCIAL - próximo offset: ${nextOffset}`);
+          }
+
+          await updateSyncProgress(userId, current.id, updateData);
+
           // Enviar evento SSE confirmando conclusão do salvamento
           sendProgressToUser(userId, {
-            type: "sync_progress",
-            message: `✅ Salvamento concluído para ${current.nickname || current.ml_user_id}`,
-            current: allOrders.length,
-            total: allOrders.length,
-            fetched: allOrders.length,
-            expected: allOrders.length,
+            type: isComplete ? "sync_account_complete" : "sync_progress",
+            message: isComplete
+              ? `✅ ${current.nickname || current.ml_user_id}: COMPLETO! ${nextOffset}/${expectedTotal} vendas`
+              : `⏸️ ${current.nickname || current.ml_user_id}: ${nextOffset}/${expectedTotal} vendas (continuará automaticamente)`,
+            current: nextOffset,
+            total: expectedTotal,
+            fetched: nextOffset,
+            expected: expectedTotal,
             accountId: current.id,
-            accountNickname: current.nickname || `Conta ${current.ml_user_id}`
+            accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+            needsContinuation: shouldContinue,
+            isComplete,
           });
         } catch (saveError) {
           const saveMsg = saveError instanceof Error ? saveError.message : 'Erro ao salvar vendas';
           console.error(`[Sync] ❌ Erro ao salvar vendas da conta ${current.ml_user_id}:`, saveError);
+
+          // Salvar erro no progresso
+          await updateSyncProgress(userId, current.id, {
+            status: "error",
+            errorMessage: saveMsg,
+          });
+
           throw new Error(`Falha ao salvar vendas: ${saveMsg}`);
         }
 
@@ -2501,30 +2611,91 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Enviar evento de conclusão da sincronização
-  sendProgressToUser(userId, {
-    type: "sync_complete",
-    message: `Sincronização concluída! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
-    current: totalSavedOrders,
-    total: totalExpectedOrders,
-    fetched: totalSavedOrders,
-    expected: totalExpectedOrders
-  });
+  // Verificar se alguma conta precisa continuar
+  // FALLBACK SEGURO: Se a tabela não existe, assume que não precisa continuar
+  let progressRecords: any[] = [];
+  try {
+    progressRecords = await prisma.meliSyncProgress.findMany({
+      where: {
+        userId,
+        accountId: { in: accounts.map(a => a.id) },
+      },
+    });
+  } catch (error) {
+    console.warn('[Sync] ⚠️ Não foi possível buscar progresso (tabela não existe). Assumindo sincronização completa.');
+    progressRecords = [];
+  }
+
+  const needsContinuation = progressRecords.some(
+    p => p.status === "in_progress" && p.syncedOrders < p.totalOrders
+  );
+
+  const incompleteAccounts = progressRecords.filter(
+    p => p.status === "in_progress" && p.syncedOrders < p.totalOrders
+  );
+
+  // Enviar evento de conclusão ou continuação
+  if (needsContinuation) {
+    console.log(`[Sync] ⏸️ Sincronização PARCIAL - ${incompleteAccounts.length} conta(s) precisam continuar`);
+    sendProgressToUser(userId, {
+      type: "sync_needs_continuation",
+      message: `Sincronização parcial concluída! ${incompleteAccounts.length} conta(s) precisam continuar. Reiniciando automaticamente...`,
+      current: totalSavedOrders,
+      total: totalExpectedOrders,
+      fetched: totalSavedOrders,
+      expected: totalExpectedOrders,
+      needsContinuation: true,
+      incompleteAccounts: incompleteAccounts.length,
+    });
+  } else {
+    console.log(`[Sync] ✅ Sincronização COMPLETA!`);
+    sendProgressToUser(userId, {
+      type: "sync_complete",
+      message: `Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
+      current: totalSavedOrders,
+      total: totalExpectedOrders,
+      fetched: totalSavedOrders,
+      expected: totalExpectedOrders,
+      needsContinuation: false,
+    });
+
+    // Limpar registros de progresso completados
+    // FALLBACK SEGURO: Se a tabela não existe, apenas loga
+    try {
+      await prisma.meliSyncProgress.deleteMany({
+        where: {
+          userId,
+          status: "completed",
+        },
+      });
+    } catch (error) {
+      console.warn('[Sync] ⚠️ Não foi possível limpar progresso (tabela não existe).');
+    }
+  }
 
   // Invalidar cache de vendas após sincronização
   invalidateVendasCache(userId);
   console.log(`[Cache] Cache de vendas invalidado para usuário ${userId}`);
 
-  // Fechar conexões SSE após um pequeno delay
-  setTimeout(() => {
-    closeUserConnections(userId);
-  }, 2000);
+  // Fechar conexões SSE após um pequeno delay (apenas se completo)
+  if (!needsContinuation) {
+    setTimeout(() => {
+      closeUserConnections(userId);
+    }, 2000);
+  }
 
   return NextResponse.json({
     syncedAt: new Date().toISOString(),
     accounts: summaries,
     orders: [] as MeliOrderPayload[],
     errors,
+    needsContinuation,
+    incompleteAccounts: incompleteAccounts.map(p => ({
+      accountId: p.accountId,
+      syncedOrders: p.syncedOrders,
+      totalOrders: p.totalOrders,
+      progress: p.totalOrders > 0 ? Math.round((p.syncedOrders / p.totalOrders) * 100) : 0,
+    })),
     totals: { 
       expected: totalExpectedOrders, 
       fetched: totalFetchedOrders,

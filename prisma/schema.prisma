@@ -434,3 +434,26 @@ model AliquotaImposto {
   @@index([ativo])
   @@map("aliquota_imposto")
 }
+
+model MeliSyncProgress {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+  accountId         String    @map("account_id")
+  totalOrders       Int       @default(0) @map("total_orders")
+  syncedOrders      Int       @default(0) @map("synced_orders")
+  lastOffset        Int       @default(0) @map("last_offset")
+  lastSyncDate      DateTime? @map("last_sync_date")
+  oldestOrderDate   DateTime? @map("oldest_order_date")
+  status            String    @default("pending") // pending, in_progress, completed, error
+  startedAt         DateTime  @default(now()) @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  errorMessage      String?   @map("error_message")
+  metadata          Json?     // Armazenar informações adicionais (ex: períodos já processados)
+
+  @@unique([userId, accountId])
+  @@index([userId])
+  @@index([accountId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("meli_sync_progress")
+}
