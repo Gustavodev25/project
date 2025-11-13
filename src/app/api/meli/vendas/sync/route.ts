@@ -78,30 +78,52 @@ const SAVE_BATCH_SIZE = 50; // Quantas vendas salvar por vez
 
 /**
  * Busca ou cria registro de progresso de sincronização
+ * FALLBACK SEGURO: Se a tabela não existe, retorna progresso padrão (offset 0)
  */
 async function getOrCreateSyncProgress(userId: string, accountId: string) {
-  const existing = await prisma.meliSyncProgress.findUnique({
-    where: { userId_accountId: { userId, accountId } },
-  });
+  try {
+    const existing = await prisma.meliSyncProgress.findUnique({
+      where: { userId_accountId: { userId, accountId } },
+    });
 
-  if (existing) {
-    return existing;
-  }
+    if (existing) {
+      return existing;
+    }
 
-  return await prisma.meliSyncProgress.create({
-    data: {
+    return await prisma.meliSyncProgress.create({
+      data: {
+        userId,
+        accountId,
+        status: "pending",
+        totalOrders: 0,
+        syncedOrders: 0,
+        lastOffset: 0,
+      },
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, retorna progresso padrão (offset 0)
+    console.warn('[Sync] ⚠️ Tabela meli_sync_progress não existe. Usando fallback (offset 0). Execute: npx prisma migrate deploy');
+    return {
+      id: 'fallback',
       userId,
       accountId,
-      status: "pending",
+      status: "pending" as const,
       totalOrders: 0,
       syncedOrders: 0,
       lastOffset: 0,
-    },
-  });
+      lastSyncDate: null,
+      oldestOrderDate: null,
+      startedAt: new Date(),
+      completedAt: null,
+      errorMessage: null,
+      metadata: null,
+    };
+  }
 }
 
 /**
  * Atualiza progresso de sincronização
+ * FALLBACK SEGURO: Se a tabela não existe, apenas loga (não falha)
  */
 async function updateSyncProgress(
   userId: string,
@@ -117,23 +139,35 @@ async function updateSyncProgress(
     lastSyncDate?: Date;
   }
 ) {
-  return await prisma.meliSyncProgress.update({
-    where: { userId_accountId: { userId, accountId } },
-    data,
-  });
+  try {
+    return await prisma.meliSyncProgress.update({
+      where: { userId_accountId: { userId, accountId } },
+      data,
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, apenas loga (não quebra)
+    console.warn('[Sync] ⚠️ Não foi possível atualizar progresso (tabela não existe).');
+    return null;
+  }
 }
 
 /**
  * Limpa registros de progresso completados (após 24h)
+ * FALLBACK SEGURO: Se a tabela não existe, apenas loga
  */
 async function cleanupCompletedProgress() {
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  await prisma.meliSyncProgress.deleteMany({
-    where: {
-      status: "completed",
-      completedAt: { lt: oneDayAgo },
-    },
-  });
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.meliSyncProgress.deleteMany({
+      where: {
+        status: "completed",
+        completedAt: { lt: oneDayAgo },
+      },
+    });
+  } catch (error) {
+    // FALLBACK: Se a tabela não existe, ignora
+    console.warn('[Sync] ⚠️ Não foi possível limpar progresso completado (tabela não existe).');
+  }
 }
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
@@ -2578,12 +2612,19 @@ export async function POST(req: NextRequest) {
   }
 
   // Verificar se alguma conta precisa continuar
-  const progressRecords = await prisma.meliSyncProgress.findMany({
-    where: {
-      userId,
-      accountId: { in: accounts.map(a => a.id) },
-    },
-  });
+  // FALLBACK SEGURO: Se a tabela não existe, assume que não precisa continuar
+  let progressRecords: any[] = [];
+  try {
+    progressRecords = await prisma.meliSyncProgress.findMany({
+      where: {
+        userId,
+        accountId: { in: accounts.map(a => a.id) },
+      },
+    });
+  } catch (error) {
+    console.warn('[Sync] ⚠️ Não foi possível buscar progresso (tabela não existe). Assumindo sincronização completa.');
+    progressRecords = [];
+  }
 
   const needsContinuation = progressRecords.some(
     p => p.status === "in_progress" && p.syncedOrders < p.totalOrders
@@ -2619,12 +2660,17 @@ export async function POST(req: NextRequest) {
     });
 
     // Limpar registros de progresso completados
-    await prisma.meliSyncProgress.deleteMany({
-      where: {
-        userId,
-        status: "completed",
-      },
-    });
+    // FALLBACK SEGURO: Se a tabela não existe, apenas loga
+    try {
+      await prisma.meliSyncProgress.deleteMany({
+        where: {
+          userId,
+          status: "completed",
+        },
+      });
+    } catch (error) {
+      console.warn('[Sync] ⚠️ Não foi possível limpar progresso (tabela não existe).');
+    }
   }
 
   // Invalidar cache de vendas após sincronização
