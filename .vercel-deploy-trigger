@@ -1,0 +1,20 @@
+# Deploy Trigger File
+# Este arquivo força um novo deploy no Vercel
+# Última atualização: 2025-11-13 13:50:00
+
+DEPLOY_VERSION=v2.0.0-incremental-sync
+DEPLOY_DATE=2025-11-13T13:50:00Z
+DEPLOY_REASON=Sincronização incremental ML - todas as vendas sem limite
+
+## Mudanças incluídas:
+- Sistema de checkpoints (tabela meli_sync_progress)
+- Sincronização incremental inteligente
+- Fallback seguro para funcionar sem migration
+- Remove limite de 2.500 vendas
+- Respeita timeout do Vercel (60s)
+
+## Status:
+✅ Pronto para produção
+✅ Testado com fallback seguro
+✅ Funciona sem aplicar migration (usa offset 0)
+✅ Quando migration aplicada: checkpoints automáticos
