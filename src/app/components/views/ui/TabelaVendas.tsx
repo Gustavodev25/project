@@ -474,10 +474,11 @@ export default function TabelaVendas({
             connect();
             // Aguardar um pouco para SSE conectar antes de iniciar sincronização
             setTimeout(() => {
-              handleSyncOrders();
+              // EMPTY STATE: sincronização completa de TODAS as contas desde 01/01/2025
+              handleSyncOrders(undefined, undefined, true); // fullSync = true
             }, 500);
           } else {
-            handleSyncOrders();
+            handleSyncOrders(undefined, undefined, true); // fullSync = true
           }
         }}
         disabled={isSyncing}

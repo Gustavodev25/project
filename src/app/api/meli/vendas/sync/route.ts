@@ -709,16 +709,22 @@ async function fetchAllOrdersForAccount(
   headers: Record<string, string>,
   userId: string,
   quickMode: boolean = false, // Novo parÃ¢metro para controle de modo
+  fullSync: boolean = false, // Novo parÃ¢metro para sincronizaÃ§Ã£o completa desde 01/2025
 ): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
   const startTime = Date.now();
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar em 20s e deixar 40s para salvar no banco (total 60s)
   // Salvamento de 500 vendas ~5s, mas com margem de seguranÃ§a para contas grandes
   // Em background mode, pode usar atÃ© 45s de busca (deixa 15s para salvar ~1500 vendas)
-  const MAX_EXECUTION_TIME = quickMode ? 20000 : 45000; // 20s quick ou 45s background
+  const MAX_EXECUTION_TIME = fullSync
+    ? 50000  // fullSync: 50 segundos de busca
+    : (quickMode ? 20000 : 45000); // 20s quick ou 45s background
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
 
-  console.log(`[Sync] ðŸš€ Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${quickMode ? 'QUICK (20s busca + 40s salvar)' : 'BACKGROUND (45s busca + 15s salvar)'}`);
+  const modoTexto = fullSync
+    ? 'FULL SYNC (buscar TODAS as vendas)'
+    : (quickMode ? 'QUICK (20s busca + 40s salvar)' : 'BACKGROUND (45s busca + 15s salvar)');
+  console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${modoTexto}`);
 
   // Verificar venda mais antiga jÃ¡ sincronizada para continuar de onde parou
   const oldestSyncedOrder = await prisma.meliVenda.findFirst({
@@ -741,7 +747,9 @@ async function fetchAllOrdersForAccount(
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar apenas 500 vendas para garantir tempo de salvar no banco
   // Salvamento de ~10k vendas demora ~30s, entÃ£o limitar busca para caber em 60s total
   // Em background, buscar 1500 vendas (mais conservador para evitar timeout)
-  let maxOffsetToFetch = quickMode ? Math.min(MAX_OFFSET, 500) : Math.min(MAX_OFFSET, 1500);
+  let maxOffsetToFetch = fullSync
+    ? MAX_OFFSET  // fullSync: buscar tudo (até 9.950 vendas recentes)
+    : (quickMode ? Math.min(MAX_OFFSET, 500) : Math.min(MAX_OFFSET, 1500));
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
@@ -854,9 +862,10 @@ async function fetchAllOrdersForAccount(
 
   // PASSO 2: Buscar vendas histÃ³ricas se ainda hÃ¡ tempo e se hÃ¡ vendas antigas nÃ£o sincronizadas
   const timeRemaining = MAX_EXECUTION_TIME - (Date.now() - startTime);
-  const shouldFetchHistory = timeRemaining > 15000; // Precisa de pelo menos 15s restantes
+  // Em fullSync, SEMPRE buscar histÃ³rico mesmo com pouco tempo (vai fazer mÃºltiplas requisições)
+  const shouldFetchHistory = fullSync ? true : (timeRemaining > 15000);
 
-  if (shouldFetchHistory && (total > results.length || oldestSyncedDate)) {
+  if (shouldFetchHistory && (total > results.length || oldestSyncedDate || fullSync)) {
     console.log(`[Sync] ðŸ”„ Buscando vendas histÃ³ricas (tempo restante: ${Math.round(timeRemaining / 1000)}s)...`);
 
     // Determinar ponto de partida para busca histÃ³rica
@@ -883,7 +892,9 @@ async function fetchAllOrdersForAccount(
     currentMonthStart.setHours(0, 0, 0, 0);
     currentMonthStart.setMonth(currentMonthStart.getMonth() - 1); // ComeÃ§ar do mÃªs anterior
 
-    const startDate = new Date('2010-01-01'); // Data limite bem antiga
+    // NOVA LÃ"GICA: Se fullSync, buscar TODAS as vendas (desde 2000). Caso contrÃ¡rio, buscar desde 2010.
+    const startDate = fullSync ? new Date('2000-01-01') : new Date('2010-01-01');
+    console.log(`[Sync] ${fullSync ? '🎯 FULL SYNC ativado - buscando TODAS as vendas (desde 2000)' : '📅 Modo incremental - buscando desde 2010'}`);
 
     // Buscar enquanto tiver tempo
     while (currentMonthStart > startDate && Date.now() - startTime < MAX_EXECUTION_TIME - 5000) {
@@ -2065,6 +2076,7 @@ export async function POST(req: NextRequest) {
     accountIds?: string[];
     orderIdsByAccount?: Record<string, string[]>;
     quickMode?: boolean; // NOVO: indica se deve retornar rÃ¡pido (30s) ou nÃ£o
+    fullSync?: boolean; // NOVO: indica sincronizaÃ§Ã£o completa desde 01/01/2025
   } = {};
 
   try {
@@ -2078,11 +2090,13 @@ export async function POST(req: NextRequest) {
 
   // Por padrÃ£o, usar quickMode=true para evitar timeout
   const quickMode = requestBody.quickMode !== false; // true por padrÃ£o, false apenas se explicitamente passado
+  const fullSync = requestBody.fullSync === true; // fullSync apenas se explicitamente true
 
   console.log(`[Sync] Iniciando sincronizaÃ§Ã£o para usuÃ¡rio ${userId}`, {
     accountIds: requestBody.accountIds,
     hasOrderIds: !!requestBody.orderIdsByAccount,
-    quickMode: quickMode // Log do modo
+    quickMode: quickMode, // Log do modo
+    fullSync: fullSync // Log do modo fullSync
   });
 
   // Dar um delay para garantir que o SSE estÃ¡ conectado
@@ -2364,6 +2378,7 @@ export async function POST(req: NextRequest) {
             headers,
             userId,
             quickMode, // NOVO: passa o modo de sincronizaÃ§Ã£o
+            fullSync, // NOVO: passa o modo fullSync
           );
           allOrders = result.orders;
           expectedTotal = result.expectedTotal;
@@ -2455,15 +2470,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Verificar se hÃ¡ mais vendas antigas para sincronizar (quando em quickMode)
-  const hasMoreToSync = quickMode && totalFetchedOrders < totalExpectedOrders;
+  // Verificar se hÃ¡ mais vendas antigas para sincronizar
+  // Em fullSync ou quickMode, indicar se ainda faltam vendas
+  const hasMoreToSync = (fullSync || quickMode) && totalFetchedOrders < totalExpectedOrders;
 
   // Enviar evento de conclusÃ£o da sincronizaÃ§Ã£o
+  let mensagemFinal = '';
+  if (fullSync && hasMoreToSync) {
+    mensagemFinal = `✅ ${totalSavedOrders} vendas sincronizadas de ${totalExpectedOrders}! Clique novamente para continuar...`;
+  } else if (fullSync) {
+    mensagemFinal = `✅ Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders}`;
+  } else if (quickMode) {
+    mensagemFinal = `Vendas recentes sincronizadas! ${totalSavedOrders} vendas processadas${hasMoreToSync ? '. Sincronizando vendas antigas em background...' : ''}`;
+  } else {
+    mensagemFinal = `Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`;
+  }
+
   sendProgressToUser(userId, {
     type: "sync_complete",
-    message: quickMode
-      ? `Vendas recentes sincronizadas! ${totalSavedOrders} vendas processadas${hasMoreToSync ? '. Sincronizando vendas antigas em background...' : ''}`
-      : `SincronizaÃ§Ã£o completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`,
+    message: mensagemFinal,
     current: totalSavedOrders,
     total: totalExpectedOrders,
     fetched: totalSavedOrders,

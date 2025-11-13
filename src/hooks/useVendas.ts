@@ -100,7 +100,6 @@ export function useVendas(platform: string = "Mercado Livre") {
   const syncCompleteProcessedRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingAccountsRef = useRef(0);
-  const lastAccountIdsRef = useRef<string[]>([]); // NOVO: guardar IDs das contas sendo sincronizadas
 
   // Resetar flag quando começar nova sincronização
   useEffect(() => {
@@ -173,14 +172,6 @@ export function useVendas(platform: string = "Mercado Livre") {
           setIsSyncing(false);
           setIsTableLoading(false);
 
-          // Verificar se há mais vendas antigas para sincronizar
-          const hasMoreToSync = (progress as any).hasMoreToSync;
-          if (hasMoreToSync) {
-            console.log('[useVendas] 🔄 Há vendas antigas pendentes - iniciando sincronização em background');
-            // Iniciar sincronização de vendas antigas em background
-            syncOlderOrdersInBackground(lastAccountIdsRef.current);
-          }
-
           // Desconectar SSE após um delay
           setTimeout(() => {
             disconnect();
@@ -195,78 +186,6 @@ export function useVendas(platform: string = "Mercado Livre") {
     }
   }, [progress, platform, disconnect]);
 
-  /**
-   * Função para sincronizar vendas antigas em background
-   * - Chamada automaticamente quando há vendas pendentes
-   * - Mostra toast informando o usuário
-   * - Não bloqueia a UI
-   */
-  const syncOlderOrdersInBackground = async (accountIds?: string[]) => {
-    try {
-      console.log('[useVendas] 🔄 Iniciando sincronização de vendas antigas em background');
-
-      // Mostrar toast informando o usuário
-      toast({
-        title: "Sincronizando vendas antigas",
-        description: "Buscando histórico de vendas em background...",
-        variant: "default"
-      });
-
-      const body: any = {};
-      if (accountIds && accountIds.length > 0) {
-        body.accountIds = accountIds;
-      }
-
-      // Chamar endpoint de background
-      const res = await fetch('/api/meli/vendas/sync-background', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        console.error('[useVendas] Erro ao sincronizar vendas antigas:', res.status);
-        toast({
-          title: "Erro na sincronização",
-          description: "Não foi possível sincronizar vendas antigas. Tente novamente.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const result = await res.json();
-      console.log('[useVendas] ✅ Sincronização de vendas antigas concluída', result);
-
-      // Recarregar vendas após sincronização em background
-      await loadVendasFromDatabase();
-
-      // Mostrar toast de sucesso
-      const saved = result.totals?.saved || 0;
-      toast({
-        title: "Vendas antigas sincronizadas!",
-        description: `${saved} vendas adicionadas ao histórico.`,
-        variant: "default"
-      });
-
-      // Se ainda há mais vendas, continuar sincronizando recursivamente
-      if (result.hasMoreToSync) {
-        console.log('[useVendas] 🔄 Ainda há vendas antigas pendentes - continuando sincronização');
-        setTimeout(() => {
-          syncOlderOrdersInBackground(accountIds);
-        }, 5000); // Aguardar 5s antes de continuar
-      }
-    } catch (error) {
-      console.error('[useVendas] Erro ao sincronizar vendas antigas:', error);
-      toast({
-        title: "Erro na sincronização",
-        description: error instanceof Error ? error.message : "Erro desconhecido",
-        variant: "destructive"
-      });
-    }
-  };
 
   const handleConnectAccount = () => {
     if (platform === "Mercado Livre") {
@@ -289,10 +208,10 @@ export function useVendas(platform: string = "Mercado Livre") {
     }
   };
 
-  const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>) => {
+  const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>, fullSync?: boolean) => {
     try {
       console.log(`[useVendas] 🚀 Iniciando sincronização de vendas para ${platform}`);
-      console.log(`[useVendas] Parâmetros recebidos:`, { accountIds, orderIdsByAccount });
+      console.log(`[useVendas] Parâmetros recebidos:`, { accountIds, orderIdsByAccount, fullSync });
       setIsSyncing(true);
       setIsTableLoading(true);
       setSyncProgress({ fetched: 0, expected: 0 });
@@ -341,9 +260,6 @@ export function useVendas(platform: string = "Mercado Livre") {
           throw new Error("Nenhuma conta do Mercado Livre conectada para sincronizar.");
         }
 
-        // NOVO: Salvar IDs das contas para uso posterior em sincronização background
-        lastAccountIdsRef.current = accountsToSync;
-
         pendingAccountsRef.current = accountsToSync.length;
 
         let aggregatedErrors: MeliOrdersResponse["errors"] = [];
@@ -354,6 +270,9 @@ export function useVendas(platform: string = "Mercado Livre") {
           const body: any = { accountIds: [accountId] };
           if (orderIdsByAccount?.[accountId]?.length) {
             body.orderIdsByAccount = { [accountId]: orderIdsByAccount[accountId] };
+          }
+          if (fullSync) {
+            body.fullSync = true; // Adicionar parâmetro fullSync ao body
           }
 
           console.log(`[useVendas] Chamando API /api/meli/vendas/sync DIRETAMENTE com body:`, body);

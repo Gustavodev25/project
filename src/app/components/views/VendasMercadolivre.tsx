@@ -49,21 +49,10 @@ const HeaderVendasMercadolivre = ({
   reloadVendas
 }: HeaderVendasMercadolivreProps) => {
   const router = useRouter();
-  const toast = useToast();
-  // Verifica se já houve alguma sincronização
-  const hasBeenSynced = lastSyncedAt !== null;
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
 
-  // Estados para sincronização automática
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
-  const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
-  const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Estados para contas novas sem vendas
-  const [newAccounts, setNewAccounts] = useState<any[]>([]);
-  const [isLoadingNewAccounts, setIsLoadingNewAccounts] = useState(true);
 
   // Hook para dropdown de informações
   const infoDropdown = useSmartDropdown<HTMLButtonElement>({
@@ -75,165 +64,14 @@ const HeaderVendasMercadolivre = ({
   });
 
 
-  // Função para verificar novas vendas (para auto-sync)
-  const handleCheckNewOrders = async (silent = false) => {
-    try {
-      console.log("[VendasML] Verificando vendas novas...");
-      const res = await fetch("/api/meli/vendas/check", {
-        cache: "no-store",
-        credentials: "include"
-      });
-      if (!res.ok) {
-        throw new Error(`Erro ${res.status}`);
-      }
 
-      const result = await res.json();
-      console.log("[VendasML] Resultado da verificação:", result);
-      const newCount = result.totals?.new || 0;
-      console.log("[VendasML] Vendas novas encontradas:", newCount);
-      setNewOrdersCount(newCount);
 
-      if (!silent && newCount > 0) {
-        toast({
-          title: "Vendas novas encontradas!",
-          description: `${newCount} venda${newCount > 1 ? 's' : ''} nova${newCount > 1 ? 's' : ''} disponível${newCount > 1 ? 'eis' : ''} para sincronizar.`,
-          variant: "success"
-        });
-      }
-    } catch (error) {
-      console.error("[VendasML] Erro ao verificar vendas:", error);
-      if (!silent) {
-        toast({
-          title: "Erro ao verificar vendas",
-          description: error instanceof Error ? error.message : "Erro desconhecido",
-          variant: "destructive"
-        });
-      }
-    }
-  };
 
-  // Carregar configurações do servidor
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const res = await fetch("/api/settings/auto-sync", {
-          credentials: "include", // Incluir cookies de autenticação
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAutoSyncEnabled(data.autoSyncEnabled);
-        }
-      } catch (error) {
-        console.error("Erro ao carregar configurações:", error);
-      } finally {
-        setIsLoadingSettings(false);
-      }
-    };
 
-    loadSettings();
-  }, []);
 
-  // Carregar notificações ao montar componente
-  useEffect(() => {
-    const loadNotifications = async () => {
-      try {
-        const res = await fetch("/api/notifications", {
-          credentials: "include", // Incluir cookies de autenticação
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const newOrdersNotification = data.notifications.find(
-            (n: any) => n.type === "new_orders" && !n.isRead
-          );
-          if (newOrdersNotification) {
-            setNewOrdersCount(newOrdersNotification.newOrdersCount);
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao carregar notificações:", error);
-      }
-    };
-
-    loadNotifications();
-  }, []);
-
-  // Carregar contas novas sem vendas ao montar componente
-  useEffect(() => {
-    const loadNewAccounts = async () => {
-      try {
-        setIsLoadingNewAccounts(true);
-        const res = await fetch("/api/meli/accounts/new", {
-          credentials: "include",
-          cache: "no-store",
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          console.log("[VendasML] Contas novas carregadas:", data);
-          setNewAccounts(data.newAccounts || []);
-        }
-      } catch (error) {
-        console.error("[VendasML] Erro ao carregar contas novas:", error);
-        setNewAccounts([]);
-      } finally {
-        setIsLoadingNewAccounts(false);
-      }
-    };
-
-    loadNewAccounts();
-  }, []);
-
-  // Função para alternar sincronização automática
-  const handleToggleAutoSync = async () => {
-    const newValue = !autoSyncEnabled;
-    
-    try {
-      const res = await fetch("/api/settings/auto-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // Incluir cookies de autenticação
-        body: JSON.stringify({ enabled: newValue }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        console.error("Erro na resposta da API:", {
-          status: res.status,
-          statusText: res.statusText,
-          error: errorData
-        });
-        throw new Error(`Erro ao atualizar configurações: ${errorData.error || res.statusText}`);
-      }
-
-      const result = await res.json();
-      console.log("Configuração atualizada com sucesso:", result);
-      
-      setAutoSyncEnabled(newValue);
-      
-      if (newValue) {
-        handleCheckNewOrders(true);
-      } else {
-        setNewOrdersCount(0);
-      }
-    } catch (error) {
-      console.error("Erro ao alternar auto-sync:", error);
-      toast.toast({
-        variant: "error",
-        title: "Erro ao atualizar configurações",
-        description: `Erro ao atualizar configurações: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.`,
-      });
-    }
-  };
-
-  // Função para abrir modal e limpar notificações
+  // Função para abrir modal
   const handleOpenSyncModal = () => {
     setShowSyncModal(true);
-    // Limpar notificações ao abrir o modal
-    fetch("/api/notifications", {
-      method: "DELETE",
-      credentials: "include",
-    }).catch(err => console.error("Erro ao marcar notificações:", err));
-    setNewOrdersCount(0);
   };
 
   const handleSyncComplete = async () => {
@@ -243,50 +81,9 @@ const HeaderVendasMercadolivre = ({
     if (reloadVendas) {
       await reloadVendas();
     }
-    // Recarregar lista de contas novas
-    const res = await fetch("/api/meli/accounts/new", {
-      credentials: "include",
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setNewAccounts(data.newAccounts || []);
-    }
     // Fechar modal (já acontece automaticamente no ModalSyncVendas)
   };
 
-  // Função para sincronizar conta nova específica
-  const handleSyncNewAccount = async (accountId: string) => {
-    console.log("[VendasML] Sincronizando conta nova:", accountId);
-    // Chamar onSyncOrders com o ID da conta (sincronização completa do histórico)
-    await onSyncOrders([accountId]);
-  };
-
-  // Effect para sincronização automática
-  useEffect(() => {
-    // Limpar intervalo anterior
-    if (autoSyncIntervalRef.current) {
-      clearInterval(autoSyncIntervalRef.current);
-      autoSyncIntervalRef.current = null;
-    }
-
-    // Se a sincronização automática está ativa, criar novo intervalo
-    if (autoSyncEnabled) {
-      // 10 minutos = 600.000 milissegundos
-      autoSyncIntervalRef.current = setInterval(() => {
-        handleCheckNewOrders(true);
-      }, 600000);
-    }
-
-    // Cleanup ao desmontar
-    return () => {
-      if (autoSyncIntervalRef.current) {
-        clearInterval(autoSyncIntervalRef.current);
-        autoSyncIntervalRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSyncEnabled]);
 
   const formatDate = (dateString: string) => {
     if (!dateString) return "-";
@@ -384,43 +181,6 @@ const HeaderVendasMercadolivre = ({
 
       {/* Container de botões */}
       <div className="flex items-center gap-3">
-        {/* Botão de Sincronização Nova Conta */}
-        {!isLoadingNewAccounts && newAccounts.length > 0 && (
-          <button
-            onClick={() => handleSyncNewAccount(newAccounts[0].id)}
-            className="inline-flex items-center gap-2 rounded-md border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:bg-green-100 hover:border-green-400 disabled:opacity-50 disabled:cursor-not-allowed text-green-700"
-            disabled={isSyncing}
-            title={`Sincronizar vendas da conta: ${newAccounts[0].nickname || `ID ${newAccounts[0].ml_user_id}`}`}
-          >
-            {/* Ícone de estrela/sparkle */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-            </svg>
-
-            {/* Texto */}
-            <span>
-              Sincronizar {newAccounts[0].nickname || "conta nova"}
-            </span>
-
-            {/* Badge de contador */}
-            {newAccounts.length > 1 && (
-              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-green-700 bg-green-200 rounded-full">
-                {newAccounts.length}
-              </span>
-            )}
-          </button>
-        )}
-
         {/* Botão de Sincronização */}
         <button
           onClick={handleOpenSyncModal}
@@ -448,12 +208,6 @@ const HeaderVendasMercadolivre = ({
                 <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z" />
                 <path d="M9 11v-5a3 3 0 0 1 6 0v5" />
               </svg>
-            )}
-            {/* Badge de vendas novas */}
-            {newOrdersCount > 0 && !isSyncing && (
-              <span className="absolute -top-2 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full animate-pulse">
-                {newOrdersCount > 99 ? '99+' : newOrdersCount}
-              </span>
             )}
           </div>
 
