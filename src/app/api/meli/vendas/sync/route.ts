@@ -4,10 +4,10 @@
  * OTIMIZAÇÕES IMPLEMENTADAS:
  * ============================
  *
- * 1. SINCRONIZAÇÃO INCREMENTAL:
- *    - Busca até 2.500 vendas mais recentes por sincronização (limite conservador para garantir 60s)
- *    - Para contas com mais vendas: execute múltiplas sincronizações
+ * 1. SINCRONIZAÇÃO COMPLETA SEM LIMITES:
+ *    - Busca TODAS as vendas da conta automaticamente (1k, 10k, 50k+)
  *    - Vendas já existentes são atualizadas (UPDATE), não duplicadas
+ *    - Uma única sincronização busca todo o histórico
  *
  * 2. DIVISÃO AUTOMÁTICA DE PERÍODOS:
  *    - Quando um período tem mais de 9.950 vendas (limite da API do ML):
@@ -34,27 +34,22 @@
  *
  * 6. GESTÃO DE TIMEOUT (Vercel Pro):
  *    - Limite de 60 segundos por função
- *    - Máximo de 2.500 vendas por sincronização (conservador, garante completion)
  *    - Processamento paralelo de detalhes de ordem
- *    - Para histórico completo: execute sincronização múltiplas vezes
+ *    - Sistema inteligente contorna limite de 10k da API do ML
  *
  * COMO FUNCIONA:
  * ==============
- * 1. Busca até 2.500 vendas mais recentes com paginação
- * 2. Se total > 9.950, busca vendas antigas por períodos mensais (até atingir 2.5k)
- * 3. Se um mês tem > 9.950 vendas, divide em períodos de 7-14 dias automaticamente
+ * 1. Busca até 9.950 vendas mais recentes com paginação (limite da API)
+ * 2. Se total > 9.950, busca vendas antigas por períodos mensais automaticamente
+ * 3. Se um mês tem > 9.950 vendas, divide em períodos de 7-14 dias recursivamente
  * 4. Salva todas as vendas em lotes de 50 no banco de dados
  * 5. Envia progresso em tempo real via SSE
- * 6. Para contas com >2.5k vendas: Execute novamente para buscar mais vendas antigas
+ * 6. Continua buscando até não encontrar mais vendas (histórico completo)
  *
- * EXEMPLO DE USO (conta com 12k vendas):
+ * EXEMPLO DE USO (conta com 50k vendas):
  * ======================================
- * Sync 1: Vendas 1-2.500 (40s)
- * Sync 2: Vendas 2.501-5.000 (40s)
- * Sync 3: Vendas 5.001-7.500 (40s)
- * Sync 4: Vendas 7.501-10.000 (40s)
- * Sync 5: Vendas 10.001-12.000 (35s)
- * Total: 5 sincronizações de ~40s cada = histórico completo em ~3-4 minutos
+ * Uma única sincronização busca todas as 50k vendas automaticamente
+ * dividindo em períodos quando necessário para contornar limite da API
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -709,7 +704,6 @@ async function fetchAllOrdersForAccount(
 ): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
-  const SYNC_LIMIT = 2500;
 
   console.log(`[Sync] 🚀 Iniciando busca completa de vendas para conta ${account.ml_user_id} (${account.nickname})`);
 
@@ -717,7 +711,7 @@ async function fetchAllOrdersForAccount(
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  let maxOffsetToFetch = Math.min(MAX_OFFSET, SYNC_LIMIT);
+  let maxOffsetToFetch = MAX_OFFSET;
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
@@ -740,7 +734,7 @@ async function fetchAllOrdersForAccount(
         ) {
           discoveredTotal = pageResult.total;
           total = discoveredTotal;
-          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal ?? Infinity, SYNC_LIMIT);
+          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal);
           console.log(
             `[Sync] ?? Conta ${account.ml_user_id}: total estimado ${total} vendas`,
           );
@@ -794,7 +788,7 @@ async function fetchAllOrdersForAccount(
     activePages.add(pagePromise);
   };
 
-  while (activePages.size < PAGE_FETCH_CONCURRENCY && nextOffset < maxOffsetToFetch) {
+  while (activePages.size < PAGE_FETCH_CONCURRENCY && nextOffset < MAX_OFFSET) {
     schedulePageFetch(nextOffset);
     nextOffset += PAGE_LIMIT;
   }
@@ -814,9 +808,9 @@ async function fetchAllOrdersForAccount(
     total = results.length;
   }
 
-  // PASSO 2: Se total > 9.950 E ainda não atingiu limite de segurança, buscar vendas antigas por período mensal
-  if (results.length < total) {
-    console.log(`[Sync] 🔄 Buscando até ${total - results.length} vendas restantes por período...`);
+  // PASSO 2: Se total > 9.950, buscar vendas antigas por período mensal SEM LIMITES
+  if (total > MAX_OFFSET) {
+    console.log(`[Sync] 🔄 Buscando vendas históricas por período (total estimado: ${total}, já baixadas: ${results.length})...`);
 
     // Pegar data da venda mais antiga já baixada
     const fallbackOldest =
@@ -833,9 +827,10 @@ async function fetchAllOrdersForAccount(
     currentMonthStart.setHours(0, 0, 0, 0);
     currentMonthStart.setMonth(currentMonthStart.getMonth() - 1); // Começar do mês anterior
 
-    const startDate = new Date('2020-01-01'); // Data limite (ajustar conforme necessário)
+    const startDate = new Date('2010-01-01'); // Data limite bem antiga para garantir busca completa
 
-    while (currentMonthStart > startDate && results.length < Math.min(total, SYNC_LIMIT)) {
+    // Continuar buscando ATÉ NÃO ENCONTRAR MAIS VENDAS (não parar no total estimado)
+    while (currentMonthStart > startDate) {
       // Calcular fim do mês
       const currentMonthEnd = new Date(currentMonthStart);
       currentMonthEnd.setMonth(currentMonthEnd.getMonth() + 1);
@@ -856,23 +851,15 @@ async function fetchAllOrdersForAccount(
 
       console.log(`[Sync] ✅ Encontradas ${monthOrders.length} vendas neste período`);
 
-      const remainingCapacity = Math.max(0, Math.min(SYNC_LIMIT, total) - results.length);
-      if (remainingCapacity === 0) {
-        break;
-      }
-      const cappedOrders =
-        monthOrders.length > remainingCapacity
-          ? monthOrders.slice(0, remainingCapacity)
-          : monthOrders;
-      results.push(...cappedOrders);
+      results.push(...monthOrders);
 
       sendProgressToUser(userId, {
         type: 'sync_progress',
-        message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${results.length}/${total} vendas baixadas (buscando histórico: ${currentMonthStart.toISOString().split('T')[0]})`,
+        message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${results.length} vendas baixadas (buscando histórico: ${currentMonthStart.toISOString().split('T')[0]})`,
         current: results.length,
-        total: total,
+        total: Math.max(total, results.length), // Usar o maior valor entre total estimado e vendas baixadas
         fetched: results.length,
-        expected: total,
+        expected: Math.max(total, results.length),
         accountId: account.id,
         accountNickname: account.nickname,
       });
@@ -887,24 +874,15 @@ async function fetchAllOrdersForAccount(
       currentMonthStart.setMonth(currentMonthStart.getMonth() - 1);
     }
 
-    console.log(`[Sync] ✅ Busca por período concluída: ${results.length} vendas de ${total} totais`);
+    console.log(`[Sync] ✅ Busca por período concluída: ${results.length} vendas baixadas (total inicial estimado: ${total})`);
   }
 
-  console.log(`[Sync] 🎉 ${results.length} vendas baixadas de ${total} totais`);
+  // Atualizar o total para o número real de vendas encontradas se for maior que o estimado
+  const finalTotal = Math.max(total, results.length);
+  console.log(`[Sync] 🎉 ${results.length} vendas baixadas (total estimado: ${total}, real: ${results.length})`);
   console.log(`[Sync] 📊 Tipos de logística:`, Array.from(logisticStats.entries()));
 
-  if (results.length < total) {
-    console.log(
-      `[Sync] Limite de ${SYNC_LIMIT} vendas por sincronização atingido (${results.length}/${total}). Execute novamente para buscar vendas mais antigas.`,
-    );
-    sendProgressToUser(userId, {
-      type: "sync_warning",
-      message: `Limite de ${SYNC_LIMIT} vendas atingido nesta sincronização. Para buscar pedidos mais antigos, execute novamente.`,
-      errorCode: "SYNC_LIMIT_REACHED",
-    });
-  }
-
-  return { orders: results, expectedTotal: total };
+  return { orders: results, expectedTotal: finalTotal };
 }
 
 /**
