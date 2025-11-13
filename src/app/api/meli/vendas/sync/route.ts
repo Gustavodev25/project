@@ -74,7 +74,6 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
-const MAX_VENDAS_POR_SYNC = 1500; // Limite ULTRA-CONSERVADOR: ~30s buscar + ~25s salvar = 55s total (margem de 5s)
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
@@ -614,23 +613,8 @@ async function fetchAllOrdersForAccount(
       total = payload.paging.total;
       console.log(`[Sync] 📊 Total: ${total} vendas encontradas`);
 
-      // Avisar sobre limite para evitar timeout
-      if (total > MAX_VENDAS_POR_SYNC) {
-        console.log(`[Sync] ⚠️ Conta tem ${total} vendas - limitando a ${MAX_VENDAS_POR_SYNC} mais recentes para evitar timeout`);
-        sendProgressToUser(userId, {
-          type: "sync_warning",
-          message: `Conta ${account.nickname || account.ml_user_id} tem ${total} vendas. Sincronizando ${MAX_VENDAS_POR_SYNC} mais recentes. Execute a sincronização novamente para buscar mais.`,
-          current: 0,
-          total: Math.min(total, MAX_VENDAS_POR_SYNC),
-          fetched: 0,
-          expected: Math.min(total, MAX_VENDAS_POR_SYNC),
-          accountId: account.id,
-          accountNickname: account.nickname
-        });
-      }
-
       // Se total > 10k, avisar que vai buscar por período
-      if (total > MAX_OFFSET && total <= MAX_VENDAS_POR_SYNC) {
+      if (total > MAX_OFFSET) {
         console.log(`[Sync] ⚠️ Conta tem mais de ${MAX_OFFSET} vendas - após buscar as recentes, buscará histórico por período`);
       }
     }
@@ -716,18 +700,12 @@ async function fetchAllOrdersForAccount(
       break;
     }
 
-    // LIMITE DE SEGURANÇA: Parar em MAX_VENDAS_POR_SYNC para evitar timeout
-    if (results.length >= MAX_VENDAS_POR_SYNC) {
-      console.log(`[Sync] ⏱️ Atingiu limite de ${MAX_VENDAS_POR_SYNC} vendas - parando para evitar timeout`);
-      break;
-    }
-
     // SEM DELAY - Processar o mais rápido possível
   }
 
   // PASSO 2: Se total > 9.950 E ainda não atingiu limite de segurança, buscar vendas antigas por período mensal
-  if (total > MAX_OFFSET && results.length < total && results.length < MAX_VENDAS_POR_SYNC) {
-    console.log(`[Sync] 🔄 Buscando até ${Math.min(total, MAX_VENDAS_POR_SYNC) - results.length} vendas restantes por período...`);
+  if (total > MAX_OFFSET && results.length < total) {
+    console.log(`[Sync] 🔄 Buscando até ${total - results.length} vendas restantes por período...`);
 
     // Pegar data da venda mais antiga já baixada
     const oldestDate = results.length > 0
@@ -744,7 +722,7 @@ async function fetchAllOrdersForAccount(
 
     const startDate = new Date('2020-01-01'); // Data limite (ajustar conforme necessário)
 
-    while (currentMonthStart > startDate && results.length < total && results.length < MAX_VENDAS_POR_SYNC) {
+    while (currentMonthStart > startDate && results.length < total) {
       // Calcular fim do mês
       const currentMonthEnd = new Date(currentMonthStart);
       currentMonthEnd.setMonth(currentMonthEnd.getMonth() + 1);
