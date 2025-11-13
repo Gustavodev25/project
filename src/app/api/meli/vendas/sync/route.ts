@@ -54,10 +54,9 @@ import type { MeliAccount } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
 import { invalidateVendasCache } from "@/lib/cache";
-import { MAX_DURATION_DEFAULT } from "@/config/vercel";
 
 export const runtime = "nodejs";
-export const maxDuration = MAX_DURATION_DEFAULT; // 60 segundos (seguro para Pro)
+export const maxDuration = 60; // 60 segundos (Vercel Pro)
 
 const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||

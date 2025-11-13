@@ -10,10 +10,9 @@ import {
 } from "@/lib/shopee";
 import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
 import { invalidateVendasCache } from "@/lib/cache";
-import { MAX_DURATION_DEFAULT } from "@/config/vercel";
 
 export const runtime = "nodejs";
-export const maxDuration = MAX_DURATION_DEFAULT; // 60 segundos (seguro para Pro)
+export const maxDuration = 60; // 60 segundos (Vercel Pro)
 const MAX_VENDAS_POR_CONTA = 10000; // Limite de 10.000 vendas por conta
 
 // Tipos auxiliares
