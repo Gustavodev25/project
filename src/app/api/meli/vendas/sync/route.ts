@@ -74,7 +74,7 @@ const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
 const PAGE_LIMIT = 50;
-const MAX_VENDAS_POR_SYNC = 2500; // Limite CONSERVADOR para garantir que complete em 60s (inclui tempo de salvar no DB)
+const MAX_VENDAS_POR_SYNC = 1500; // Limite ULTRA-CONSERVADOR: ~30s buscar + ~25s salvar = 55s total (margem de 5s)
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
 
