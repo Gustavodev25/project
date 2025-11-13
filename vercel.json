@@ -1,0 +1,18 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "claude/fix-mercado-livre-sync-011CV6CD9AC8nWRCoTX9EiKi": true,
+      "main": true
+    }
+  },
+  "github": {
+    "silent": false,
+    "autoJobCancelation": true
+  },
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ]
+}
