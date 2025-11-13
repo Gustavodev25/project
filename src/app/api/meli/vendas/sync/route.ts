@@ -709,6 +709,7 @@ async function fetchAllOrdersForAccount(
 ): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
+  const SYNC_LIMIT = 2500;
 
   console.log(`[Sync] 🚀 Iniciando busca completa de vendas para conta ${account.ml_user_id} (${account.nickname})`);
 
@@ -716,7 +717,7 @@ async function fetchAllOrdersForAccount(
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  let maxOffsetToFetch = MAX_OFFSET;
+  let maxOffsetToFetch = Math.min(MAX_OFFSET, SYNC_LIMIT);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
@@ -739,7 +740,7 @@ async function fetchAllOrdersForAccount(
         ) {
           discoveredTotal = pageResult.total;
           total = discoveredTotal;
-          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal);
+          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal ?? Infinity, SYNC_LIMIT);
           console.log(
             `[Sync] ?? Conta ${account.ml_user_id}: total estimado ${total} vendas`,
           );
@@ -793,7 +794,7 @@ async function fetchAllOrdersForAccount(
     activePages.add(pagePromise);
   };
 
-  while (activePages.size < PAGE_FETCH_CONCURRENCY && nextOffset < MAX_OFFSET) {
+  while (activePages.size < PAGE_FETCH_CONCURRENCY && nextOffset < maxOffsetToFetch) {
     schedulePageFetch(nextOffset);
     nextOffset += PAGE_LIMIT;
   }
@@ -814,7 +815,7 @@ async function fetchAllOrdersForAccount(
   }
 
   // PASSO 2: Se total > 9.950 E ainda não atingiu limite de segurança, buscar vendas antigas por período mensal
-  if (total > MAX_OFFSET && results.length < total) {
+  if (results.length < total) {
     console.log(`[Sync] 🔄 Buscando até ${total - results.length} vendas restantes por período...`);
 
     // Pegar data da venda mais antiga já baixada
@@ -834,7 +835,7 @@ async function fetchAllOrdersForAccount(
 
     const startDate = new Date('2020-01-01'); // Data limite (ajustar conforme necessário)
 
-    while (currentMonthStart > startDate && results.length < total) {
+    while (currentMonthStart > startDate && results.length < Math.min(total, SYNC_LIMIT)) {
       // Calcular fim do mês
       const currentMonthEnd = new Date(currentMonthStart);
       currentMonthEnd.setMonth(currentMonthEnd.getMonth() + 1);
@@ -855,7 +856,15 @@ async function fetchAllOrdersForAccount(
 
       console.log(`[Sync] ✅ Encontradas ${monthOrders.length} vendas neste período`);
 
-      results.push(...monthOrders);
+      const remainingCapacity = Math.max(0, Math.min(SYNC_LIMIT, total) - results.length);
+      if (remainingCapacity === 0) {
+        break;
+      }
+      const cappedOrders =
+        monthOrders.length > remainingCapacity
+          ? monthOrders.slice(0, remainingCapacity)
+          : monthOrders;
+      results.push(...cappedOrders);
 
       sendProgressToUser(userId, {
         type: 'sync_progress',
@@ -883,6 +892,17 @@ async function fetchAllOrdersForAccount(
 
   console.log(`[Sync] 🎉 ${results.length} vendas baixadas de ${total} totais`);
   console.log(`[Sync] 📊 Tipos de logística:`, Array.from(logisticStats.entries()));
+
+  if (results.length < total) {
+    console.log(
+      `[Sync] Limite de ${SYNC_LIMIT} vendas por sincronização atingido (${results.length}/${total}). Execute novamente para buscar vendas mais antigas.`,
+    );
+    sendProgressToUser(userId, {
+      type: "sync_warning",
+      message: `Limite de ${SYNC_LIMIT} vendas atingido nesta sincronização. Para buscar pedidos mais antigos, execute novamente.`,
+      errorCode: "SYNC_LIMIT_REACHED",
+    });
+  }
 
   return { orders: results, expectedTotal: total };
 }
