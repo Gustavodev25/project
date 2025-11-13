@@ -1499,6 +1499,39 @@ async function buildSkuCache(
 }
 
 // Função para salvar vendas em lotes - OTIMIZADA
+function extractOrderIdFromPayload(order: MeliOrderPayload): string | null {
+  const rawOrder = (order?.order ?? null) as any;
+  if (!rawOrder || rawOrder.id === undefined || rawOrder.id === null) {
+    return null;
+  }
+  const id = String(rawOrder.id).trim();
+  return id.length === 0 ? null : id;
+}
+
+function deduplicateOrders(
+  orders: MeliOrderPayload[]
+): { uniqueOrders: MeliOrderPayload[]; duplicates: number } {
+  const seen = new Set<string>();
+  const uniqueOrders: MeliOrderPayload[] = [];
+  let duplicates = 0;
+
+  for (const order of orders) {
+    const orderId = extractOrderIdFromPayload(order);
+    if (!orderId) {
+      uniqueOrders.push(order);
+      continue;
+    }
+    if (seen.has(orderId)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(orderId);
+    uniqueOrders.push(order);
+  }
+
+  return { uniqueOrders, duplicates };
+}
+
 async function saveVendasBatch(
   orders: MeliOrderPayload[],
   userId: string,
@@ -1507,15 +1540,29 @@ async function saveVendasBatch(
   let saved = 0;
   let errors = 0;
 
+  const { uniqueOrders, duplicates } = deduplicateOrders(orders);
+  const totalOrders = uniqueOrders.length;
+
+  if (duplicates > 0) {
+    console.warn(
+      `[Sync] ${duplicates} venda(s) duplicada(s) detectada(s) no retorno do Mercado Livre. Ignorando duplicatas para evitar salvar pedidos repetidos.`
+    );
+  }
+
+  if (totalOrders === 0) {
+    return { saved, errors };
+  }
+
   try {
-    const skuCache = await buildSkuCache(orders, userId);
+    const skuCache = await buildSkuCache(uniqueOrders, userId);
+    let processedCount = 0;
 
-    // Processar em lotes maiores para ser mais rápido
-    for (let i = 0; i < orders.length; i += batchSize) {
-      const batch = orders.slice(i, i + batchSize);
+    // Processar em lotes maiores para ser mais rapido
+    for (let i = 0; i < totalOrders; i += batchSize) {
+      const batch = uniqueOrders.slice(i, i + batchSize);
 
-      // Processar lote com Promise.allSettled para garantir que erros não parem o processo
-      const batchPromises = batch.map(async (order, batchIndex) => {
+      // Processar lote com Promise.allSettled para garantir que erros nao parem o processo
+      const batchPromises = batch.map(async (order) => {
         try {
           const result = await saveVendaToDatabase(order, userId, skuCache);
           if (result) {
@@ -1524,40 +1571,41 @@ async function saveVendasBatch(
             errors++;
           }
 
-          return { success: result, orderId: (order.order as any)?.id || 'UNKNOWN' };
+          return { success: result, orderId: extractOrderIdFromPayload(order) || 'UNKNOWN' };
         } catch (error) {
           errors++;
           const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`[Sync] Erro ao salvar venda ${(order.order as any)?.id}:`, errorMsg);
-          return { success: false, orderId: (order.order as any)?.id || 'UNKNOWN', error: errorMsg };
+          const payloadId = extractOrderIdFromPayload(order) || 'UNKNOWN';
+          console.error(`[Sync] Erro ao salvar venda ${payloadId}:`, errorMsg);
+          return { success: false, orderId: payloadId, error: errorMsg };
         }
       });
 
       await Promise.allSettled(batchPromises);
 
-      // Enviar progresso SSE apenas a cada lote (não a cada venda) para reduzir overhead
-      const currentProgress = Math.min(i + batchSize, orders.length);
-      const percentage = Math.round((currentProgress / orders.length) * 100);
+      // Enviar progresso SSE apenas a cada lote (nao a cada venda) para reduzir overhead
+      processedCount += batch.length;
+      const percentage = Math.round((processedCount / totalOrders) * 100);
       try {
         sendProgressToUser(userId, {
           type: "sync_progress",
-          message: `Salvando no banco: ${currentProgress}/${orders.length} vendas (${percentage}%)`,
-          current: currentProgress,
-          total: orders.length,
-          fetched: currentProgress,
-          expected: orders.length
+          message: `Salvando no banco: ${processedCount}/${totalOrders} vendas (${percentage}%)`,
+          current: processedCount,
+          total: totalOrders,
+          fetched: processedCount,
+          expected: totalOrders
         });
       } catch (sseError) {
-        // Ignorar erros de SSE - não são críticos
-        console.warn(`[Sync] Erro ao enviar progresso SSE (não crítico):`, sseError);
+        // Ignorar erros de SSE - nao sao criticos
+        console.warn(`[Sync] Erro ao enviar progresso SSE (nao critico):`, sseError);
       }
 
-      // SEM DELAY - Processar o mais rápido possível
+      // SEM DELAY - Processar o mais rapido possivel
     }
   } catch (error) {
-    console.error(`[Sync] Erro crítico em saveVendasBatch:`, error);
-    // Retornar o que foi salvo até agora
-    errors = orders.length - saved;
+    console.error(`[Sync] Erro critico em saveVendasBatch:`, error);
+    // Retornar o que foi salvo ate agora
+    errors = totalOrders - saved;
   }
 
   return { saved, errors };
@@ -1568,19 +1616,20 @@ async function saveVendaToDatabase(
   userId: string,
   skuCache: Map<string, SkuCacheEntry>
 ): Promise<boolean> {
-  const orderId = (order.order as any)?.id || 'UNKNOWN';
+  const extractedOrderId = extractOrderIdFromPayload(order);
+
+  if (!extractedOrderId) {
+    console.error(`[Sync] Venda sem ID valido, pulando...`);
+    return false;
+  }
+
+  const orderId = extractedOrderId;
 
   try {
     console.log(`[Sync] Salvando venda ${orderId} para userId: ${userId}`);
 
     const o: any = order.order ?? {};
     const freight = order.freight;
-
-    // Validação básica dos dados essenciais
-    if (!o || !o.id) {
-      console.error(`[Sync] Venda sem ID válido, pulando...`);
-      return false;
-    }
 
     const orderItems: any[] = Array.isArray(o.order_items) ? o.order_items : [];
     const firstItem = orderItems[0] ?? {};
@@ -1702,14 +1751,14 @@ async function saveVendaToDatabase(
 
     // Verificar se a venda já existe
     const existingVenda = await prisma.meliVenda.findUnique({
-      where: { orderId: String(o.id) }
+      where: { orderId }
     });
 
     if (existingVenda) {
       // Atualizar venda existente
       try {
         await prisma.meliVenda.update({
-          where: { orderId: String(o.id) },
+          where: { orderId },
           data: {
             dataVenda: dateString ? new Date(dateString) : new Date(),
             status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
@@ -1753,7 +1802,7 @@ async function saveVendaToDatabase(
         const msg = (err as any)?.message ? String((err as any).message) : String(err);
         if (msg.includes("Unknown argument `latitude`") || msg.includes("Unknown argument `longitude`")) {
           await prisma.meliVenda.update({
-            where: { orderId: String(o.id) },
+            where: { orderId },
             data: {
               dataVenda: dateString ? new Date(dateString) : new Date(),
               status: truncateString(String(o.status ?? "desconhecido").replaceAll("_", " "), 100),
@@ -1795,11 +1844,11 @@ async function saveVendaToDatabase(
           throw err;
         }
       }
-      console.log(`[DEBUG] Venda ${o.id} atualizada com sucesso`);
+      console.log(`[DEBUG] Venda ${orderId} atualizada com sucesso`);
     } else {
       // Debug para identificar campos longos
       const debugData = {
-        orderId: String(o.id),
+        orderId: orderId,
         userId,
         meliAccountId: order.accountId,
         status: String(o.status ?? "desconhecido").replaceAll("_", " "),
@@ -1821,13 +1870,13 @@ async function saveVendaToDatabase(
         canal: "ML"
       };
       
-      debugFieldLengths(debugData, String(o.id));
+      debugFieldLengths(debugData, orderId);
       
       // Criar nova venda
       try {
         await prisma.meliVenda.create({
           data: {
-            orderId: truncateString(String(o.id), 255),
+            orderId: truncateString(orderId, 255),
             userId: truncateString(userId, 50),
             meliAccountId: truncateString(order.accountId, 25),
             dataVenda: dateString ? new Date(dateString) : new Date(),
@@ -1870,7 +1919,7 @@ async function saveVendaToDatabase(
         if (msg.includes("Unknown argument `latitude`") || msg.includes("Unknown argument `longitude`")) {
           await prisma.meliVenda.create({
             data: {
-              orderId: truncateString(String(o.id), 255),
+              orderId: truncateString(orderId, 255),
               userId: truncateString(userId, 50),
               meliAccountId: truncateString(order.accountId, 25),
               dataVenda: dateString ? new Date(dateString) : new Date(),
@@ -1912,10 +1961,10 @@ async function saveVendaToDatabase(
           throw err;
         }
       }
-      console.log(`[DEBUG] Venda ${o.id} criada com sucesso`);
+      console.log(`[DEBUG] Venda ${orderId} criada com sucesso`);
     }
 
-    console.log(`[Sync] ✓ Venda ${o.id} salva/atualizada com sucesso`);
+    console.log(`[Sync] ✓ Venda ${orderId} salva/atualizada com sucesso`);
     return true;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -2373,11 +2422,4 @@ export async function POST(req: NextRequest) {
     },
   });
 }
-
-
-
-
-
-
-
 
