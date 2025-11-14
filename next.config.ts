@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
-const rawStaticTimeout = Number(process.env.NEXT_STATIC_PAGE_GENERATION_TIMEOUT ?? 60);
+const rawStaticTimeout = Number(process.env.NEXT_STATIC_PAGE_GENERATION_TIMEOUT ?? 600);
 const staticPageGenerationTimeout =
-  Number.isFinite(rawStaticTimeout) && rawStaticTimeout > 0 ? rawStaticTimeout : 60;
+  Number.isFinite(rawStaticTimeout) && rawStaticTimeout > 0 ? rawStaticTimeout : 600;
 
 // Explicitly set Turbopack's workspace root to this project directory
 // to avoid Next.js inferring a parent directory when multiple lockfiles exist.
