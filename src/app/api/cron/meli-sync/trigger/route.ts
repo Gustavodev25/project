@@ -38,8 +38,21 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_APP_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
+  // Detectar se deve usar backend remoto
+  const backendUrl = process.env.RENDER_BACKEND_URL;
+  const useRemoteBackend = !!backendUrl;
+
+  // Escolher endpoint: local ou remoto
+  const syncEndpoint = useRemoteBackend
+    ? `${backendUrl}/api/meli/vendas/sync`
+    : `${baseUrl}/api/cron/meli-sync`;
+
+  console.log(
+    `[Cron Trigger] 🚀 Usando ${useRemoteBackend ? "backend REMOTO (Render)" : "backend LOCAL (Vercel)"}: ${syncEndpoint}`
+  );
+
   try {
-    const resp = await fetch(`${baseUrl}/api/cron/meli-sync`, {
+    const resp = await fetch(syncEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

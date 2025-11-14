@@ -20,7 +20,8 @@
       "Bash(find:*)",
       "Bash(npm run build:*)",
       "Bash(npm run prisma:generate:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
