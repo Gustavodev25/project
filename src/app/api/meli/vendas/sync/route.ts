@@ -730,9 +730,8 @@ async function fetchAllOrdersForAccount(
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar em 20s e deixar 40s para salvar no banco (total 60s)
   // Salvamento de 500 vendas ~5s, mas com margem de seguranÃ§a para contas grandes
   // Em background mode, pode usar atÃ© 45s de busca (deixa 15s para salvar ~1500 vendas)
-  const MAX_EXECUTION_TIME = fullSync
-    ? 50000  // fullSync: 50 segundos de busca
-    : (quickMode ? 20000 : 45000); // 20s quick ou 45s background
+  // OTIMIZAÇÃO: 30s fetch + 20s save = 50s total (margem 10s para 60s timeout)
+  const MAX_EXECUTION_TIME = 30000; // SEMPRE 30 segundos
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
 
@@ -762,10 +761,9 @@ async function fetchAllOrdersForAccount(
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar apenas 500 vendas para garantir tempo de salvar no banco
   // Salvamento de ~10k vendas demora ~30s, entÃ£o limitar busca para caber em 60s total
   // Em background, buscar 1500 vendas (mais conservador para evitar timeout)
-  // OTIMIZAÇÃO: 200 vendas por sync (cabe confortavelmente em 60s)
-  // Com batch UPSERT: 200 vendas = ~50-55s total
-  // 17k vendas = ~85 syncs = ~12-15 minutos total
-  const SAFE_BATCH_SIZE = 200;
+  // LIMITE SEGURO: 100 vendas por sync (30s fetch + 15s save = 45s total)
+  // 12k vendas = 120 syncs automáticos
+  const SAFE_BATCH_SIZE = 100;
   let maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
@@ -877,12 +875,12 @@ async function fetchAllOrdersForAccount(
     total = results.length;
   }
 
-  // PASSO 2: Buscar vendas histÃ³ricas se ainda hÃ¡ tempo e se hÃ¡ vendas antigas nÃ£o sincronizadas
+  // PASSO 2: Buscar vendas históricas apenas se NÃO atingiu o limite
   const timeRemaining = MAX_EXECUTION_TIME - (Date.now() - startTime);
-  // Em fullSync, SEMPRE buscar histÃ³rico mesmo com pouco tempo (vai fazer mÃºltiplas requisições)
-  const shouldFetchHistory = fullSync ? true : (timeRemaining > 15000);
+  const reachedLimit = results.length >= SAFE_BATCH_SIZE;
+  const shouldFetchHistory = !reachedLimit && timeRemaining > 10000;
 
-  if (shouldFetchHistory && (total > results.length || oldestSyncedDate || fullSync)) {
+  if (shouldFetchHistory && (total > results.length || oldestSyncedDate)) {
     console.log(`[Sync] ðŸ”„ Buscando vendas histÃ³ricas (tempo restante: ${Math.round(timeRemaining / 1000)}s)...`);
 
     // Determinar ponto de partida para busca histÃ³rica
@@ -2033,23 +2031,16 @@ async function prepareVendaData(
 
 // REMOVIDA: saveVendaToDatabase() - refatorada em prepareVendaData() + batch operations
 export async function POST(req: NextRequest) {
+  // Suportar tanto autenticação de usuário quanto cron job
   const sessionCookie = req.cookies.get("session")?.value;
-  let session;
-  try {
-    session = await assertSessionToken(sessionCookie);
-  } catch {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronSecret = req.headers.get('x-cron-secret');
 
-  const userId = session.sub;
-  // REMOVIDO: historyStart - nÃ£o precisa mais de janelas de tempo complexas
-  
-  // Ler body para obter contas selecionadas e IDs de vendas verificadas
+  // Ler body primeiro (só pode ser lido uma vez)
   let requestBody: {
     accountIds?: string[];
     orderIdsByAccount?: Record<string, string[]>;
-    quickMode?: boolean; // NOVO: indica se deve retornar rÃ¡pido (30s) ou nÃ£o
-    fullSync?: boolean; // NOVO: indica sincronizaÃ§Ã£o completa desde 01/01/2025
+    quickMode?: boolean;
+    fullSync?: boolean;
   } = {};
 
   try {
@@ -2059,6 +2050,39 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[Sync] Erro ao parsear body:', error);
+  }
+
+  let userId: string;
+
+  // Autenticar via cron secret OU sessão de usuário
+  if (cronSecret && cronSecret === process.env.CRON_SECRET) {
+    // Requisição de cron job - pegar userId do body
+    const accountId = requestBody.accountIds?.[0];
+    if (!accountId) {
+      return new NextResponse("Missing accountId for cron job", { status: 400 });
+    }
+
+    // Buscar userId da conta
+    const account = await prisma.meliAccount.findUnique({
+      where: { id: accountId },
+      select: { userId: true }
+    });
+
+    if (!account) {
+      return new NextResponse("Account not found", { status: 404 });
+    }
+
+    userId = account.userId;
+    console.log(`[Sync] Cron job autenticado para userId: ${userId}`);
+  } else {
+    // Autenticação normal via sessão
+    let session;
+    try {
+      session = await assertSessionToken(sessionCookie);
+    } catch {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+    userId = session.sub;
   }
 
   // Por padrÃ£o, usar quickMode=true para evitar timeout
