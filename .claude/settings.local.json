@@ -15,7 +15,8 @@
       "Bash(Select-String \"src/app/api/meli/vendas/sync/route.ts\")",
       "Bash(iconv:*)",
       "Bash(git checkout:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(Select-String \"CRON_SYNC_README\")"
     ],
     "deny": [],
     "ask": []
