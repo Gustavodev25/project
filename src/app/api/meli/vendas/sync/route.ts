@@ -731,7 +731,7 @@ async function fetchAllOrdersForAccount(
   userId: string,
   quickMode: boolean = false, // Novo parÃ¢metro para controle de modo
   fullSync: boolean = false, // Novo parÃ¢metro para sincronizaÃ§Ã£o completa desde 01/2025
-): Promise<{ orders: MeliOrderPayload[]; expectedTotal: number }> {
+): Promise<FetchOrdersResult> {
   const startTime = Date.now();
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar em 20s e deixar 40s para salvar no banco (total 60s)
   // Salvamento de 500 vendas ~5s, mas com margem de seguranÃ§a para contas grandes
@@ -740,6 +740,7 @@ async function fetchAllOrdersForAccount(
   const MAX_EXECUTION_TIME = 30000; // SEMPRE 30 segundos
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
+  let forcedStop = false; // Declarar forcedStop localmente
 
   const modoTexto = fullSync
     ? 'FULL SYNC (buscar TODAS as vendas)'
