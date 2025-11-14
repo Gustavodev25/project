@@ -762,9 +762,11 @@ async function fetchAllOrdersForAccount(
   // MUDANÃ‡A CRÃTICA: Em quickMode, buscar apenas 500 vendas para garantir tempo de salvar no banco
   // Salvamento de ~10k vendas demora ~30s, entÃ£o limitar busca para caber em 60s total
   // Em background, buscar 1500 vendas (mais conservador para evitar timeout)
-  let maxOffsetToFetch = fullSync
-    ? MAX_OFFSET  // fullSync: buscar tudo (até 9.950 vendas recentes)
-    : (quickMode ? Math.min(MAX_OFFSET, 500) : Math.min(MAX_OFFSET, 1500));
+  // OTIMIZAÇÃO: 200 vendas por sync (cabe confortavelmente em 60s)
+  // Com batch UPSERT: 200 vendas = ~50-55s total
+  // 17k vendas = ~85 syncs = ~12-15 minutos total
+  const SAFE_BATCH_SIZE = 200;
+  let maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
 
@@ -2471,10 +2473,39 @@ export async function POST(req: NextRequest) {
   invalidateVendasCache(userId);
   console.log(`[Cache] Cache de vendas invalidado para usuÃ¡rio ${userId}`);
 
-  // Fechar conexÃµes SSE apÃ³s um pequeno delay
-  setTimeout(() => {
-    closeUserConnections(userId);
-  }, 2000);
+  // AUTO-SYNC: Continuar automaticamente se houver mais vendas
+  if (hasMoreToSync) {
+    console.log(`[Sync] Iniciando proximo sync automaticamente...`);
+
+    sendProgressToUser(userId, {
+      type: "sync_continue",
+      message: `Continuando... ${totalSavedOrders} vendas salvas.`,
+      current: totalSavedOrders,
+      total: totalExpectedOrders,
+      fetched: totalFetchedOrders,
+      expected: totalExpectedOrders
+    });
+
+    // Trigger próximo sync (fire-and-forget - não espera resposta)
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+
+    fetch(`${baseUrl}/api/meli/vendas/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': `session=${sessionCookie}`
+      },
+      body: JSON.stringify({
+        accountIds: requestBody.accountIds,
+        quickMode: requestBody.quickMode,
+        fullSync: requestBody.fullSync
+      })
+    }).catch(err => console.error(`[Sync] Erro ao continuar:`, err));
+  } else {
+    // Fechar SSE apenas quando completar tudo
+    setTimeout(() => closeUserConnections(userId), 2000);
+  }
 
   return NextResponse.json({
     syncedAt: new Date().toISOString(),
@@ -2488,6 +2519,7 @@ export async function POST(req: NextRequest) {
     },
     hasMoreToSync, // NOVO: flag indicando se hÃ¡ vendas antigas pendentes
     quickMode, // NOVO: indica qual modo foi usado
+    autoSyncTriggered: hasMoreToSync
   });
 }
 
