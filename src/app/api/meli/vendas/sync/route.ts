@@ -2110,7 +2110,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Buscar contas - filtrar por IDs se fornecidos
-  const accountsWhere: any = { userId: session.sub };
+  const accountsWhere: any = { userId };
   if (requestBody.accountIds && requestBody.accountIds.length > 0) {
     accountsWhere.id = { in: requestBody.accountIds };
   }
@@ -2290,7 +2290,7 @@ export async function POST(req: NextRequest) {
 
           try {
 
-            const batchResult = await saveVendasBatch(fetchedOrders, session.sub, 50);
+            const batchResult = await saveVendasBatch(fetchedOrders, userId, 50);
 
             totalSavedOrders += batchResult.saved;
 
