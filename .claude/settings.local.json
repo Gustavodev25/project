@@ -16,7 +16,11 @@
       "Bash(iconv:*)",
       "Bash(git checkout:*)",
       "Bash(powershell -Command:*)",
-      "Bash(Select-String \"CRON_SYNC_README\")"
+      "Bash(Select-String \"CRON_SYNC_README\")",
+      "Bash(find:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run prisma:generate:*)",
+      "Bash(npm run:*)"
     ],
     "deny": [],
     "ask": []

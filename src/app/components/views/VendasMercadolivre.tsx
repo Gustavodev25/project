@@ -7,18 +7,19 @@ import Sidebar from "../views/ui/Sidebar";
 import Topbar from "../views/ui/Topbar";
 import TabelaVendas from "../views/ui/TabelaVendas";
 import { useVendas } from "@/hooks/useVendas";
-import FiltrosVendas, { 
-  FiltroStatus, 
-  FiltroPeriodo, 
-  FiltroADS, 
-  FiltroExposicao, 
+import FiltrosVendas, {
+  FiltroStatus,
+  FiltroPeriodo,
+  FiltroADS,
+  FiltroExposicao,
   FiltroTipoAnuncio,
   FiltroModalidadeEnvio,
-  ColunasVisiveis 
+  ColunasVisiveis
 } from "../views/ui/FiltrosVendas";
 import { useSmartDropdown } from "@/hooks/useSmartDropdown";
 import { useToast } from "./ui/toaster";
 import ModalSyncVendas from "./ui/ModalSyncVendas";
+import { useBackendDetection } from "@/hooks/useBackendDetection";
 
 const FULL_W = "16rem";
 const RAIL_W = "4rem";
@@ -37,6 +38,7 @@ interface HeaderVendasMercadolivreProps {
   contasConectadas?: any[];
   progress?: any;
   reloadVendas?: () => Promise<void>;
+  backendUrl?: string;
 }
 
 const HeaderVendasMercadolivre = ({
@@ -46,7 +48,8 @@ const HeaderVendasMercadolivre = ({
   onSyncOrders,
   contasConectadas = [],
   progress,
-  reloadVendas
+  reloadVendas,
+  backendUrl = ""
 }: HeaderVendasMercadolivreProps) => {
   const router = useRouter();
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
@@ -144,28 +147,54 @@ const HeaderVendasMercadolivre = ({
 
             {/* Dropdown */}
             {infoDropdown.isVisible && (
-              <div 
+              <div
                 ref={infoDropdown.dropdownRef}
-                className={`smart-dropdown w-64 ${
+                className={`smart-dropdown w-72 ${
                   infoDropdown.isOpen ? 'dropdown-enter' : 'dropdown-exit'
                 }`}
                 style={infoDropdown.position}
               >
                 <div className="p-4">
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-gray-700">Vendas encontradas:</span>
                       <span className="text-sm font-semibold text-gray-900">
                         {vendas?.length || 0}
                       </span>
                     </div>
-                    
+
                     {lastSyncedAt && (
                       <div className="pt-2 border-t border-gray-100/80">
                         <p className="text-xs text-gray-600 mb-1">Última sincronização:</p>
                         <p className="text-xs font-medium text-gray-800">
                           {formatDate(lastSyncedAt)} às {new Date(lastSyncedAt).toLocaleTimeString("pt-BR")}
                         </p>
+                      </div>
+                    )}
+
+                    {/* Debug: Backend URL */}
+                    {backendUrl && (
+                      <div className="pt-2 border-t border-gray-100/80">
+                        <p className="text-xs text-gray-600 mb-2">🔗 Backend em uso:</p>
+                        <div className="bg-gray-50 rounded p-2 border border-gray-200">
+                          <p className="text-xs font-semibold text-gray-800 mb-1">
+                            {backendUrl.split(' - ')[0]} {backendUrl.split(' - ')[1] || ""}
+                          </p>
+                          <p className="text-xs font-mono text-gray-600 break-all bg-white rounded p-1 border border-gray-100">
+                            {backendUrl.split(' - ')[2] || backendUrl}
+                          </p>
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-xs text-gray-500">
+                              {backendUrl.includes("Vercel")
+                                ? "ℹ️ Usando backend no Vercel (Frontend)"
+                                : backendUrl.includes("Render")
+                                ? "✅ Usando backend no Render (Separado)"
+                                : backendUrl.includes("Local")
+                                ? "🖥️ Usando backend local (Desenvolvimento)"
+                                : "❓ Backend desconhecido"}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -263,6 +292,7 @@ export default function VendasMercadolivre() {
   });
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const backendInfo = useBackendDetection();
   const [filtroAtivo, setFiltroAtivo] = useState<FiltroStatus>("pagos");
   const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("todos");
   const [dataInicioPersonalizada, setDataInicioPersonalizada] = useState<Date | null>(null);
@@ -416,6 +446,7 @@ export default function VendasMercadolivre() {
     return () => clearTimeout(timer);
   }, []);
 
+
   const handleMobileClose = useCallback(() => {
     setIsSidebarMobileOpen(false);
   }, []);
@@ -464,6 +495,7 @@ export default function VendasMercadolivre() {
             contasConectadas={contasConectadas || []}
             progress={progress}
             reloadVendas={reloadVendas}
+            backendUrl={`${backendInfo.statusIcon} ${backendInfo.source} - ${backendInfo.url}`}
           />
           
           {/* Componente de Filtros */}
@@ -488,7 +520,7 @@ export default function VendasMercadolivre() {
             onContaChange={setFiltroConta}
             contasDisponiveis={contasConectadas.map(conta => ({
               id: conta.id,
-              nickname: conta.nickname
+              nickname: conta.nickname || ""
             }))}
             colunasVisiveis={colunasVisiveis}
             onColunasChange={setColunasVisiveis}
