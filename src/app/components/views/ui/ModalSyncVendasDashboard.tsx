@@ -230,7 +230,7 @@ export default function ModalSyncVendasDashboard({
       ));
 
       try {
-        const apiUrl = conta.platform === 'meli' ? '/api/meli/vendas/sync' : '/api/shopee/vendas/sync';
+        const apiUrl = conta.platform === 'meli' ? '/api/cron/meli-sync/trigger' : '/api/shopee/vendas/sync';
         const body = { accountIds: [conta.id] };
 
         const res = await fetch(apiUrl, {
@@ -243,7 +243,10 @@ export default function ModalSyncVendasDashboard({
 
         if (res.ok) {
           const data = await res.json();
-          const count = data?.totals?.saved || data?.totals?.fetched || 0;
+          const count = (Array.isArray((data as any)?.results) ? (data as any).results.find((r: any) => r.accountId === conta.id)?.vendas : undefined)
+            || (data as any)?.totals?.saved
+            || (data as any)?.totals?.fetched
+            || 0;
           
           // Completado com sucesso
           setSyncSteps(prev => prev.map((s, idx) =>

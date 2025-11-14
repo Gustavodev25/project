@@ -275,8 +275,8 @@ export function useVendas(platform: string = "Mercado Livre") {
             body.fullSync = true; // Adicionar parâmetro fullSync ao body
           }
 
-          console.log(`[useVendas] Chamando API /api/meli/vendas/sync DIRETAMENTE com body:`, body);
-          res = await fetch("/api/meli/vendas/sync", {
+          console.log(`[useVendas] Chamando API /api/cron/meli-sync/trigger (via cron) com body:`, body);
+          res = await fetch("/api/cron/meli-sync/trigger", {
             method: "POST",
             cache: "no-store",
             credentials: "include",
@@ -300,27 +300,19 @@ export function useVendas(platform: string = "Mercado Livre") {
             throw new Error(message);
           }
 
-          const payload: MeliOrdersResponse & {
-            totals?: { expected?: number; fetched?: number; saved?: number };
-          } = await res.json();
+          const payload: any = await res.json();
+          const resultsArr: Array<any> = Array.isArray(payload?.results) ? payload.results : [];
+          const thisFetched = resultsArr.reduce((sum: number, r: any) => sum + (r?.vendas || 0), 0);
 
-          const realTotals = payload.totals || {
-            fetched: payload.orders?.length || 0,
-            expected: payload.orders?.length || 0,
-          };
+          aggregatedFetched += thisFetched;
+          aggregatedExpected += thisFetched;
 
-          aggregatedFetched += realTotals.fetched || 0;
-          aggregatedExpected += realTotals.expected || realTotals.fetched || 0;
-
-          if (payload.errors?.length) {
+          if (Array.isArray(payload?.errors) && payload.errors.length) {
             aggregatedErrors = [...aggregatedErrors, ...payload.errors];
           }
 
-          setSyncProgress({
-            fetched: aggregatedFetched,
-            expected: aggregatedExpected || aggregatedFetched,
-          });
-          setLastSyncedAt(payload.syncedAt ?? null);
+          setSyncProgress({ fetched: aggregatedFetched, expected: aggregatedExpected || aggregatedFetched });
+          setLastSyncedAt(payload.syncedAt ?? new Date().toISOString());
         }
 
         setSyncErrors(aggregatedErrors);
