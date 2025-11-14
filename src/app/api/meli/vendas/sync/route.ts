@@ -658,26 +658,41 @@ async function fetchOrdersPage({
     }`,
   );
 
-  const shipmentDetailsResults = await Promise.allSettled(
-    orders.map(async (order: any) => {
-      const shippingId = order?.shipping?.id;
-      if (!shippingId) {
-        return typeof order?.shipping === "object" ? order.shipping : null;
-      }
-      try {
-        const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-        if (!res.ok) return null;
-        return await res.json();
-      } catch {
-        return null;
-      }
-    }),
-  );
+  // OTIMIZAÇÃO: Fetch shipments em batches menores para evitar rate limiting
+  // Limite de 10 shipments concorrentes (ao invés de 50) para não sobrecarregar API
+  const SHIPMENT_BATCH_SIZE = 10;
+  const shipments: any[] = new Array(orders.length).fill(null);
 
-  const shipments = shipmentDetailsResults.map((entry, idx) => {
-    if (entry.status === "fulfilled" && entry.value) return entry.value;
-    return typeof orders[idx]?.shipping === "object" ? orders[idx].shipping : null;
-  });
+  for (let i = 0; i < orders.length; i += SHIPMENT_BATCH_SIZE) {
+    const batchOrders = orders.slice(i, i + SHIPMENT_BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batchOrders.map(async (order: any) => {
+        const shippingId = order?.shipping?.id;
+        if (!shippingId) {
+          return typeof order?.shipping === "object" ? order.shipping : null;
+        }
+        try {
+          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    // Mapear resultados para array de shipments
+    batchResults.forEach((result, idx) => {
+      const originalIdx = i + idx;
+      if (result.status === "fulfilled" && result.value) {
+        shipments[originalIdx] = result.value;
+      } else {
+        shipments[originalIdx] = typeof orders[originalIdx]?.shipping === "object"
+          ? orders[originalIdx].shipping
+          : null;
+      }
+    });
+  }
 
   result.orders = orders
     .map((order: any, idx: number) => {
@@ -1107,27 +1122,40 @@ async function fetchOrdersInDateRange(
 
       if (orders.length === 0) break;
 
-      // Buscar detalhes
-      const [orderDetailsResults, shipmentDetailsResults] = await Promise.all([
-        Promise.allSettled(orders.map(async (o: any) => {
+      // Buscar detalhes dos orders
+      const orderDetailsResults = await Promise.allSettled(
+        orders.map(async (o: any) => {
           if (!o?.id) return o;
           try {
             const r = await fetchWithRetry(`${MELI_API_BASE}/orders/${o.id}`, { headers }, 3, userId);
             return r.ok ? await r.json() : o;
           } catch { return o; }
-        })),
-        Promise.allSettled(orders.map(async (o: any) => {
-          const sid = o?.shipping?.id;
-          if (!sid) return null;
-          try {
-            const r = await fetchWithRetry(`${MELI_API_BASE}/shipments/${sid}`, { headers }, 3, userId);
-            return r.ok ? await r.json() : null;
-          } catch { return null; }
-        })),
-      ]);
+        })
+      );
 
       const detailedOrders = orderDetailsResults.map((r, i) => r.status === "fulfilled" ? r.value : orders[i]);
-      const shipments = shipmentDetailsResults.map((r) => r.status === "fulfilled" ? r.value : null);
+
+      // OTIMIZAÇÃO: Buscar shipments em batches menores (10 por vez)
+      const SHIPMENT_BATCH_SIZE = 10;
+      const shipments: any[] = new Array(orders.length).fill(null);
+
+      for (let i = 0; i < orders.length; i += SHIPMENT_BATCH_SIZE) {
+        const batchOrders = orders.slice(i, i + SHIPMENT_BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batchOrders.map(async (o: any) => {
+            const sid = o?.shipping?.id;
+            if (!sid) return null;
+            try {
+              const r = await fetchWithRetry(`${MELI_API_BASE}/shipments/${sid}`, { headers }, 3, userId);
+              return r.ok ? await r.json() : null;
+            } catch { return null; }
+          })
+        );
+
+        batchResults.forEach((result, idx) => {
+          shipments[i + idx] = result.status === "fulfilled" ? result.value : null;
+        });
+      }
 
       detailedOrders.forEach((order: any, idx: number) => {
         if (!order) return;
@@ -1713,7 +1741,7 @@ function deduplicateOrders(
 async function saveVendasBatch(
   orders: MeliOrderPayload[],
   userId: string,
-  batchSize: number = 50 // AUMENTADO de 10 para 50
+  batchSize: number = 100 // OTIMIZADO: aumentado para 100 para batch operations
 ): Promise<{ saved: number; errors: number }> {
   let saved = 0;
   let errors = 0;
@@ -1735,31 +1763,74 @@ async function saveVendasBatch(
     const skuCache = await buildSkuCache(uniqueOrders, userId);
     let processedCount = 0;
 
-    // Processar em lotes maiores para ser mais rapido
+    // OTIMIZAÇÃO CRÍTICA: Processar em lotes com batch UPSERT
+    // Reduz de 500 queries individuais para 5-10 queries em lote
     for (let i = 0; i < totalOrders; i += batchSize) {
       const batch = uniqueOrders.slice(i, i + batchSize);
 
-      // Processar lote com Promise.allSettled para garantir que erros nao parem o processo
-      const batchPromises = batch.map(async (order) => {
-        try {
-          const result = await saveVendaToDatabase(order, userId, skuCache);
-          if (result) {
-            saved++;
-          } else {
-            errors++;
-          }
+      try {
+        // Preparar todos os dados do batch primeiro
+        const preparedData = await Promise.all(
+          batch.map(order => prepareVendaData(order, userId, skuCache))
+        );
 
-          return { success: result, orderId: extractOrderIdFromPayload(order) || 'UNKNOWN' };
-        } catch (error) {
-          errors++;
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          const payloadId = extractOrderIdFromPayload(order) || 'UNKNOWN';
-          console.error(`[Sync] Erro ao salvar venda ${payloadId}:`, errorMsg);
-          return { success: false, orderId: payloadId, error: errorMsg };
+        // Filtrar dados válidos
+        const validData = preparedData.filter(d => d !== null);
+
+        if (validData.length === 0) {
+          errors += batch.length;
+          processedCount += batch.length;
+          continue;
         }
-      });
 
-      await Promise.allSettled(batchPromises);
+        // Buscar IDs existentes para dividir em creates vs updates
+        const orderIds = validData.map(d => d!.orderId);
+        const existingOrders = await prisma.meliVenda.findMany({
+          where: { orderId: { in: orderIds } },
+          select: { orderId: true }
+        });
+
+        const existingOrderIdSet = new Set(existingOrders.map(o => o.orderId));
+
+        const toCreate = validData.filter(d => !existingOrderIdSet.has(d!.orderId));
+        const toUpdate = validData.filter(d => existingOrderIdSet.has(d!.orderId));
+
+        // BATCH CREATE: insere múltiplos registros de uma vez
+        if (toCreate.length > 0) {
+          try {
+            await prisma.meliVenda.createMany({
+              data: toCreate.map(d => d!.createData),
+              skipDuplicates: true // Evita erro se já existir
+            });
+            saved += toCreate.length;
+          } catch (createError) {
+            console.error(`[Sync] Erro em batch create:`, createError);
+            errors += toCreate.length;
+          }
+        }
+
+        // BATCH UPDATE: atualiza múltiplos registros em uma transação
+        if (toUpdate.length > 0) {
+          try {
+            await prisma.$transaction(
+              toUpdate.map(d =>
+                prisma.meliVenda.update({
+                  where: { orderId: d!.orderId },
+                  data: { ...d!.updateData, atualizadoEm: new Date() }
+                })
+              )
+            );
+            saved += toUpdate.length;
+          } catch (updateError) {
+            console.error(`[Sync] Erro em batch update:`, updateError);
+            errors += toUpdate.length;
+          }
+        }
+
+      } catch (batchError) {
+        console.error(`[Sync] Erro crítico no batch ${i}-${i + batchSize}:`, batchError);
+        errors += batch.length;
+      }
 
       // Enviar progresso SSE apenas a cada lote (nao a cada venda) para reduzir overhead
       processedCount += batch.length;
@@ -1777,8 +1848,6 @@ async function saveVendasBatch(
         // Ignorar erros de SSE - nao sao criticos
         console.warn(`[Sync] Erro ao enviar progresso SSE (nao critico):`, sseError);
       }
-
-      // SEM DELAY - Processar o mais rapido possivel
     }
   } catch (error) {
     console.error(`[Sync] Erro critico em saveVendasBatch:`, error);
@@ -1789,23 +1858,22 @@ async function saveVendasBatch(
   return { saved, errors };
 }
 
-async function saveVendaToDatabase(
+// Nova função auxiliar para preparar dados da venda sem salvar
+async function prepareVendaData(
   order: MeliOrderPayload,
   userId: string,
   skuCache: Map<string, SkuCacheEntry>
-): Promise<boolean> {
+): Promise<{ orderId: string; createData: any; updateData: any } | null> {
   const extractedOrderId = extractOrderIdFromPayload(order);
 
   if (!extractedOrderId) {
     console.error(`[Sync] Venda sem ID valido, pulando...`);
-    return false;
+    return null;
   }
 
   const orderId = extractedOrderId;
 
   try {
-    console.log(`[Sync] Salvando venda ${orderId} para userId: ${userId}`);
-
     const o: any = order.order ?? {};
     const freight = order.freight;
     const normalizedMlUserId =
@@ -1847,6 +1915,7 @@ async function saveVendaToDatabase(
     const tags: string[] = Array.isArray(o.tags)
       ? o.tags.map((t: unknown) => String(t))
       : [];
+
     const internalTags: string[] = Array.isArray(o.internal_tags)
       ? o.internal_tags.map((t: unknown) => String(t))
       : [];
@@ -1884,36 +1953,6 @@ async function saveVendaToDatabase(
       if (cachedSku) {
         if (cachedSku.custoUnitario !== null) {
           cmv = roundCurrency(cachedSku.custoUnitario * quantity);
-        }
-      } else {
-        try {
-          const skuData = await prisma.sKU.findFirst({
-            where: {
-              userId,
-              sku: skuVenda
-            },
-            select: {
-              custoUnitario: true,
-              tipo: true
-            }
-          });
-
-          const custoUnitarioValue =
-            skuData?.custoUnitario !== null && skuData?.custoUnitario !== undefined
-              ? Number(skuData.custoUnitario)
-              : null;
-
-          if (custoUnitarioValue !== null) {
-            cmv = roundCurrency(custoUnitarioValue * quantity);
-          }
-
-          skuCache.set(skuVenda, {
-            custoUnitario: custoUnitarioValue,
-            tipo: skuData?.tipo ?? null
-          });
-        } catch (error) {
-          console.error(`[DEBUG] Erro ao buscar SKU ${skuVenda}:`, error);
-          skuCache.set(skuVenda, { custoUnitario: null, tipo: null });
         }
       }
     }
@@ -1963,102 +2002,34 @@ async function saveVendaToDatabase(
       })
     };
 
-    const geoData = {
-      latitude: latitude !== null ? new Decimal(latitude) : null,
-      longitude: longitude !== null ? new Decimal(longitude) : null
-    };
+    // Tentar incluir geo se disponível
+    const geoData = latitude !== null && longitude !== null ? {
+      latitude: new Decimal(latitude),
+      longitude: new Decimal(longitude)
+    } : {};
 
-    const includeGeo = (withGeo: boolean) => (withGeo ? { ...vendaBaseData, ...geoData } : { ...vendaBaseData });
-
-    const buildCreateData = (withGeo: boolean) => ({
+    const createData = {
       orderId: truncateString(orderId, 255),
       userId: truncateString(userId, 50),
       meliAccountId: truncateString(order.accountId, 25),
-      ...includeGeo(withGeo)
-    });
-
-    const buildUpdateData = (withGeo: boolean) => ({
-      ...includeGeo(withGeo),
-      atualizadoEm: new Date()
-    });
-
-    debugFieldLengths(
-      {
-        orderId,
-        userId,
-        meliAccountId: order.accountId,
-        status: String(o.status ?? 'desconhecido').replaceAll('_', ' '),
-        conta: contaLabel,
-        titulo: firstItemTitle,
-        sku: itemData?.seller_sku || itemData?.sku,
-        comprador: buyerName,
-        logisticType: freight.logisticType,
-        envioMode: freight.shippingMode,
-        shippingStatus,
-        shippingId,
-        exposicao: (() => {
-          const listingTypeId = (orderItem?.listing_type_id ?? itemData?.listing_type_id) ?? null;
-          return mapListingTypeToExposure(listingTypeId);
-        })(),
-        tipoAnuncio: tags.includes('catalog') ? 'Catalogo' : 'Proprio',
-        ads: internalTags.includes('ads') ? 'ADS' : null,
-        plataforma: 'Mercado Livre',
-        canal: 'ML'
-      },
-      orderId
-    );
-
-    const isGeoColumnError = (msg: string) =>
-      msg.includes('Unknown argument `latitude`') || msg.includes('Unknown argument `longitude`');
-
-    const upsertWithGeoFallback = async (withGeo: boolean) => {
-      try {
-        await prisma.meliVenda.upsert({
-          where: { orderId },
-          update: buildUpdateData(withGeo),
-          create: buildCreateData(withGeo)
-        });
-      } catch (err) {
-        const msg = (err as any)?.message ? String((err as any).message) : String(err);
-        if (withGeo && isGeoColumnError(msg)) {
-          console.warn('[Sync] Latitude/longitude nao suportadas. Repetindo sem geolocalizacao.');
-          await prisma.meliVenda.upsert({
-            where: { orderId },
-            update: buildUpdateData(false),
-            create: buildCreateData(false)
-          });
-        } else {
-          throw err;
-        }
-      }
+      ...vendaBaseData,
+      ...geoData
     };
 
-    await upsertWithGeoFallback(true);
-    console.log(`[DEBUG] Venda ${orderId} salva/atualizada com sucesso via upsert`);
+    const updateData = {
+      ...vendaBaseData,
+      ...geoData
+    };
 
-    console.log(`[Sync] ✅ Venda ${orderId} salva/atualizada com sucesso`);
-    return true;
+    return { orderId, createData, updateData };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[Sync] ❌ Erro ao salvar venda ${orderId}:`, errorMsg);
-
-    if (error instanceof Error && error.stack) {
-      console.error(`[Sync] Stack trace:`, error.stack);
-    }
-
-    if (errorMsg.includes('Unique constraint')) {
-      console.error(`[Sync] Erro de constraint unico - pedido ${orderId} pode ja existir`);
-    } else if (errorMsg.includes('Foreign key constraint')) {
-      console.error(`[Sync] Erro de chave estrangeira - dados relacionados podem estar ausentes`);
-    } else if (errorMsg.includes('Data too long') || errorMsg.includes('String too long')) {
-      console.error(`[Sync] Erro de tamanho de campo - algum campo excede o limite do banco`);
-    } else if (errorMsg.includes('Invalid') || errorMsg.includes('invalid')) {
-      console.error(`[Sync] Erro de validacao - dados invalidos para o banco`);
-    }
-
-    return false;
+    console.error(`[Sync] Erro ao preparar venda ${orderId}:`, errorMsg);
+    return null;
   }
 }
+
+// REMOVIDA: saveVendaToDatabase() - refatorada em prepareVendaData() + batch operations
 export async function POST(req: NextRequest) {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
