@@ -5,6 +5,12 @@ import "react-datepicker/dist/react-datepicker.css";
 import "../styles/datepicker-custom.css";
 import Providers from "./providers";
 
+// Force everything to be treated as dynamic so Next.js never tries to prerender
+// API routes/pages during build (Render deploy 2025-11-14).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
