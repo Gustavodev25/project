@@ -403,6 +403,12 @@ type OrdersFetchResult = {
   expectedTotal: number;
 };
 
+type FetchOrdersResult = {
+  orders: MeliOrderPayload[];
+  expectedTotal: number;
+  forcedStop: boolean;
+};
+
 type SyncError = {
   accountId: string;
   mlUserId: number;
@@ -846,6 +852,7 @@ async function fetchAllOrdersForAccount(
     // Verificar tempo antes de continuar
     if (Date.now() - startTime > MAX_EXECUTION_TIME) {
       console.log(`[Sync] â±ï¸ Tempo limite atingido (${Math.round((Date.now() - startTime) / 1000)}s) - parando busca de vendas recentes`);
+      forcedStop = true;
       break;
     }
     schedulePageFetch(nextOffset);
@@ -858,6 +865,7 @@ async function fetchAllOrdersForAccount(
     // Verificar tempo antes de continuar
     if (Date.now() - startTime > MAX_EXECUTION_TIME) {
       console.log(`[Sync] â±ï¸ Tempo limite atingido - parando paginaÃ§Ã£o`);
+      forcedStop = true;
       break;
     }
 
@@ -958,7 +966,13 @@ async function fetchAllOrdersForAccount(
 
     const elapsedTime = Math.round((Date.now() - startTime) / 1000);
     console.log(`[Sync] âœ… Busca por perÃ­odo concluÃ­da em ${elapsedTime}s: ${results.length} vendas baixadas`);
+    if (Date.now() - startTime >= MAX_EXECUTION_TIME - 5000 && currentMonthStart > startDate) {
+      forcedStop = true;
+    }
   } else if (!shouldFetchHistory && total > results.length) {
+    if (timeRemaining <= 10000) {
+      forcedStop = true;
+    }
     console.log(`[Sync] â±ï¸ Tempo insuficiente para busca histÃ³rica - execute sincronizaÃ§Ã£o novamente para continuar`);
   }
 
@@ -987,7 +1001,7 @@ async function fetchAllOrdersForAccount(
     console.log(`[Sync] âœ… HistÃ³rico completo sincronizado!`);
   }
 
-  return { orders: results, expectedTotal: finalTotal };
+  return { orders: results, expectedTotal: finalTotal, forcedStop };
 }
 
 /**
@@ -2146,6 +2160,7 @@ export async function POST(req: NextRequest) {
   let totalExpectedOrders = 0;
   let totalFetchedOrders = 0;
   let totalSavedOrders = 0;
+  let forcedStop = false;
   
   // Preparar steps para cada conta
   const steps = accounts.map(acc => ({
@@ -2368,6 +2383,7 @@ export async function POST(req: NextRequest) {
 
         let allOrders: MeliOrderPayload[] = [];
         let expectedTotal = 0;
+        let accountForcedStop = false;
 
         try {
           const result = await fetchAllOrdersForAccount(
@@ -2379,6 +2395,8 @@ export async function POST(req: NextRequest) {
           );
           allOrders = result.orders;
           expectedTotal = result.expectedTotal;
+          accountForcedStop = result.forcedStop;
+          forcedStop = forcedStop || accountForcedStop;
 
           console.log(`[Sync] âœ… Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
           console.log(`[Sync] Debug - allOrders.length: ${allOrders.length}, expectedTotal: ${expectedTotal}`);
@@ -2469,11 +2487,14 @@ export async function POST(req: NextRequest) {
 
   // Verificar se hÃ¡ mais vendas antigas para sincronizar
   // Em fullSync ou quickMode, indicar se ainda faltam vendas
-  const hasMoreToSync = (fullSync || quickMode) && totalFetchedOrders < totalExpectedOrders;
+  const pendingVolume = totalFetchedOrders < totalExpectedOrders;
+  const hasMoreToSync = forcedStop || ((fullSync || quickMode) && pendingVolume);
 
-  // Enviar evento de conclusÃ£o da sincronizaÃ§Ã£o
+  // Enviar evento de conclusão da sincronização
   let mensagemFinal = '';
-  if (fullSync && hasMoreToSync) {
+  if (forcedStop) {
+    mensagemFinal = `⚠️ ${totalSavedOrders} vendas processadas até agora. Tempo limite atingido, continuaremos automaticamente.`;
+  } else if (fullSync && hasMoreToSync) {
     mensagemFinal = `✅ ${totalSavedOrders} vendas sincronizadas de ${totalExpectedOrders}! Clique novamente para continuar...`;
   } else if (fullSync) {
     mensagemFinal = `✅ Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders}`;

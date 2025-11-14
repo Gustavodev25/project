@@ -3,7 +3,7 @@ const activeConnections = new Map<string, ReadableStreamDefaultController>();
 
 // Função para enviar progresso para todas as conexões ativas de um usuário
 export function sendProgressToUser(userId: string, progress: {
-  type: "sync_start" | "sync_progress" | "sync_complete" | "sync_error" | "sync_warning" | "sync_debug";
+  type: "sync_start" | "sync_progress" | "sync_complete" | "sync_error" | "sync_warning" | "sync_debug" | "sync_continue";
   message: string;
   current?: number;
   total?: number;
@@ -16,6 +16,7 @@ export function sendProgressToUser(userId: string, progress: {
   timestamp?: string;
   errorCode?: string;
   debugData?: any;
+  hasMoreToSync?: boolean;
   steps?: Array<{
     accountId: string;
     accountName: string;
@@ -50,8 +51,12 @@ export function sendProgressToUser(userId: string, progress: {
     }
   }
   
+  // Log apenas para debug se não houver conexões SSE (modo cron)
   if (sentCount > 0) {
     console.log(`[SSE] Progresso enviado para ${sentCount} conexão(ões) do usuário ${userId}:`, progress.message);
+  } else {
+    // Modo cron: apenas log de debug
+    console.log(`[Cron] ${progress.message}`);
   }
 }
 

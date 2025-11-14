@@ -4,11 +4,17 @@
  * Este endpoint é chamado automaticamente pelo Vercel Cron
  * para sincronizar vendas do Mercado Livre de todas as contas ativas.
  *
+ * ESTRATÉGIA:
+ * - Processa múltiplas contas em paralelo (lotes de 3)
+ * - Usa quickMode para sincronizar apenas vendas recentes
+ * - Evita timeout ao processar em lotes pequenos
+ * - Cada execução sincroniza TODAS as contas em ~60s
+ *
  * Configuração em vercel.json:
  * {
  *   "crons": [{
  *     "path": "/api/cron/meli-sync",
- *     "schedule": "0 * * * *"  // A cada hora
+ *     "schedule": "0 */2 * * *"  // A cada 2 horas
  *   }]
  * }
  */
@@ -17,7 +23,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300; // 5 minutos para processar todas as contas
 
 export async function GET(req: NextRequest) {
   // Verificar autorização via CRON_SECRET
@@ -34,11 +40,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log('[Cron] Iniciando sincronização automática do Mercado Livre...');
+  const startTime = Date.now();
+  console.log('[Cron] 🚀 Iniciando sincronização automática do Mercado Livre...');
 
   try {
     // Buscar todas as contas Meli ativas
-    // Agrupa por userId para sincronizar uma conta por usuário por vez
     const accounts = await prisma.meliAccount.findMany({
       select: {
         id: true,
@@ -50,85 +56,108 @@ export async function GET(req: NextRequest) {
     });
 
     if (accounts.length === 0) {
-      console.log('[Cron] Nenhuma conta do Mercado Livre encontrada');
+      console.log('[Cron] ⚠️ Nenhuma conta do Mercado Livre encontrada');
       return NextResponse.json({
         success: true,
         message: 'Nenhuma conta encontrada',
-        synced: 0
+        synced: 0,
+        duration: Date.now() - startTime
       });
     }
 
-    console.log(`[Cron] Encontradas ${accounts.length} contas do Mercado Livre`);
+    console.log(`[Cron] 📊 Encontradas ${accounts.length} contas do Mercado Livre`);
 
-    // Agrupar contas por usuário
-    const accountsByUser = accounts.reduce((acc, account) => {
-      if (!acc[account.userId]) {
-        acc[account.userId] = [];
-      }
-      acc[account.userId].push(account);
-      return acc;
-    }, {} as Record<string, typeof accounts>);
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
+    // Processar contas em lotes paralelos de 3
+    const BATCH_SIZE = 3;
     const results = [];
 
-    // Sincronizar uma conta de cada usuário (para não sobrecarregar)
-    for (const [userId, userAccounts] of Object.entries(accountsByUser)) {
-      const account = userAccounts[0]; // Pegar primeira conta do usuário
+    for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+      const batch = accounts.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(accounts.length / BATCH_SIZE);
 
-      try {
-        console.log(`[Cron] Sincronizando conta ${account.nickname || account.ml_user_id} (usuário ${userId})...`);
+      console.log(`[Cron] 🔄 Processando lote ${batchNumber}/${totalBatches} (${batch.length} contas)...`);
 
-        // Fazer requisição para endpoint de sync
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL ||
-          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+      // Processar lote em paralelo
+      const batchResults = await Promise.allSettled(
+        batch.map(async (account) => {
+          const accountStartTime = Date.now();
+          try {
+            console.log(`[Cron]   → Sincronizando ${account.nickname || account.ml_user_id}...`);
 
-        // Criar token de sessão temporário para o cron job
-        // Nota: Em produção, considere usar um mecanismo mais seguro
-        const response = await fetch(`${baseUrl}/api/meli/vendas/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-cron-secret': process.env.CRON_SECRET || ''
-          },
-          body: JSON.stringify({
-            accountIds: [account.id],
-            quickMode: true,
-            fullSync: false
-          })
-        });
+            const response = await fetch(`${baseUrl}/api/meli/vendas/sync`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-cron-secret': process.env.CRON_SECRET || ''
+              },
+              body: JSON.stringify({
+                accountIds: [account.id],
+                quickMode: true,  // Sincroniza apenas vendas recentes (rápido)
+                fullSync: false   // Não busca histórico completo
+              })
+            });
 
-        const data = await response.json();
+            const data = await response.json();
+            const duration = Date.now() - accountStartTime;
 
-        results.push({
-          accountId: account.id,
-          nickname: account.nickname,
-          success: response.ok,
-          status: response.status,
-          vendas: data.totals?.saved || 0
-        });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${data.error || 'Erro desconhecido'}`);
+            }
 
-        console.log(`[Cron] ✅ Conta ${account.nickname}: ${data.totals?.saved || 0} vendas sincronizadas`);
+            console.log(`[Cron]   ✅ ${account.nickname}: ${data.totals?.saved || 0} vendas em ${duration}ms`);
 
-      } catch (error) {
-        console.error(`[Cron] ❌ Erro ao sincronizar conta ${account.id}:`, error);
-        results.push({
-          accountId: account.id,
-          nickname: account.nickname,
-          success: false,
-          error: error instanceof Error ? error.message : 'Erro desconhecido'
-        });
-      }
+            return {
+              accountId: account.id,
+              nickname: account.nickname,
+              ml_user_id: account.ml_user_id,
+              success: true,
+              status: response.status,
+              vendas: data.totals?.saved || 0,
+              duration
+            };
+
+          } catch (error) {
+            const duration = Date.now() - accountStartTime;
+            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+            console.error(`[Cron]   ❌ ${account.nickname}: ${errorMessage}`);
+
+            return {
+              accountId: account.id,
+              nickname: account.nickname,
+              ml_user_id: account.ml_user_id,
+              success: false,
+              error: errorMessage,
+              duration
+            };
+          }
+        })
+      );
+
+      // Adicionar resultados do lote
+      results.push(...batchResults.map(r => r.status === 'fulfilled' ? r.value : r.reason));
+
+      // Log do lote
+      const batchSuccess = batchResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      console.log(`[Cron] ✓ Lote ${batchNumber}/${totalBatches}: ${batchSuccess}/${batch.length} contas sincronizadas`);
     }
 
     const successCount = results.filter(r => r.success).length;
     const totalVendas = results.reduce((sum, r) => sum + (r.vendas || 0), 0);
+    const totalDuration = Date.now() - startTime;
 
-    console.log(`[Cron] ✅ Sincronização completa: ${successCount}/${results.length} contas sincronizadas, ${totalVendas} vendas`);
+    console.log(`[Cron] 🎉 Sincronização completa: ${successCount}/${results.length} contas, ${totalVendas} vendas, ${totalDuration}ms`);
 
     return NextResponse.json({
       success: true,
       message: `${successCount}/${results.length} contas sincronizadas`,
       totalVendas,
+      totalAccounts: results.length,
+      successCount,
+      duration: totalDuration,
       results
     });
 
