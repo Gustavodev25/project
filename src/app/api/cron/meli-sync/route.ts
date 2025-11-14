@@ -14,7 +14,7 @@
  * {
  *   "crons": [{
  *     "path": "/api/cron/meli-sync",
- *     "schedule": "0 */2 * * *"  // A cada 2 horas
+ *     "schedule": "0 *\\/2 * * *"  // A cada 2 horas
  *   }]
  * }
  */
