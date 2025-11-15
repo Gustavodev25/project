@@ -65,7 +65,7 @@ export class ContaPagarSyncService {
     }
   }
 
-  private async processContaPagar(contaBling: any, index: number) {
+  public async processContaPagar(contaBling: any) {
     try {
       // Skip if we've already processed this account in this sync
       if (this.processedAccounts.has(contaBling.id.toString())) {
@@ -219,7 +219,7 @@ export class ContaPagarSyncService {
       for (let i = 0; i < contasBling.length; i++) {
         const contaBling = contasBling[i];
         try {
-          await this.processContaPagar(contaBling, i);
+          await this.processContaPagar(contaBling);
           
           // Update progress every 5 accounts or if it's the last one
           if (i % 5 === 0 || i === contasBling.length - 1) {
