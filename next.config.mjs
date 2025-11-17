@@ -8,8 +8,10 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // Configuração para output standalone (melhor para deploy)
-  output: 'standalone',
+  // Variáveis de ambiente públicas
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',
+  },
 };
 
 export default nextConfig;
