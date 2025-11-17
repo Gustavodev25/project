@@ -5,6 +5,7 @@ import {
   saveVendasToCache
 } from "@/lib/vendasCache";
 import { toast } from "@/hooks/use-toast";
+import { API_CONFIG } from "@/lib/api-config";
 
 // Re-exportar funções de cache para uso externo
 export { 
@@ -276,13 +277,11 @@ export function useVendas(platform: string = "Mercado Livre") {
           }
 
           console.log(`[useVendas] Chamando API /api/cron/meli-sync/trigger (via cron) com body:`, body);
-          res = await fetch("/api/cron/meli-sync/trigger", {
+          console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
+          res = await API_CONFIG.fetch("/api/cron/meli-sync/trigger", {
             method: "POST",
             cache: "no-store",
             credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
             body: JSON.stringify(body),
           });
           console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
@@ -330,13 +329,11 @@ export function useVendas(platform: string = "Mercado Livre") {
         }
         
         // Sincronização completa em uma única chamada (com paginação automática interna)
-        res = await fetch("/api/shopee/vendas/sync", {
+        console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
+        res = await API_CONFIG.fetch("/api/shopee/vendas/sync", {
           method: "POST",
           cache: "no-store",
           credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
           body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
 
@@ -424,8 +421,9 @@ export function useVendas(platform: string = "Mercado Livre") {
       }
 
       console.log(`[useVendas] Chamando API de contas: ${apiUrl}`);
-      
-      const res = await fetch(apiUrl, { 
+      console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
+
+      const res = await API_CONFIG.fetch(apiUrl, {
         cache: "no-store",
         credentials: "include"
       });
@@ -476,8 +474,9 @@ export function useVendas(platform: string = "Mercado Livre") {
       }
 
       console.log(`[useVendas] Atualizando da API: ${apiUrl}`);
+      console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
 
-      const res = await fetch(apiUrl, {
+      const res = await API_CONFIG.fetch(apiUrl, {
         cache: "no-store",
         credentials: "include"
       });
