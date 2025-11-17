@@ -391,7 +391,7 @@ function calculateMargemContribuicao(
 
 type MeliOrderPayload = {
   accountId: string;
-  accountNickname: string | null;
+  accountNickname: string | undefined;
   mlUserId: number;
   order: unknown;
   shipment?: unknown;
@@ -1186,7 +1186,7 @@ async function fetchOrdersInDateRange(
 
         results.push({
           accountId: account.id,
-          accountNickname: account.nickname || null,
+          accountNickname: account.nickname || undefined,
           mlUserId: account.ml_user_id,
           order,
           shipment,
