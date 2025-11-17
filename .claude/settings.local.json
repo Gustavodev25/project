@@ -3,7 +3,17 @@
     "allow": [
       "Bash(git pull:*)",
       "Bash(npm run build:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: add backend API routes\n\nAdiciona todos os endpoints da API do projeto:\n- accounts: gerenciamento de contas\n- auth: autenticação\n- bling: integração Bling\n- cron: tarefas agendadas\n- dashboard: dados do painel\n- debug: ferramentas de debug\n- financeiro: módulo financeiro\n- meli: integração Mercado Livre\n- notifications: notificações\n- sales: vendas\n- settings: configurações\n- shopee: integração Shopee\n- sku: gerenciamento de SKU\n- test: testes\n- vendas: módulo de vendas\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git config:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git rm -rf .)",
+      "Bash(git clean:*)",
+      "Bash(dir /s /b 2)",
+      "Bash(nul)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
