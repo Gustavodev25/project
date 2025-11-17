@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { getStatusWhere, getCanalWhere, getTipoAnuncioWhere, getModalidadeWhere } from "@/lib/dashboard-filters";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
@@ -137,7 +138,7 @@ function groupByPeriod(vendas: any[], tipo: 'mensal' | 'semanal' | 'diario') {
   return grupos;
 }
 
-export async function GET(req: NextRequest) {
+export const GET = withCors(async (req: NextRequest) => {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
@@ -375,4 +376,4 @@ export async function GET(req: NextRequest) {
     console.error("Erro ao calcular dados da série temporal:", err);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
-}
+});

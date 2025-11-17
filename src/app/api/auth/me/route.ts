@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export const GET = withCors(async (req: NextRequest) => {
   const sessionCookie = req.cookies.get("session")?.value;
 
   if (!sessionCookie) {
@@ -36,4 +37,4 @@ export async function GET(req: NextRequest) {
     console.error("Erro ao buscar usuário:", error);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
-}
+});

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
 import { cache, createCacheKey } from "@/lib/cache";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ type RawDataWithOrder = JsonRecord & {
   shipment?: JsonRecord | null;
 };
 
-export async function GET(req: NextRequest) {
+export const GET = withCors(async (req: NextRequest) => {
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
@@ -238,4 +239,4 @@ export async function GET(req: NextRequest) {
     console.error("Erro ao buscar vendas:", error);
     return new NextResponse("Erro interno do servidor", { status: 500 });
   }
-}
+});

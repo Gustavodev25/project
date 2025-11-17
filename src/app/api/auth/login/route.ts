@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 import prisma from "@/lib/prisma";
 import { LoginSchema } from "@/lib/validators";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ function allow(ip: string, email: string) {
   return true;
 }
 
-export async function POST(req: Request) {
+export const POST = withCors(async (req: Request) => {
   // 1) Content-Type
   const ct = req.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
@@ -128,4 +129,4 @@ export async function POST(req: Request) {
   });
 
   return res;
-}
+});

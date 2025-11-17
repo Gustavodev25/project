@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { RegisterSchema } from "@/lib/validators";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs"; // garante Map() para rate-limit em Node
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ function allow(ip: string, email: string) {
   return true;
 }
 
-export async function POST(req: Request) {
+export const POST = withCors(async (req: Request) => {
   // 1) Content-Type
   const ct = req.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
@@ -91,4 +92,4 @@ export async function POST(req: Request) {
       "Referrer-Policy": "no-referrer",
     },
   });
-}
+});

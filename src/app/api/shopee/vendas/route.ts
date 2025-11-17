@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { cache, createCacheKey } from "@/lib/cache";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export const GET = withCors(async (req: NextRequest) => {
   const session = await assertSessionToken(req.cookies.get("session")?.value);
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
@@ -118,4 +119,4 @@ export async function GET(req: NextRequest) {
     console.error("Erro ao buscar vendas Shopee:", error);
     return new NextResponse("Erro interno do servidor", { status: 500 });
   }
-}
+});

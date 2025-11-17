@@ -21,7 +21,8 @@
       "Bash(npm run build:*)",
       "Bash(npm run prisma:generate:*)",
       "Bash(npm run:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []

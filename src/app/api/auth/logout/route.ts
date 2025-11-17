@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export const POST = withCors(async () => {
   const response = NextResponse.json({ ok: true });
   
   // Limpar o cookie de sessão
@@ -15,4 +16,4 @@ export async function POST() {
   });
 
   return response;
-}
+});

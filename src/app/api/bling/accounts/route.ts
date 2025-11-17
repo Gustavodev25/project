@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { tryVerifySessionToken } from "@/lib/auth";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export const GET = withCors(async (req: NextRequest) => {
   const session = await tryVerifySessionToken(req.cookies.get("session")?.value);
   if (!session) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
@@ -34,4 +35,4 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
