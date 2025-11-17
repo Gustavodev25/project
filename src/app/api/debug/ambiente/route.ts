@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { withCors } from "@/lib/cors";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+export const OPTIONS = withCors(async (_req: NextRequest) => {
+  return new NextResponse(null, { status: 204 });
+});
+
+export const GET = withCors(async (req: NextRequest) => {
   try {
     const sessionCookie = req.cookies.get("session")?.value;
     const session = await assertSessionToken(sessionCookie);
@@ -183,4 +188,4 @@ export async function GET(req: NextRequest) {
       message: error instanceof Error ? error.message : String(error),
     }, { status: 500 });
   }
-}
+});

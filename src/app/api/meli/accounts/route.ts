@@ -5,6 +5,10 @@ import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
+export const OPTIONS = withCors(async (_req: NextRequest) => {
+  return new NextResponse(null, { status: 204 });
+});
+
 export const GET = withCors(async (req: NextRequest) => {
   const sessionCookie = req.cookies.get("session")?.value;
   try {

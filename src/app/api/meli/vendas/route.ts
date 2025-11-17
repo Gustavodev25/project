@@ -6,6 +6,10 @@ import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
+export const OPTIONS = withCors(async (_req: NextRequest) => {
+  return new NextResponse(null, { status: 204 });
+});
+
 function roundCurrency(value: number): number {
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
   return Object.is(rounded, -0) ? 0 : rounded;
