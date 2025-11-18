@@ -103,6 +103,18 @@ export class PrismaClient {
 
   writeFileSync(join(prismaClientDir, 'package.json'), JSON.stringify(packageJson, null, 2));
 
+  // Criar runtime/library mock
+  const runtimeDir = join(prismaClientDir, 'runtime');
+  mkdirSync(runtimeDir, { recursive: true });
+
+  const runtimeLibraryContent = `
+// Mock runtime/library para build frontend
+module.exports = {};
+`;
+
+  writeFileSync(join(runtimeDir, 'library.js'), runtimeLibraryContent);
+  writeFileSync(join(runtimeDir, 'library.d.ts'), 'export {};');
+
   console.log('✅ Prisma Client mock criado para build frontend');
   console.log('   → As rotas API serão redirecionadas para o backend (Render)');
 

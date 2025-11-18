@@ -29,7 +29,8 @@
       "Bash(taskkill:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(git remote:*)"
     ],
     "deny": [],
     "ask": []
