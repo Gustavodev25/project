@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node scripts/dev-local.mjs",
     "dev:https": "node scripts/dev-local.mjs --experimental-https",
-    "build": "prisma generate && next build",
+    "build": "next build",
+    "build:backend": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "test:auto-sync": "npx ts-node scripts/test-auto-sync.ts",
@@ -14,7 +15,7 @@
     "deploy:backend": "git push backend main",
     "deploy:frontend": "git push frontend main",
     "deploy:all": "git push backend main && git push frontend main",
-    "postinstall": "prisma generate"
+    "postinstall": "node scripts/conditional-prisma.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.17.1",

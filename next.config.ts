@@ -4,6 +4,9 @@ const rawStaticTimeout = Number(process.env.NEXT_STATIC_PAGE_GENERATION_TIMEOUT 
 const staticPageGenerationTimeout =
   Number.isFinite(rawStaticTimeout) && rawStaticTimeout > 0 ? rawStaticTimeout : 600;
 
+// Detectar se está na Vercel (frontend only)
+const isVercel = process.env.VERCEL === '1';
+
 // Explicitly set Turbopack's workspace root to this project directory
 // to avoid Next.js inferring a parent directory when multiple lockfiles exist.
 const nextConfig: NextConfig & { turbopack?: { root?: string } } = {
@@ -22,6 +25,19 @@ const nextConfig: NextConfig & { turbopack?: { root?: string } } = {
   // Keep this strictly positive; setting it to zero causes every page/route
   // to time out during static prerender (see Render deploy on 2025-11-14).
   staticPageGenerationTimeout,
+
+  // Na Vercel (frontend), pular rotas API no build
+  ...(isVercel && {
+    experimental: {
+      outputFileTracingExcludes: {
+        '*': [
+          'node_modules/@prisma/client/**/*',
+          'node_modules/@prisma/engines/**/*',
+          'node_modules/prisma/**/*',
+        ],
+      },
+    },
+  }),
 };
 
 export default nextConfig;
