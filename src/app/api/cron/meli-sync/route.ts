@@ -61,9 +61,16 @@ async function runCron(req: NextRequest, options?: CronBody) {
 
     console.log(`[Cron] 📊 Encontradas ${targetAccounts.length} contas do Mercado Livre`);
 
+    const internalBaseUrl =
+      process.env.INTERNAL_BACKEND_URL ||
+      process.env.RENDER_INTERNAL_URL ||
+      (process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null);
+
     const baseUrl =
+      internalBaseUrl ||
       process.env.NEXT_PUBLIC_APP_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+      process.env.RENDER_EXTERNAL_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : req.nextUrl.origin);
 
     // Parâmetros de execução vindos do body (com padrões seguros)
     const quickMode = options?.quickMode !== false; // default true

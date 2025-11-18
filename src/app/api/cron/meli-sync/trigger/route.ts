@@ -34,9 +34,16 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {}
 
+  const internalBaseUrl =
+    process.env.INTERNAL_BACKEND_URL ||
+    process.env.RENDER_INTERNAL_URL ||
+    (process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null);
+
   const baseUrl =
+    internalBaseUrl ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+    process.env.RENDER_EXTERNAL_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : req.nextUrl.origin);
 
   // Detectar se deve usar backend remoto
   const backendUrl = process.env.RENDER_BACKEND_URL;

@@ -733,11 +733,9 @@ async function fetchAllOrdersForAccount(
   fullSync: boolean = false, // Novo parÃ¢metro para sincronizaÃ§Ã£o completa desde 01/2025
 ): Promise<FetchOrdersResult> {
   const startTime = Date.now();
-  // MUDANÃ‡A CRÃTICA: Em quickMode, buscar em 20s e deixar 40s para salvar no banco (total 60s)
-  // Salvamento de 500 vendas ~5s, mas com margem de seguranÃ§a para contas grandes
-  // Em background mode, pode usar atÃ© 45s de busca (deixa 15s para salvar ~1500 vendas)
-  // OTIMIZAÇÃO: 30s fetch + 20s save = 50s total (margem 10s para 60s timeout)
-  const MAX_EXECUTION_TIME = 30000; // SEMPRE 30 segundos
+  // Em fullSync podemos rodar quanto for preciso; nos outros modos limitamos para evitar timeout
+  const MAX_EXECUTION_TIME = fullSync ? Number.POSITIVE_INFINITY : 30000;
+
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
   let forcedStop = false; // Declarar forcedStop localmente
@@ -765,12 +763,9 @@ async function fetchAllOrdersForAccount(
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  // MUDANÃ‡A CRÃTICA: Em quickMode, buscar apenas 500 vendas para garantir tempo de salvar no banco
-  // Salvamento de ~10k vendas demora ~30s, entÃ£o limitar busca para caber em 60s total
-  // Em background, buscar 1500 vendas (mais conservador para evitar timeout)
-  // LIMITE SEGURO: 100 vendas por sync (30s fetch + 15s save = 45s total)
-  // 12k vendas = 120 syncs automáticos
-  const SAFE_BATCH_SIZE = 100;
+  // Em fullSync buscamos o m?ximo poss?vel; nos demais modos limitamos para evitar timeout
+  const SAFE_BATCH_SIZE = fullSync ? MAX_OFFSET : (quickMode ? 500 : 1500);
+
   let maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
@@ -886,8 +881,9 @@ async function fetchAllOrdersForAccount(
 
   // PASSO 2: Buscar vendas históricas apenas se NÃO atingiu o limite
   const timeRemaining = MAX_EXECUTION_TIME - (Date.now() - startTime);
-  const reachedLimit = results.length >= SAFE_BATCH_SIZE;
-  const shouldFetchHistory = !reachedLimit && timeRemaining > 10000;
+  const reachedLimit = !fullSync && results.length >= SAFE_BATCH_SIZE;
+  const shouldFetchHistory = fullSync || (!reachedLimit && timeRemaining > 10000);
+
 
   if (shouldFetchHistory && (total > results.length || oldestSyncedDate)) {
     console.log(`[Sync] ðŸ”„ Buscando vendas histÃ³ricas (tempo restante: ${Math.round(timeRemaining / 1000)}s)...`);
@@ -2100,9 +2096,11 @@ export async function POST(req: NextRequest) {
     userId = session.sub;
   }
 
-  // Por padrÃ£o, usar quickMode=true para evitar timeout
-  const quickMode = requestBody.quickMode !== false; // true por padrÃ£o, false apenas se explicitamente passado
+  // Por padr?o, usar quickMode=true para evitar timeout (mas desativar em fullSync)
   const fullSync = requestBody.fullSync === true; // fullSync apenas se explicitamente true
+  const quickMode = fullSync ? false : requestBody.quickMode !== false; // true por padr?o, false apenas se explicitamente passado
+  requestBody.quickMode = quickMode;
+  requestBody.fullSync = fullSync;
 
   console.log(`[Sync] Iniciando sincronizaÃ§Ã£o para usuÃ¡rio ${userId}`, {
     accountIds: requestBody.accountIds,
@@ -2533,7 +2531,14 @@ export async function POST(req: NextRequest) {
     });
 
     // Trigger próximo sync (fire-and-forget - não espera resposta)
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ||
+    const internalBaseUrl =
+      process.env.INTERNAL_BACKEND_URL ||
+      process.env.RENDER_INTERNAL_URL ||
+      (process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null);
+
+    const baseUrl = internalBaseUrl ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
     fetch(`${baseUrl}/api/meli/vendas/sync`, {
