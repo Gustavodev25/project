@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/dev-local.mjs",
     "dev:https": "node scripts/dev-local.mjs --experimental-https",
-    "build": "next build",
+    "build": "node scripts/setup-frontend-build.mjs && next build",
     "build:backend": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
