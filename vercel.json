@@ -1,16 +1,31 @@
 {
-  "crons": [
+  "rewrites": [
     {
-      "path": "/api/cron/meli-sync",
-      "schedule": "0 */2 * * *"
+      "source": "/api/:path*",
+      "destination": "https://project-backend-rjoh.onrender.com/api/:path*"
     }
   ],
-  "functions": {
-    "src/app/api/cron/meli-sync/route.ts": {
-      "maxDuration": 300
-    },
-    "src/app/api/meli/vendas/sync/route.ts": {
-      "maxDuration": 60
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
     }
-  }
+  ]
 }

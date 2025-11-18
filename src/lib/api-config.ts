@@ -1,42 +1,64 @@
 /**
- * Configuração centralizada para chamadas de API
+ * Configuração centralizada para chamadas de API.
  *
- * Em desenvolvimento: usa localhost:3000
- * Em produção: usa o backend no Render
+ * Em desenvolvimento/localhost usamos rotas relativas (mesma origem)
+ * para compartilhar cookies automaticamente. Em produção usamos
+ * o backend configurado (Render).
  */
 
+function isLocalhost(): boolean {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  }
+
+  return process.env.NODE_ENV !== "production";
+}
+
+function shouldUseExternalBackend(): boolean {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const forceExternal =
+    process.env.NEXT_PUBLIC_FORCE_EXTERNAL_BACKEND === "true";
+
+  if (!apiUrl) {
+    return false;
+  }
+
+  if (forceExternal) {
+    return true;
+  }
+
+  return !isLocalhost();
+}
+
 export const API_CONFIG = {
-  // URL base da API
-  baseURL: process.env.NEXT_PUBLIC_API_URL || '',
-
-  // Se há URL de API configurada, use-a; caso contrário, usa caminho relativo
-  getApiUrl: (path: string): string => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-    // Se tem URL configurada (Render), usa ela
-    if (apiUrl) {
-      return `${apiUrl}${path}`;
-    }
-
-    // Senão, usa caminho relativo (mesma origem)
-    return path;
+  get baseURL(): string {
+    return shouldUseExternalBackend() ? process.env.NEXT_PUBLIC_API_URL || "" : "";
   },
 
-  // Helper para fazer requisições
+  getApiUrl(path: string): string {
+    if (!shouldUseExternalBackend()) {
+      return path;
+    }
+
+    return `${process.env.NEXT_PUBLIC_API_URL}${path}`;
+  },
+
   async fetch(path: string, options?: RequestInit) {
     const url = API_CONFIG.getApiUrl(path);
 
     return fetch(url, {
+      credentials: "include",
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options?.headers,
       },
     });
   },
 };
 
-// Tipos de ambiente
-export const isProduction = process.env.NODE_ENV === 'production';
-export const isDevelopment = process.env.NODE_ENV === 'development';
-export const hasExternalBackend = !!process.env.NEXT_PUBLIC_API_URL;
+// Tipos de ambiente / flags
+export const isProduction = process.env.NODE_ENV === "production";
+export const isDevelopment = process.env.NODE_ENV === "development";
+export const hasExternalBackend = shouldUseExternalBackend();

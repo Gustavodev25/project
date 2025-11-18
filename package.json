@@ -9,6 +9,11 @@
     "start": "next start",
     "lint": "eslint",
     "test:auto-sync": "npx ts-node scripts/test-auto-sync.ts",
+    "verify:env": "node scripts/verify-env.mjs",
+    "verify:env:prod": "node scripts/verify-env.mjs production",
+    "deploy:backend": "git push backend main",
+    "deploy:frontend": "git push frontend main",
+    "deploy:all": "git push backend main && git push frontend main",
     "postinstall": "prisma generate"
   },
   "dependencies": {

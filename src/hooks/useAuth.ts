@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { API_CONFIG } from "@/lib/api-config";
 
 interface User {
   id: string;
@@ -48,8 +49,7 @@ export function useAuth() {
     }
 
     try {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include",
+      const response = await API_CONFIG.fetch("/api/auth/me", {
         cache: "no-store", // Evitar cache do navegador
       });
 
@@ -89,6 +89,16 @@ export function useAuth() {
   // Fazer logout
   const logout = useCallback(async () => {
     try {
+      if (API_CONFIG.baseURL) {
+        try {
+          await API_CONFIG.fetch("/api/auth/logout", {
+            method: "POST",
+          });
+        } catch (remoteError) {
+          console.warn("[useAuth] Erro ao deslogar backend remoto:", remoteError);
+        }
+      }
+
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",

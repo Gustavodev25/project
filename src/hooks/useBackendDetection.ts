@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_CONFIG } from "@/lib/api-config";
 
 interface BackendInfo {
   url: string;
@@ -11,34 +12,33 @@ export function useBackendDetection(): BackendInfo {
   const [backendInfo, setBackendInfo] = useState<BackendInfo>({
     url: "",
     source: "Unknown",
-    statusIcon: "⚪",
+    statusIcon: "❔",
     statusColor: "gray",
   });
 
   useEffect(() => {
     const detectBackend = async () => {
       try {
-        // 1. Verificar variável de ambiente
         let apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
-        // 2. Se não houver variável, usar origin
         if (!apiUrl && typeof window !== "undefined") {
           apiUrl = window.location.origin;
         }
 
-        // 3. Tentar obter informações de debug do backend
+        const finalUrl = apiUrl || (typeof window !== "undefined" ? window.location.origin : "");
+        const debugEndpoint = API_CONFIG.getApiUrl("/api/debug/ambiente");
+
         try {
-          const response = await fetch(`${apiUrl || "/api"}/debug/ambiente`, {
+          const response = await fetch(debugEndpoint, {
             method: "GET",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
           });
 
           if (response.ok) {
             const data = await response.json();
-            console.log("🔍 Resposta do backend debug:", data);
+            console.log("[useBackendDetection] Resposta do backend debug:", data);
 
-            // Se conseguir resposta do backend, use a URL configurada
-            const finalUrl = apiUrl || window.location.origin;
             const source = determineBackendSource(finalUrl, data);
 
             setBackendInfo({
@@ -47,21 +47,23 @@ export function useBackendDetection(): BackendInfo {
               statusIcon: getStatusIcon(source),
               statusColor: getStatusColor(source),
             });
+
+            return;
           }
         } catch (debugError) {
-          // Se falhar o debug endpoint, usa detecção por URL
-          const finalUrl = apiUrl || window.location.origin;
-          const source = determineBackendSource(finalUrl, null);
-
-          setBackendInfo({
-            url: finalUrl,
-            source,
-            statusIcon: getStatusIcon(source),
-            statusColor: getStatusColor(source),
-          });
+          console.warn("[useBackendDetection] Falha ao consultar /api/debug/ambiente:", debugError);
         }
 
-        console.log("🔗 Backend detectado:", apiUrl);
+        const fallbackSource = determineBackendSource(finalUrl, null);
+
+        setBackendInfo({
+          url: finalUrl,
+          source: fallbackSource,
+          statusIcon: getStatusIcon(fallbackSource),
+          statusColor: getStatusColor(fallbackSource),
+        });
+
+        console.log("[useBackendDetection] Backend detectado:", finalUrl);
       } catch (error) {
         console.error("Erro ao detectar backend:", error);
       }
@@ -77,12 +79,10 @@ function determineBackendSource(
   url: string,
   debugData?: any
 ): "Vercel" | "Render" | "Local" | "Unknown" {
-  // Verificar pelo environment variable do Vercel
   if (debugData?.vercelEnv) {
     return "Vercel";
   }
 
-  // Verificar pela URL
   if (
     url.includes("vercel.app") ||
     url.includes(".vercel.app") ||
@@ -98,7 +98,6 @@ function determineBackendSource(
     return "Render";
   }
 
-  // Verificar pelo hostname da resposta do debug
   if (debugData?.vercelRegion) {
     return "Vercel";
   }
@@ -111,13 +110,13 @@ function getStatusIcon(source: "Vercel" | "Render" | "Local" | "Unknown"): strin
     case "Vercel":
       return "🟦";
     case "Render":
-      return "🟩";
+      return "🟢";
     case "Local":
       return "🟨";
     case "Unknown":
-      return "⚪";
+      return "❔";
     default:
-      return "⚪";
+      return "❔";
   }
 }
 

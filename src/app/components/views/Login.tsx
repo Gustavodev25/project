@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "./ui/toaster";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { API_CONFIG } from "@/lib/api-config";
 
 // Usando o sistema de inputs padronizado
 
@@ -108,23 +109,51 @@ export default function Login() {
     }
     setIsLoading(true);
     try {
+      const payload = JSON.stringify({ email: normalizedEmail, senha });
+      const shouldSyncExternal = Boolean(API_CONFIG.baseURL);
+
+      // 1) Se estivermos usando backend externo, realizar login lá primeiro
+      if (shouldSyncExternal) {
+        const remoteRes = await API_CONFIG.fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        });
+
+        const remoteData = await remoteRes.json().catch(() => ({}));
+
+        console.log("[Login] Resposta do backend remoto:", {
+          status: remoteRes.status,
+          ok: remoteRes.ok,
+          data: remoteData,
+        });
+
+        if (!remoteRes.ok || !remoteData?.ok) {
+          const message =
+            remoteData?.message ||
+            remoteData?.error ||
+            "Falha ao autenticar no backend remoto.";
+          throw new Error(message);
+        }
+      }
+
+      // 2) Sempre realizar login local para manter compatibilidade com rotas locais
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // Importante para incluir cookies
-        body: JSON.stringify({ email: normalizedEmail, senha }),
+        credentials: "include",
+        body: payload,
       });
 
-      // Primeiro tentar parsear a resposta como JSON
       const data = await res.json().catch(() => ({}));
 
-      console.log("🔍 Resposta do login:", {
+      console.log("[Login] Resposta do backend local:", {
         status: res.status,
         ok: res.ok,
-        data: data
+        data,
       });
 
-      if (res.ok && data.ok) {
+      if (res.ok && data?.ok) {
         // Login bem-sucedido - atualizar contexto de auth e redirecionar
         console.log("✅ Login bem-sucedido! Redirecionando...");
         toast({

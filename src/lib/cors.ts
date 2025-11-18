@@ -5,11 +5,18 @@ import { NextResponse } from 'next/server';
  */
 
 const ALLOWED_ORIGINS = [
+  // Desenvolvimento local
   'http://localhost:3000',
   'http://localhost:3001',
-  'https://project-livid-tau.vercel.app',
-  'https://project-backend-rjoh.onrender.com',
-  // Adicione outros domínios conforme necessário
+  'http://127.0.0.1:3000',
+
+  // Produção - ATUALIZE ESTAS URLs COM SUAS URLs REAIS
+  'https://project-livid-tau.vercel.app',        // Frontend Vercel
+  'https://project-backend-rjoh.onrender.com',   // Backend Render
+
+  // Adicione aqui quando tiver as URLs finais:
+  // 'https://SEU-APP-FRONTEND.vercel.app',
+  // 'https://SEU-APP-BACKEND.onrender.com',
 ];
 
 export function getCorsHeaders(origin?: string | null): HeadersInit {

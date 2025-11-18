@@ -22,7 +22,13 @@
       "Bash(npm run prisma:generate:*)",
       "Bash(npm run:*)",
       "Bash(git push:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(git clone:*)",
+      "Bash(python apply-cors.py:*)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

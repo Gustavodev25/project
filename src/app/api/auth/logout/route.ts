@@ -3,16 +3,20 @@ import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export const POST = withCors(async () => {
+export const POST = withCors(async (req: Request) => {
+  const host = req.headers.get("host") || "";
+  const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
+  const cookieSameSite = isLocalhost ? "lax" : "none";
+  const cookieSecure = !isLocalhost;
+
   const response = NextResponse.json({ ok: true });
-  
-  // Limpar o cookie de sessão
+
   response.cookies.set("session", "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: cookieSecure,
+    sameSite: cookieSameSite,
     path: "/",
-    maxAge: 0, // Expira imediatamente
+    maxAge: 0,
   });
 
   return response;
