@@ -28,7 +28,8 @@
       "Bash(curl:*)",
       "Bash(taskkill:*)",
       "Bash(netstat:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []
