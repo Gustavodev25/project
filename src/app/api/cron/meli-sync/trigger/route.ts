@@ -59,6 +59,10 @@ export async function POST(req: NextRequest) {
   );
 
   try {
+    // AbortController com timeout de 10 minutos para sincronizações longas
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos
+
     const resp = await fetch(syncEndpoint, {
       method: "POST",
       headers: {
@@ -71,12 +75,24 @@ export async function POST(req: NextRequest) {
         fullSync: body.fullSync,
         batchSize: body.batchSize,
       }),
+      signal: controller.signal,
     });
 
+    clearTimeout(timeoutId);
     const data = await resp.json().catch(() => ({}));
     return NextResponse.json(data, { status: resp.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
+
+    // Mensagem mais amigável para timeout
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn("[Cron Trigger] ⏱️ Timeout após 10 minutos - sincronização continua em background");
+      return NextResponse.json({
+        message: "Sincronização iniciada. Processamento continua em background.",
+        warning: "Timeout após 10 minutos, mas o processo continua rodando."
+      }, { status: 202 }); // 202 Accepted
+    }
+
     console.error("[Cron Trigger] Erro ao acionar cron:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }

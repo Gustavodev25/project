@@ -278,44 +278,31 @@ export function useVendas(platform: string = "Mercado Livre") {
 
           console.log(`[useVendas] Chamando API /api/cron/meli-sync/trigger (via cron) com body:`, body);
           console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
-          res = await API_CONFIG.fetch("/api/cron/meli-sync/trigger", {
+
+          // Fire-and-forget: Iniciar sincronização sem aguardar resposta HTTP
+          // O progresso será acompanhado via SSE (Server-Sent Events)
+          API_CONFIG.fetch("/api/cron/meli-sync/trigger", {
             method: "POST",
             cache: "no-store",
             credentials: "include",
             body: JSON.stringify(body),
+          }).catch(() => {
+            // Ignorar silenciosamente timeouts do navegador
+            // Backend continua processando e SSE envia o progresso
           });
-          console.log(`[useVendas] Resposta da API sync: status=${res.status} ${res.statusText}`);
 
-          if (!res.ok) {
-            let message = `Erro ${res.status}`;
-            try {
-              const errJson = await res.json();
-              const apiMsg =
-                (errJson?.errors && errJson.errors[0]?.message) ||
-                errJson?.error ||
-                errJson?.message;
-              if (typeof apiMsg === "string" && apiMsg.trim()) message = apiMsg;
-            } catch {}
-            throw new Error(message);
-          }
+          console.log(`[useVendas] ✅ Sincronização iniciada - acompanhe o progresso em tempo real`);
 
-          const payload: any = await res.json();
-          const resultsArr: Array<any> = Array.isArray(payload?.results) ? payload.results : [];
-          const thisFetched = resultsArr.reduce((sum: number, r: any) => sum + (r?.vendas || 0), 0);
+          // Não aguardar resposta HTTP - confiar apenas no SSE para updates
+          // Isso elimina completamente os erros de timeout do navegador
 
-          aggregatedFetched += thisFetched;
-          aggregatedExpected += thisFetched;
-
-          if (Array.isArray(payload?.errors) && payload.errors.length) {
-            aggregatedErrors = [...aggregatedErrors, ...payload.errors];
-          }
-
-          setSyncProgress({ fetched: aggregatedFetched, expected: aggregatedExpected || aggregatedFetched });
-          setLastSyncedAt(payload.syncedAt ?? new Date().toISOString());
+          // SSE vai atualizar automaticamente:
+          // - syncProgress via setSyncProgress
+          // - lastSyncedAt quando completar
+          // - syncErrors se houver problemas
         }
 
-        setSyncErrors(aggregatedErrors);
-
+        // SSE já gerencia os erros via setSyncErrors
         await loadVendasFromDatabase();
 
         return;

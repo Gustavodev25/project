@@ -789,7 +789,7 @@ async function fetchAllOrdersForAccount(
         ) {
           discoveredTotal = pageResult.total;
           total = discoveredTotal;
-          maxOffsetToFetch = Math.min(MAX_OFFSET, discoveredTotal);
+          maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE, discoveredTotal);
           console.log(
             `[Sync] ?? Conta ${account.ml_user_id}: total estimado ${total} vendas`,
           );
@@ -881,7 +881,7 @@ async function fetchAllOrdersForAccount(
 
   // PASSO 2: Buscar vendas históricas apenas se NÃO atingiu o limite
   const timeRemaining = MAX_EXECUTION_TIME - (Date.now() - startTime);
-  const reachedLimit = !fullSync && results.length >= SAFE_BATCH_SIZE;
+  const reachedLimit = !fullSync && results.length > SAFE_BATCH_SIZE;
   const shouldFetchHistory = fullSync || (!reachedLimit && timeRemaining > 10000);
 
 
@@ -1057,7 +1057,17 @@ async function fetchOrdersInDateRange(
     // Determinar tamanho ideal do sub-perÃ­odo
     // Se tem mais de 50k vendas, dividir em perÃ­odos de 7 dias
     // Se tem 10k-50k vendas, dividir em perÃ­odos de 14 dias
-    const subPeriodDays = totalInPeriod > 50000 ? 7 : 14;
+    // OTIMIZAÇÃO: Divisão mais agressiva baseada no volume de vendas
+    let subPeriodDays: number;
+    if (totalInPeriod > 100000) {
+      subPeriodDays = 3; // Períodos de 3 dias para volumes muito altos (>100k vendas)
+    } else if (totalInPeriod > 50000) {
+      subPeriodDays = 5; // Períodos de 5 dias para volumes altos (50k-100k vendas)
+    } else if (totalInPeriod > 30000) {
+      subPeriodDays = 7; // Períodos de 7 dias para volumes médio-altos (30k-50k vendas)
+    } else {
+      subPeriodDays = 14; // Períodos de 14 dias para volumes médios (10k-30k vendas)
+    }
 
     console.log(`[Sync] ðŸ”„ Dividindo em sub-perÃ­odos de ${subPeriodDays} dias`);
 
@@ -2541,6 +2551,10 @@ export async function POST(req: NextRequest) {
       process.env.RENDER_EXTERNAL_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
+    // Fire-and-forget com timeout de 10 minutos para sincronizações longas
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos
+
     fetch(`${baseUrl}/api/meli/vendas/sync`, {
       method: 'POST',
       headers: {
@@ -2551,8 +2565,17 @@ export async function POST(req: NextRequest) {
         accountIds: requestBody.accountIds,
         quickMode: requestBody.quickMode,
         fullSync: requestBody.fullSync
-      })
-    }).catch(err => console.error(`[Sync] Erro ao continuar:`, err));
+      }),
+      signal: controller.signal
+    })
+    .then(() => clearTimeout(timeoutId))
+    .catch(err => {
+      clearTimeout(timeoutId);
+      // Ignorar erros de abort - é esperado em sincronizações longas
+      if (err.name !== 'AbortError') {
+        console.error(`[Sync] Erro ao continuar:`, err);
+      }
+    });
   } else {
     // Fechar SSE apenas quando completar tudo
     setTimeout(() => closeUserConnections(userId), 2000);
