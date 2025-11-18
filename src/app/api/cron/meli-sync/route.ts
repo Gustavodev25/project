@@ -63,7 +63,8 @@ async function runCron(req: NextRequest, options?: CronBody) {
 
     const baseUrl =
       process.env.NEXT_PUBLIC_APP_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+      process.env.RENDER_EXTERNAL_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : req.nextUrl.origin);
 
     // Parâmetros de execução vindos do body (com padrões seguros)
     const quickMode = options?.quickMode !== false; // default true
