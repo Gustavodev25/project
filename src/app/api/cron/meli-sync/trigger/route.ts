@@ -6,10 +6,15 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { assertSessionToken } from "@/lib/auth";
+import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+export const OPTIONS = withCors(async () => {
+  return new NextResponse(null, { status: 204 });
+});
+
+export const POST = withCors(async (req: NextRequest) => {
   // Validar sessão do usuário (não expor CRON para anônimos)
   const sessionCookie = req.cookies.get("session")?.value;
   try {
@@ -96,5 +101,4 @@ export async function POST(req: NextRequest) {
     console.error("[Cron Trigger] Erro ao acionar cron:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
-
+});
