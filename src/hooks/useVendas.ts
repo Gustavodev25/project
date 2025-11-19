@@ -83,7 +83,13 @@ export interface MeliOrdersResponse {
 }
 
 // Hook customizado para gerenciar vendas
-export function useVendas(platform: string = "Mercado Livre") {
+export function useVendas(
+  platform: string = "Mercado Livre",
+  options?: {
+    autoConnectSSE?: boolean;
+  }
+) {
+  const autoConnectSSE = options?.autoConnectSSE ?? false;
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [contasConectadas, setContasConectadas] = useState<ContaConectada[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -96,6 +102,17 @@ export function useVendas(platform: string = "Mercado Livre") {
   
   // Hook para progresso em tempo real
   const { isConnected, progress, connect, disconnect } = useVendasSyncProgress();
+
+  // Conectar SSE automaticamente para acompanhar sincronizações em background (ex.: cron)
+  useEffect(() => {
+    if (!autoConnectSSE) return;
+    if (platform !== "Mercado Livre" && platform !== "Shopee") return;
+
+    connect();
+    return () => {
+      disconnect();
+    };
+  }, [autoConnectSSE, platform, connect, disconnect]);
 
   // Ref para rastrear se sync_complete já foi processado
   const syncCompleteProcessedRef = useRef(false);
@@ -141,7 +158,17 @@ export function useVendas(platform: string = "Mercado Livre") {
   useEffect(() => {
     if (progress && (platform === "Mercado Livre" || platform === "Shopee")) {
       console.log(`[useVendas] Progresso SSE recebido (${platform}):`, progress);
-      
+
+      // Se receber progresso de sincronização ativa, marcar como syncing
+      // Isso garante que após reload da página, o estado seja restaurado
+      if (progress.type === "sync_progress" || progress.type === "sync_start") {
+        if (!isSyncing) {
+          console.log('[useVendas] Sincronização em andamento detectada - ativando isSyncing');
+          setIsSyncing(true);
+          setIsTableLoading(true);
+        }
+      }
+
       if (progress.type === "sync_progress") {
         // Atualizar progresso usando fetched/expected ou current/total
         const fetched = progress.fetched || progress.current || 0;
@@ -185,7 +212,7 @@ export function useVendas(platform: string = "Mercado Livre") {
         disconnect();
       }
     }
-  }, [progress, platform, disconnect]);
+  }, [progress, platform, disconnect, autoConnectSSE, isSyncing]);
 
 
   const handleConnectAccount = () => {
@@ -210,6 +237,8 @@ export function useVendas(platform: string = "Mercado Livre") {
   };
 
   const handleSyncOrders = async (accountIds?: string[], orderIdsByAccount?: Record<string, string[]>, fullSync?: boolean) => {
+    let isMeliFireAndForget = false; // Flag para controlar se é Mercado Livre fire-and-forget
+
     try {
       console.log(`[useVendas] 🚀 Iniciando sincronização de vendas para ${platform}`);
       console.log(`[useVendas] Parâmetros recebidos:`, { accountIds, orderIdsByAccount, fullSync });
@@ -261,46 +290,41 @@ export function useVendas(platform: string = "Mercado Livre") {
           throw new Error("Nenhuma conta do Mercado Livre conectada para sincronizar.");
         }
 
-        pendingAccountsRef.current = accountsToSync.length;
+        pendingAccountsRef.current = 1; // Agora é sempre 1 pois fazemos UMA única chamada
 
-        let aggregatedErrors: MeliOrdersResponse["errors"] = [];
-        let aggregatedFetched = 0;
-        let aggregatedExpected = 0;
-
-        for (const accountId of accountsToSync) {
-          const body: any = { accountIds: [accountId] };
-          if (orderIdsByAccount?.[accountId]?.length) {
-            body.orderIdsByAccount = { [accountId]: orderIdsByAccount[accountId] };
-          }
-          if (fullSync) {
-            body.fullSync = true; // Adicionar parâmetro fullSync ao body
-          }
-
-          console.log(`[useVendas] Chamando API /api/cron/meli-sync/trigger (via cron) com body:`, body);
-          console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
-
-          // Fire-and-forget: Iniciar sincronização sem aguardar resposta HTTP
-          // O progresso será acompanhado via SSE (Server-Sent Events)
-          API_CONFIG.fetch("/api/cron/meli-sync/trigger", {
-            method: "POST",
-            cache: "no-store",
-            credentials: "include",
-            body: JSON.stringify(body),
-          }).catch(() => {
-            // Ignorar silenciosamente timeouts do navegador
-            // Backend continua processando e SSE envia o progresso
-          });
-
-          console.log(`[useVendas] ✅ Sincronização iniciada - acompanhe o progresso em tempo real`);
-
-          // Não aguardar resposta HTTP - confiar apenas no SSE para updates
-          // Isso elimina completamente os erros de timeout do navegador
-
-          // SSE vai atualizar automaticamente:
-          // - syncProgress via setSyncProgress
-          // - lastSyncedAt quando completar
-          // - syncErrors se houver problemas
+        // UMA única chamada com TODAS as contas (backend processa sequencialmente)
+        const body: any = { accountIds: accountsToSync };
+        if (orderIdsByAccount && Object.keys(orderIdsByAccount).length > 0) {
+          body.orderIdsByAccount = orderIdsByAccount;
         }
+        if (fullSync) {
+          body.fullSync = true;
+        }
+
+        console.log(`[useVendas] Chamando API /api/cron/meli-sync/trigger com ${accountsToSync.length} conta(s):`, body);
+        console.log(`[useVendas] 🔗 Usando backend: ${API_CONFIG.baseURL || 'local'}`);
+
+        // Fire-and-forget: Iniciar sincronização sem aguardar resposta HTTP
+        // O progresso será acompanhado via SSE (Server-Sent Events)
+        API_CONFIG.fetch("/api/cron/meli-sync/trigger", {
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
+          body: JSON.stringify(body),
+        }).catch(() => {
+          // Ignorar silenciosamente timeouts do navegador
+          // Backend continua processando e SSE envia o progresso
+        });
+
+        console.log(`[useVendas] ✅ Sincronização iniciada para ${accountsToSync.length} conta(s) - acompanhe o progresso em tempo real`);
+
+        // SSE vai atualizar automaticamente:
+        // - syncProgress via setSyncProgress
+        // - lastSyncedAt quando completar
+        // - syncErrors se houver problemas
+
+        // Marcar como fire-and-forget para não resetar estados no finally
+        isMeliFireAndForget = true;
 
         // SSE já gerencia os erros via setSyncErrors
         await loadVendasFromDatabase();
@@ -380,10 +404,15 @@ export function useVendas(platform: string = "Mercado Livre") {
       setIsTableLoading(false);
       pendingAccountsRef.current = 0;
     } finally {
-      // Marcar como concluído para todas as plataformas
-      setIsSyncing(false);
-      setIsTableLoading(false);
-      pendingAccountsRef.current = 0;
+      // ⚠️ IMPORTANTE: Se for Mercado Livre fire-and-forget, NÃO resetar aqui
+      // O SSE vai resetar quando receber sync_complete
+      if (!isMeliFireAndForget) {
+        setIsSyncing(false);
+        setIsTableLoading(false);
+        pendingAccountsRef.current = 0;
+      } else {
+        console.log('[useVendas] Fire-and-forget ativo - SSE vai gerenciar o término da sincronização');
+      }
     }
   };
 

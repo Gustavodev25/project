@@ -1,63 +1,4 @@
-﻿/**
- * API de SincronizaÃ§Ã£o de Vendas do Mercado Livre
- *
- * OTIMIZAÃ‡Ã•ES IMPLEMENTADAS:
- * ============================
- *
- * 1. SINCRONIZAÃ‡ÃƒO INCREMENTAL INTELIGENTE:
- *    - Busca vendas progressivamente sem dar timeout (respeitando limite de 60s do Vercel)
- *    - Prioriza vendas mais recentes (mais importantes)
- *    - Vendas jÃ¡ existentes sÃ£o atualizadas (UPDATE), nÃ£o duplicadas
- *    - SincronizaÃ§Ãµes subsequentes continuam de onde a anterior parou
- *    - Suporta contas com 1k atÃ© 50k+ vendas
- *
- * 2. DIVISÃƒO AUTOMÃTICA DE PERÃODOS:
- *    - Quando um perÃ­odo tem mais de 9.950 vendas (limite da API do ML):
- *      * Detecta automaticamente o total de vendas no perÃ­odo
- *      * Divide em sub-perÃ­odos menores (7 ou 14 dias dependendo do volume)
- *      * Busca recursivamente cada sub-perÃ­odo
- *      * Garante sincronizaÃ§Ã£o completa sem perda de dados
- *
- * 3. SALVAMENTO EM LOTES OTIMIZADO:
- *    - Salva vendas em lotes de 50
- *    - Usa Promise.allSettled para garantir que erros nÃ£o parem o processo
- *    - Cache de SKU para reduzir queries ao banco
- *    - Sem delays desnecessÃ¡rios para mÃ¡xima velocidade
- *
- * 4. RETRY AUTOMÃTICO COM BACKOFF:
- *    - Tentativas automÃ¡ticas em caso de erros temporÃ¡rios (429, 500, 502, 503, 504)
- *    - Exponential backoff: 1s, 2s, 4s
- *    - AtÃ© 3 tentativas por requisiÃ§Ã£o
- *
- * 5. PROGRESSO EM TEMPO REAL:
- *    - Server-Sent Events (SSE) para comunicaÃ§Ã£o em tempo real
- *    - Mensagens detalhadas de progresso (pÃ¡gina atual, perÃ­odo, porcentagem)
- *    - MantÃ©m conexÃ£o viva durante o processo
- *
- * 6. GESTÃƒO DE TIMEOUT (Vercel Pro):
- *    - Limite de 60 segundos por funÃ§Ã£o (58s efetivos + 2s margem)
- *    - Monitora tempo de execuÃ§Ã£o constantemente
- *    - Para busca antes de atingir timeout
- *    - SincronizaÃ§Ã£o subsequente continua automaticamente
- *
- * COMO FUNCIONA:
- * ==============
- * 1. Busca atÃ© 2.500 vendas mais recentes com paginaÃ§Ã£o
- * 2. Se sobrar tempo (>15s), busca vendas antigas por perÃ­odos mensais
- * 3. Se um mÃªs tem > 9.950 vendas, divide em perÃ­odos de 7-14 dias recursivamente
- * 4. Salva todas as vendas em lotes de 50 no banco de dados
- * 5. Envia progresso em tempo real via SSE
- * 6. Informa se hÃ¡ vendas restantes para prÃ³xima sincronizaÃ§Ã£o
- *
- * EXEMPLO DE USO (conta com 10k vendas):
- * ======================================
- * Sync 1: 2.500 vendas recentes + 1.000 histÃ³ricas = 3.500 vendas (55s)
- * Sync 2: Atualiza recentes + 3.000 histÃ³ricas = 3.000 novas (52s)
- * Sync 3: Atualiza recentes + 3.500 histÃ³ricas = 3.500 novas (54s)
- * Total: 3 sincronizaÃ§Ãµes = histÃ³rico completo de 10k vendas (~3 min)
- */
-
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { assertSessionToken } from "@/lib/auth";
 import { refreshMeliAccountToken } from "@/lib/meli";
@@ -68,15 +9,17 @@ import { sendProgressToUser, closeUserConnections } from "@/lib/sse-progress";
 import { invalidateVendasCache } from "@/lib/cache";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // 60 segundos (Vercel Pro)
+export const maxDuration = 60;
 
 const MELI_API_BASE =
   process.env.MELI_API_BASE?.replace(/\/$/, "") ||
   "https://api.mercadolibre.com";
+// Máximo da API do ML é 50 (51 causa erro)
 const PAGE_LIMIT = 50;
+// Aumentado de 2-5 para 15 = 3-7x mais requisições simultâneas
 const PAGE_FETCH_CONCURRENCY = Math.min(
-  5,
-  Math.max(1, Number(process.env.MELI_PAGE_FETCH_CONCURRENCY ?? "2") || 2),
+  15,
+  Math.max(1, Number(process.env.MELI_PAGE_FETCH_CONCURRENCY ?? "15") || 15),
 );
 
 type FreightSource = "shipment" | "order" | "shipping_option" | null;
@@ -101,7 +44,7 @@ type MeliOrderFreight = {
   quantity: number | null;
   unitPrice: number | null;
   diffBaseList: number | null;
-  
+
   adjustedCost: number | null;
   adjustmentSource: string | null;
 };
@@ -142,33 +85,6 @@ function extractOrderDate(order: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-
-// FunÃ§Ã£o para debug - identificar qual campo estÃ¡ causando o problema
-function debugFieldLengths(data: any, orderId: string) {
-  const fieldLengths: { [key: string]: number } = {};
-  
-  // Verificar todos os campos de string
-  const stringFields = [
-    'orderId', 'userId', 'meliAccountId', 'status', 'conta', 'titulo', 'sku', 
-    'comprador', 'logisticType', 'envioMode', 'shippingStatus', 'shippingId',
-    'exposicao', 'tipoAnuncio', 'ads', 'plataforma', 'canal'
-  ];
-  
-  stringFields.forEach(field => {
-    if (data[field] && typeof data[field] === 'string') {
-      fieldLengths[field] = data[field].length;
-    }
-  });
-  
-  // Log apenas se algum campo for muito longo
-  const longFields = Object.entries(fieldLengths).filter(([_, length]) => length > 100);
-  if (longFields.length > 0) {
-    console.log(`[DEBUG] Venda ${orderId} - Campos longos:`, longFields);
-  }
-  
-  return fieldLengths;
-}
-
 function sumOrderQuantities(items: unknown): number | null {
   if (!Array.isArray(items)) return null;
   let total = 0;
@@ -186,7 +102,7 @@ function sumOrderQuantities(items: unknown): number | null {
 function convertLogisticTypeName(logisticType: string | null): string | null {
   if (!logisticType) return logisticType;
 
-  if (logisticType === "xd_drop_off") return "AgÃªncia";
+  if (logisticType === "xd_drop_off") return "Agência";
   if (logisticType === "self_service") return "FLEX";
   if (logisticType === "cross_docking") return "Coleta";
 
@@ -197,17 +113,17 @@ function mapListingTypeToExposure(listingType: string | null): string | null {
   if (!listingType) return null;
   const normalized = listingType.toLowerCase();
 
-  // gold_pro Ã© Premium
+  // gold_pro é Premium
   if (normalized === "gold_pro") return "Premium";
 
-  // gold_special e outros tipos gold sÃ£o ClÃ¡ssico
-  if (normalized.startsWith("gold")) return "ClÃ¡ssico";
+  // gold_special e outros tipos gold são Clássico
+  if (normalized.startsWith("gold")) return "Clássico";
 
-  // Silver Ã© ClÃ¡ssico
-  if (normalized === "silver") return "ClÃ¡ssico";
+  // Silver é Clássico
+  if (normalized === "silver") return "Clássico";
 
-  // Outros tipos defaultam para ClÃ¡ssico
-  return "ClÃ¡ssico";
+  // Outros tipos defaultam para Clássico
+  return "Clássico";
 }
 
 function calculateFreightAdjustment(
@@ -221,7 +137,7 @@ function calculateFreightAdjustment(
 ): { adjustedCost: number | null; adjustmentSource: string | null } {
   if (!logisticType) return { adjustedCost: null, adjustmentSource: null };
 
-  // order_cost total = unitÃ¡rio * quantidade  (equivalente ao SQL)
+  // order_cost total = unitário * quantidade  (equivalente ao SQL)
   const orderCost = unitPrice !== null && quantity ? unitPrice * quantity : null;
 
   const freteAdjust = calcularFreteAdjust({
@@ -234,24 +150,23 @@ function calculateFreightAdjustment(
     quantity: quantity ?? 0,
   });
 
-  // Se vier o sentinela (Â±999) do SQL, ignora override
+  // Se vier o sentinela (±999) do SQL, ignora override
   if (Math.abs(freteAdjust) === 999) {
     return { adjustedCost: null, adjustmentSource: null };
   }
 
-  // IMPORTANTE: 0 Ã© override vÃ¡lido (zera frete nos < 79 para NÃƒO-FLEX)
+  // IMPORTANTE: 0 é override válido (zera frete nos < 79 para NÃO-FLEX)
   const adj = roundCurrency(freteAdjust);
 
   const label =
     logisticType === 'self_service' ? 'FLEX' :
     logisticType === 'drop_off' ? 'Correios' :
-    logisticType === 'xd_drop_off' ? 'AgÃªncia' :
+    logisticType === 'xd_drop_off' ? 'Agência' :
     logisticType === 'fulfillment' ? 'FULL' :
     logisticType === 'cross_docking' ? 'Coleta' : logisticType;
 
   return { adjustedCost: adj, adjustmentSource: label };
 }
-
 
 function calculateFreight(order: any, shipment: any): MeliOrderFreight {
   const o = order ?? {};
@@ -352,14 +267,8 @@ function calculateFreight(order: any, shipment: any): MeliOrderFreight {
 }
 
 /**
- * Calcula a margem de contribuiÃ§Ã£o seguindo a fÃ³rmula:
+ * Calcula a margem de contribuição seguindo a fórmula:
  * Margem = Valor Total + Taxa Plataforma + Frete - CMV
- * 
- * @param valorTotal - Valor total da venda (POSITIVO)
- * @param taxaPlataforma - Taxa da plataforma (JÃ DEVE VIR NEGATIVA)
- * @param frete - Valor do frete (pode ser + ou -)
- * @param cmv - Custo da Mercadoria Vendida (POSITIVO)
- * @returns Margem de contribuiÃ§Ã£o e se Ã© margem real ou receita lÃ­quida
  */
 function calculateMargemContribuicao(
   valorTotal: number,
@@ -367,11 +276,8 @@ function calculateMargemContribuicao(
   frete: number,
   cmv: number | null
 ): { valor: number; isMargemReal: boolean } {
-  // Valores base (taxa jÃ¡ vem negativa, frete pode ser + ou -)
   const taxa = taxaPlataforma || 0;
-  
-  // Se temos CMV, calculamos a margem de contribuiÃ§Ã£o real
-  // FÃ³rmula: Margem = Valor Total + Taxa Plataforma + Frete - CMV
+
   if (cmv !== null && cmv !== undefined && cmv > 0) {
     const margemContribuicao = valorTotal + taxa + frete - cmv;
     return {
@@ -379,9 +285,7 @@ function calculateMargemContribuicao(
       isMargemReal: true
     };
   }
-  
-  // Se nÃ£o temos CMV, retornamos a receita lÃ­quida
-  // Receita LÃ­quida = Valor Total + Taxa Plataforma + Frete
+
   const receitaLiquida = valorTotal + taxa + frete;
   return {
     valor: roundCurrency(receitaLiquida),
@@ -422,13 +326,6 @@ type AccountSummary = {
   expires_at: string;
 };
 
-type DateRangeWindow = {
-  from: Date;
-  to: Date;
-  total: number;
-  depth: number;
-};
-
 type SkuCacheEntry = {
   custoUnitario: number | null;
   tipo: string | null;
@@ -452,21 +349,21 @@ type FetchOrdersPageResult = {
 };
 
 /**
- * Verifica se um erro HTTP Ã© temporÃ¡rio e pode ser retentado
+ * Verifica se um erro HTTP é temporário e pode ser retentado
  */
 function isRetryableError(status: number): boolean {
   return [429, 500, 502, 503, 504].includes(status);
 }
 
 /**
- * Aguarda um tempo especÃ­fico (exponential backoff)
+ * Aguarda um tempo específico (exponential backoff)
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * Faz uma requisiÃ§Ã£o HTTP com retry automÃ¡tico para erros temporÃ¡rios
+ * Faz uma requisição HTTP com retry automático para erros temporários
  */
 async function fetchWithRetry(
   url: string,
@@ -482,37 +379,32 @@ async function fetchWithRetry(
       const response = await fetch(url, options);
       lastResponse = response;
 
-      // Se sucesso, retorna imediatamente
       if (response.ok) {
         return response;
       }
 
-      // Erros de autenticaÃ§Ã£o (401, 403) nÃ£o devem ser retryable - falhar imediatamente
       if (response.status === 401 || response.status === 403) {
-        console.error(`[Sync] Erro de autenticaÃ§Ã£o ${response.status} - Token pode estar invÃ¡lido`);
+        console.error(`[Sync] Erro de autenticação ${response.status} - Token pode estar inválido`);
         if (userId) {
           sendProgressToUser(userId, {
             type: "sync_warning",
-            message: `Erro de autenticaÃ§Ã£o ${response.status}. Verifique se a conta estÃ¡ conectada corretamente.`,
+            message: `Erro de autenticação ${response.status}. Verifique se a conta está conectada corretamente.`,
             errorCode: response.status.toString()
           });
         }
-        return response; // Retornar resposta de erro para tratamento especÃ­fico
-      }
-
-      // Se erro nÃ£o-retryable (exceto auth), retorna imediatamente
-      if (!isRetryableError(response.status)) {
-        console.warn(`[Sync] Erro HTTP ${response.status} (nÃ£o-retryable) em ${url.substring(0, 80)}...`);
         return response;
       }
 
-      // Erro retryable - tentar novamente
+      if (!isRetryableError(response.status)) {
+        console.warn(`[Sync] Erro HTTP ${response.status} (não-retryable) em ${url.substring(0, 80)}...`);
+        return response;
+      }
+
       lastError = new Error(`HTTP ${response.status}`);
 
-      // Calcular delay com exponential backoff
-      const baseDelay = 1000; // 1 segundo
-      const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
-      const jitter = Math.random() * 1000; // atÃ© 1s de jitter
+      const baseDelay = 1000;
+      const delay = baseDelay * Math.pow(2, attempt);
+      const jitter = Math.random() * 1000;
       const totalDelay = delay + jitter;
 
       console.warn(
@@ -520,30 +412,26 @@ async function fetchWithRetry(
         `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
       );
 
-      // Enviar aviso via SSE apenas na primeira tentativa
       if (userId && attempt === 0) {
         sendProgressToUser(userId, {
           type: "sync_warning",
-          message: `Erro temporÃ¡rio ${response.status} da API do Mercado Livre. Tentando novamente...`,
+          message: `Erro temporário ${response.status} da API do Mercado Livre. Tentando novamente...`,
           errorCode: response.status.toString()
         });
       }
 
-      // Aguardar antes de tentar novamente
       await sleep(totalDelay);
 
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Log do erro
-      console.error(`[Retry] Erro na requisiÃ§Ã£o (tentativa ${attempt + 1}/${maxRetries}):`, lastError.message);
+      console.error(`[Retry] Erro na requisição (tentativa ${attempt + 1}/${maxRetries}):`, lastError.message);
 
-      // Se Ã© a Ãºltima tentativa, lanÃ§ar erro
       if (attempt === maxRetries - 1) {
         if (userId) {
           sendProgressToUser(userId, {
             type: "sync_warning",
-            message: `Erro de conexÃ£o apÃ³s ${maxRetries} tentativas: ${lastError.message}`,
+            message: `Erro de conexão após ${maxRetries} tentativas: ${lastError.message}`,
             errorCode: "NETWORK_ERROR"
           });
         }
@@ -560,11 +448,10 @@ async function fetchWithRetry(
         `Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${Math.round(totalDelay)}ms`
       );
 
-      // Enviar aviso via SSE apenas na primeira tentativa
       if (userId && attempt === 0) {
         sendProgressToUser(userId, {
           type: "sync_warning",
-          message: `Erro de conexÃ£o. Tentando novamente...`,
+          message: `Erro de conexão. Tentando novamente...`,
           errorCode: "NETWORK_ERROR"
         });
       }
@@ -573,14 +460,16 @@ async function fetchWithRetry(
     }
   }
 
-  // Se chegou aqui, todas as tentativas falharam
   if (lastResponse && !lastResponse.ok) {
-    return lastResponse; // Retornar Ãºltima resposta de erro
+    return lastResponse;
   }
 
-  throw lastError || new Error('Falha apÃ³s mÃºltiplas tentativas');
+  throw lastError || new Error('Falha após múltiplas tentativas');
 }
 
+/**
+ * PÁGINA DE ORDERS - AGORA BUSCANDO DETALHES (internal_tags, context, etc.)
+ */
 async function fetchOrdersPage({
   account,
   headers,
@@ -616,10 +505,10 @@ async function fetchOrdersPage({
   try {
     response = await fetchWithRetry(url.toString(), { headers }, 3, userId);
   } catch (error) {
-    console.error(`[Sync] âš ï¸ Erro ao buscar pÃ¡gina ${pageNumber}:`, error);
+    console.error(`[Sync] ⚠️ Erro ao buscar página ${pageNumber}:`, error);
     sendProgressToUser(userId, {
       type: "sync_warning",
-      message: `Erro ao buscar pÃ¡gina ${pageNumber}: ${
+      message: `Erro ao buscar página ${pageNumber}: ${
         error instanceof Error ? error.message : "Falha desconhecida"
       }`,
       errorCode: "PAGE_FETCH_ERROR",
@@ -634,19 +523,26 @@ async function fetchOrdersPage({
   }
 
   result.total =
-    typeof payload?.paging?.total === "number" && Number.isFinite(payload.paging.total)
+    typeof payload?.paging?.total === "number" &&
+    Number.isFinite(payload.paging.total)
       ? payload.paging.total
       : null;
 
   if (!response.ok) {
-    const message = typeof payload?.message === "string" ? payload.message : `Status ${response.status}`;
-    console.error(`[Sync] âš ï¸ Erro HTTP ${response.status} ao buscar pÃ¡gina ${pageNumber}:`, message);
+    const message =
+      typeof payload?.message === "string"
+        ? payload.message
+        : `Status ${response.status}`;
+    console.error(
+      `[Sync] ⚠️ Erro HTTP ${response.status} ao buscar página ${pageNumber}:`,
+      message,
+    );
     if (response.status === 400) {
-      console.log(`[Sync] âš ï¸ Limite da API atingido em offset ${offset}`);
+      console.log(`[Sync] ⚠️ Limite da API atingido em offset ${offset}`);
     }
     sendProgressToUser(userId, {
       type: "sync_warning",
-      message: `Erro HTTP ${response.status} na pÃ¡gina ${pageNumber}: ${message}`,
+      message: `Erro HTTP ${response.status} na página ${pageNumber}: ${message}`,
       errorCode: response.status.toString(),
     });
     return result;
@@ -654,19 +550,42 @@ async function fetchOrdersPage({
 
   const orders = Array.isArray(payload?.results) ? payload.results : [];
   if (orders.length === 0) {
-    console.log(`[Sync] ðŸ“„ PÃ¡gina ${pageNumber}: 0 vendas (offset ${offset})`);
+    console.log(`[Sync] 📄 Página ${pageNumber}: 0 vendas (offset ${offset})`);
     return result;
   }
 
   console.log(
-    `[Sync] ðŸ“„ PÃ¡gina ${pageNumber}: ${orders.length} vendas (offset ${offset})${
-      result.total ? ` (${Math.min(offset + orders.length, result.total)}/${result.total})` : ""
+    `[Sync] 📄 Página ${pageNumber}: ${orders.length} vendas (offset ${offset})${
+      result.total
+        ? ` (${Math.min(offset + orders.length, result.total)}/${result.total})`
+        : ""
     }`,
   );
 
-  // OTIMIZAÇÃO: Fetch shipments em batches menores para evitar rate limiting
-  // Limite de 10 shipments concorrentes (ao invés de 50) para não sobrecarregar API
-  const SHIPMENT_BATCH_SIZE = 10;
+  // NOVO: buscar DETALHES completos de cada pedido (para ter internal_tags, context, etc.)
+  const orderDetailsResults = await Promise.allSettled(
+    orders.map(async (o: any) => {
+      if (!o?.id) return o;
+      try {
+        const r = await fetchWithRetry(
+          `${MELI_API_BASE}/orders/${o.id}`,
+          { headers },
+          3,
+          userId,
+        );
+        return r.ok ? await r.json() : o;
+      } catch {
+        return o;
+      }
+    }),
+  );
+
+  const detailedOrders = orderDetailsResults.map((r, i) =>
+    r.status === "fulfilled" && r.value ? r.value : orders[i],
+  );
+
+  // Aumentado de 10 para 50 para mais velocidade
+  const SHIPMENT_BATCH_SIZE = 50;
   const shipments: any[] = new Array(orders.length).fill(null);
 
   for (let i = 0; i < orders.length; i += SHIPMENT_BATCH_SIZE) {
@@ -678,29 +597,28 @@ async function fetchOrdersPage({
           return typeof order?.shipping === "object" ? order.shipping : null;
         }
         try {
-          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
+          const res = await fetchWithRetry(
+            `${MELI_API_BASE}/shipments/${shippingId}`,
+            { headers },
+            3,
+            userId,
+          );
           if (!res.ok) return null;
           return await res.json();
         } catch {
           return null;
         }
-      })
+      }),
     );
 
-    // Mapear resultados para array de shipments
-    batchResults.forEach((result, idx) => {
+    batchResults.forEach((r, idx) => {
       const originalIdx = i + idx;
-      if (result.status === "fulfilled" && result.value) {
-        shipments[originalIdx] = result.value;
-      } else {
-        shipments[originalIdx] = typeof orders[originalIdx]?.shipping === "object"
-          ? orders[originalIdx].shipping
-          : null;
-      }
+      shipments[originalIdx] =
+        r.status === "fulfilled" && r.value ? r.value : null;
     });
   }
 
-  result.orders = orders
+  result.orders = detailedOrders
     .map((order: any, idx: number) => {
       if (!order) return null;
       const shipment = shipments[idx] ?? undefined;
@@ -719,33 +637,27 @@ async function fetchOrdersPage({
 }
 
 /**
- * FUNÃ‡ÃƒO OTIMIZADA: Busca vendas com limite de tempo (58s mÃ¡ximo)
- * - Prioriza vendas mais recentes primeiro
- * - Busca progressivamente vendas antigas
- * - Evita timeout do Vercel (60s)
- * - SincronizaÃ§Ãµes subsequentes continuam de onde parou
+ * Busca todas as vendas de uma conta (modo recente + histórico)
  */
 async function fetchAllOrdersForAccount(
   account: MeliAccount,
   headers: Record<string, string>,
   userId: string,
-  quickMode: boolean = false, // Novo parÃ¢metro para controle de modo
-  fullSync: boolean = false, // Novo parÃ¢metro para sincronizaÃ§Ã£o completa desde 01/2025
+  quickMode: boolean = false,
+  fullSync: boolean = false,
 ): Promise<FetchOrdersResult> {
   const startTime = Date.now();
-  // Em fullSync podemos rodar quanto for preciso; nos outros modos limitamos para evitar timeout
   const MAX_EXECUTION_TIME = fullSync ? Number.POSITIVE_INFINITY : 30000;
 
   const results: MeliOrderPayload[] = [];
   const logisticStats = new Map<string, number>();
-  let forcedStop = false; // Declarar forcedStop localmente
+  let forcedStop = false;
 
   const modoTexto = fullSync
     ? 'FULL SYNC (buscar TODAS as vendas)'
     : (quickMode ? 'QUICK (20s busca + 40s salvar)' : 'BACKGROUND (45s busca + 15s salvar)');
   console.log(`[Sync] 🚀 Iniciando busca de vendas para conta ${account.ml_user_id} (${account.nickname}) - Modo: ${modoTexto}`);
 
-  // Verificar venda mais antiga jÃ¡ sincronizada para continuar de onde parou
   const oldestSyncedOrder = await prisma.meliVenda.findFirst({
     where: { meliAccountId: account.id },
     orderBy: { dataVenda: 'asc' },
@@ -754,18 +666,16 @@ async function fetchAllOrdersForAccount(
 
   const oldestSyncedDate = oldestSyncedOrder?.dataVenda;
   if (oldestSyncedDate) {
-    console.log(`[Sync] ðŸ“… Venda mais antiga no banco: ${oldestSyncedDate.toISOString().split('T')[0]}`);
+    console.log(`[Sync] 📅 Venda mais antiga no banco: ${oldestSyncedDate.toISOString().split('T')[0]}`);
   } else {
-    console.log(`[Sync] ðŸ“… Primeira sincronizaÃ§Ã£o - buscando desde o inÃ­cio`);
+    console.log(`[Sync] 📅 Primeira sincronização - buscando desde o início`);
   }
 
-  const MAX_OFFSET = 9950; // Limite seguro antes do 10k da API
+  const MAX_OFFSET = 9950;
   let total = 0;
   let discoveredTotal: number | null = null;
   let nextOffset = 0;
-  // Em fullSync buscamos o m?ximo poss?vel; nos demais modos limitamos para evitar timeout
-  const SAFE_BATCH_SIZE = fullSync ? MAX_OFFSET : (quickMode ? 500 : 1500);
-
+  const SAFE_BATCH_SIZE = fullSync ? MAX_OFFSET : (quickMode ? 2000 : 5000);
   let maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE);
   const activePages = new Set<Promise<void>>();
   let oldestOrderDate: Date | null = null;
@@ -790,8 +700,13 @@ async function fetchAllOrdersForAccount(
           discoveredTotal = pageResult.total;
           total = discoveredTotal;
           maxOffsetToFetch = Math.min(MAX_OFFSET, SAFE_BATCH_SIZE, discoveredTotal);
+
+          const volumeMessage = total > 50000 ? " (VOLUME MUITO ALTO! Múltiplas sincronizações serão necessárias)" :
+                               total > 10000 ? " (ALTO VOLUME! Sincronização automática continuará até completar)" :
+                               total > 5000 ? " (volume médio)" : "";
+
           console.log(
-            `[Sync] ?? Conta ${account.ml_user_id}: total estimado ${total} vendas`,
+            `[Sync] 📊 Conta ${account.nickname || account.ml_user_id}: TOTAL ${total} vendas${volumeMessage}`,
           );
         }
 
@@ -818,7 +733,7 @@ async function fetchAllOrdersForAccount(
           type: "sync_progress",
           message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${
             results.length
-          }/${discoveredTotal ?? results.length} vendas baixadas (pï¿½gina ${pageNumber})`,
+          }/${discoveredTotal ?? results.length} vendas baixadas (página ${pageNumber})`,
           current: results.length,
           total: discoveredTotal ?? results.length,
           fetched: results.length,
@@ -828,10 +743,10 @@ async function fetchAllOrdersForAccount(
           page: pageNumber,
         });
       } catch (error) {
-        console.error(`[Sync] ?? Erro inesperado na pï¿½gina ${pageNumber}:`, error);
+        console.error(`[Sync] ?? Erro inesperado na página ${pageNumber}:`, error);
         sendProgressToUser(userId, {
           type: "sync_warning",
-          message: `Erro inesperado na pï¿½gina ${pageNumber}: ${
+          message: `Erro inesperado na página ${pageNumber}: ${
             error instanceof Error ? error.message : "Falha desconhecida"
           }`,
           errorCode: "PAGE_FETCH_ERROR",
@@ -843,11 +758,10 @@ async function fetchAllOrdersForAccount(
     activePages.add(pagePromise);
   };
 
-  // PASSO 1: Buscar vendas recentes (paginaÃ§Ã£o normal)
+  // PASSO 1: vendas recentes
   while (activePages.size < PAGE_FETCH_CONCURRENCY && nextOffset < Math.min(MAX_OFFSET, maxOffsetToFetch)) {
-    // Verificar tempo antes de continuar
     if (Date.now() - startTime > MAX_EXECUTION_TIME) {
-      console.log(`[Sync] â±ï¸ Tempo limite atingido (${Math.round((Date.now() - startTime) / 1000)}s) - parando busca de vendas recentes`);
+      console.log(`[Sync] ⏳ Tempo limite atingido (${Math.round((Date.now() - startTime) / 1000)}s) - parando busca de vendas recentes`);
       forcedStop = true;
       break;
     }
@@ -858,9 +772,8 @@ async function fetchAllOrdersForAccount(
   while (activePages.size > 0) {
     await Promise.race(activePages);
 
-    // Verificar tempo antes de continuar
     if (Date.now() - startTime > MAX_EXECUTION_TIME) {
-      console.log(`[Sync] â±ï¸ Tempo limite atingido - parando paginaÃ§Ã£o`);
+      console.log(`[Sync] ⏳ Tempo limite atingido - parando paginação`);
       forcedStop = true;
       break;
     }
@@ -879,54 +792,44 @@ async function fetchAllOrdersForAccount(
     total = results.length;
   }
 
-  // PASSO 2: Buscar vendas históricas apenas se NÃO atingiu o limite
+  // PASSO 2: histórico
   const timeRemaining = MAX_EXECUTION_TIME - (Date.now() - startTime);
-  const reachedLimit = !fullSync && results.length > SAFE_BATCH_SIZE;
-  const shouldFetchHistory = fullSync || (!reachedLimit && timeRemaining > 10000);
-
+  const shouldFetchHistory = fullSync || timeRemaining > 15000;
 
   if (shouldFetchHistory && (total > results.length || oldestSyncedDate)) {
-    console.log(`[Sync] ðŸ”„ Buscando vendas histÃ³ricas (tempo restante: ${Math.round(timeRemaining / 1000)}s)...`);
+    console.log(`[Sync] 🔄 Buscando vendas históricas (tempo restante: ${Math.round(timeRemaining / 1000)}s)...`);
 
-    // Determinar ponto de partida para busca histÃ³rica
     let searchStartDate: Date;
 
     if (oldestSyncedDate) {
-      // Continuar de onde a Ãºltima sincronizaÃ§Ã£o parou
       searchStartDate = new Date(oldestSyncedDate);
-      searchStartDate.setDate(searchStartDate.getDate() - 1); // Um dia antes da Ãºltima sincronizada
-      console.log(`[Sync] ðŸ“… Continuando busca histÃ³rica a partir de ${searchStartDate.toISOString().split('T')[0]}`);
+      searchStartDate.setDate(searchStartDate.getDate() - 1);
+      console.log(`[Sync] 📅 Continuando busca histórica a partir de ${searchStartDate.toISOString().split('T')[0]}`);
     } else {
-      // Primeira vez: comeÃ§ar da venda mais antiga das recentes
       const fallbackOldest =
         results.length > 0
           ? extractOrderDate(results[results.length - 1].order) ?? new Date()
           : new Date();
       searchStartDate = oldestOrderDate ?? fallbackOldest;
-      console.log(`[Sync] ðŸ“… Primeira busca histÃ³rica a partir de ${searchStartDate.toISOString().split('T')[0]}`);
+      console.log(`[Sync] 📅 Primeira busca histórica a partir de ${searchStartDate.toISOString().split('T')[0]}`);
     }
 
-    // Buscar vendas mais antigas em blocos de 1 mÃªs
     const currentMonthStart = new Date(searchStartDate);
-    currentMonthStart.setDate(1); // Primeiro dia do mÃªs
+    currentMonthStart.setDate(1);
     currentMonthStart.setHours(0, 0, 0, 0);
-    currentMonthStart.setMonth(currentMonthStart.getMonth() - 1); // ComeÃ§ar do mÃªs anterior
+    currentMonthStart.setMonth(currentMonthStart.getMonth() - 1);
 
-    // NOVA LÃ"GICA: Se fullSync, buscar TODAS as vendas (desde 2000). Caso contrÃ¡rio, buscar desde 2010.
-    const startDate = fullSync ? new Date('2000-01-01') : new Date('2010-01-01');
-    console.log(`[Sync] ${fullSync ? '🎯 FULL SYNC ativado - buscando TODAS as vendas (desde 2000)' : '📅 Modo incremental - buscando desde 2010'}`);
+    const startDate = new Date('1999-01-01');
+    console.log(`[Sync] 🎯 Buscando TODAS as vendas desde o início da conta (sem limite de data)`);
 
-    // Buscar enquanto tiver tempo
     while (currentMonthStart > startDate && Date.now() - startTime < MAX_EXECUTION_TIME - 5000) {
-      // Calcular fim do mÃªs
       const currentMonthEnd = new Date(currentMonthStart);
       currentMonthEnd.setMonth(currentMonthEnd.getMonth() + 1);
-      currentMonthEnd.setDate(0); // Ãšltimo dia do mÃªs
+      currentMonthEnd.setDate(0);
       currentMonthEnd.setHours(23, 59, 59, 999);
 
-      console.log(`[Sync] ðŸ“… Buscando: ${currentMonthStart.toISOString().split('T')[0]} a ${currentMonthEnd.toISOString().split('T')[0]}`);
+      console.log(`[Sync] 📅 Buscando: ${currentMonthStart.toISOString().split('T')[0]} a ${currentMonthEnd.toISOString().split('T')[0]}`);
 
-      // Buscar vendas deste mÃªs
       const monthOrders = await fetchOrdersInDateRange(
         account,
         headers,
@@ -936,33 +839,31 @@ async function fetchAllOrdersForAccount(
         logisticStats
       );
 
-      console.log(`[Sync] âœ… Encontradas ${monthOrders.length} vendas neste perÃ­odo`);
+      console.log(`[Sync] ✅ Encontradas ${monthOrders.length} vendas neste período`);
 
       results.push(...monthOrders);
 
       sendProgressToUser(userId, {
         type: 'sync_progress',
-        message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${results.length} vendas baixadas (buscando histÃ³rico: ${currentMonthStart.toISOString().split('T')[0]})`,
+        message: `${account.nickname || `Conta ${account.ml_user_id}`}: ${results.length} vendas baixadas (buscando histórico: ${currentMonthStart.toISOString().split('T')[0]})`,
         current: results.length,
-        total: Math.max(total, results.length), // Usar o maior valor entre total estimado e vendas baixadas
+        total: Math.max(total, results.length),
         fetched: results.length,
         expected: Math.max(total, results.length),
         accountId: account.id,
         accountNickname: account.nickname,
       });
 
-      // Se nÃ£o encontrou vendas neste mÃªs, chegou no inÃ­cio do histÃ³rico
       if (monthOrders.length === 0) {
-        console.log(`[Sync] âœ… Nenhuma venda encontrada neste perÃ­odo - histÃ³rico completo!`);
+        console.log(`[Sync] ✅ Nenhuma venda encontrada neste período - histórico completo!`);
         break;
       }
 
-      // Ir para o mÃªs anterior
       currentMonthStart.setMonth(currentMonthStart.getMonth() - 1);
     }
 
     const elapsedTime = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[Sync] âœ… Busca por perÃ­odo concluÃ­da em ${elapsedTime}s: ${results.length} vendas baixadas`);
+    console.log(`[Sync] ✅ Busca por período concluída em ${elapsedTime}s: ${results.length} vendas baixadas`);
     if (Date.now() - startTime >= MAX_EXECUTION_TIME - 5000 && currentMonthStart > startDate) {
       forcedStop = true;
     }
@@ -970,40 +871,38 @@ async function fetchAllOrdersForAccount(
     if (timeRemaining <= 10000) {
       forcedStop = true;
     }
-    console.log(`[Sync] â±ï¸ Tempo insuficiente para busca histÃ³rica - execute sincronizaÃ§Ã£o novamente para continuar`);
+    console.log(`[Sync] ⏳ Tempo insuficiente para busca histórica - execute sincronização novamente para continuar`);
   }
 
-  // Calcular estatÃ­sticas finais
   const elapsedTime = Math.round((Date.now() - startTime) / 1000);
   const finalTotal = Math.max(total, results.length);
 
-  console.log(`[Sync] ðŸŽ‰ ${results.length} vendas baixadas em ${elapsedTime}s (total estimado: ${total})`);
-  console.log(`[Sync] ðŸ“Š Tipos de logÃ­stica:`, Array.from(logisticStats.entries()));
+  const percentualBaixado = total > 0 ? Math.round((results.length / total) * 100) : 100;
+  console.log(`[Sync] 🎉 ${results.length} de ${total} vendas baixadas (${percentualBaixado}%) em ${elapsedTime}s`);
+  console.log(`[Sync] 📊 Tipos de logística:`, Array.from(logisticStats.entries()));
 
-  // Verificar se hÃ¡ mais vendas para sincronizar
   const totalInDatabase = await prisma.meliVenda.count({
     where: { meliAccountId: account.id }
   });
 
   if (totalInDatabase < total) {
     const remaining = total - totalInDatabase;
-    console.log(`[Sync] ðŸ“Œ ${remaining} vendas restantes - execute sincronizaÃ§Ã£o novamente para continuar`);
+    console.log(`[Sync] 📌 ${remaining} vendas restantes - execute sincronização novamente para continuar`);
     sendProgressToUser(userId, {
       type: 'sync_warning',
-      message: `${remaining} vendas antigas ainda nÃ£o sincronizadas. Execute sincronizaÃ§Ã£o novamente para buscar o restante.`,
+      message: `${remaining} vendas antigas ainda não sincronizadas. Execute sincronização novamente para buscar o restante.`,
       accountId: account.id,
       accountNickname: account.nickname || undefined
     });
   } else {
-    console.log(`[Sync] âœ… HistÃ³rico completo sincronizado!`);
+    console.log(`[Sync] ✅ Histórico completo sincronizado!`);
   }
 
   return { orders: results, expectedTotal: finalTotal, forcedStop };
 }
 
 /**
- * Busca vendas em um perÃ­odo especÃ­fico (para contornar limite de 10k)
- * Se o perÃ­odo tiver mais de 9.950 vendas, divide em sub-perÃ­odos automaticamente
+ * Busca vendas em um período específico (para contornar limite de 10k)
  */
 async function fetchOrdersInDateRange(
   account: MeliAccount,
@@ -1019,7 +918,6 @@ async function fetchOrdersInDateRange(
   let totalInPeriod = 0;
   let needsSplitting = false;
 
-  // Primeira requisiÃ§Ã£o para verificar quantas vendas existem no perÃ­odo
   const checkUrl = new URL(`${MELI_API_BASE}/orders/search`);
   checkUrl.searchParams.set("seller", account.ml_user_id.toString());
   checkUrl.searchParams.set("sort", "date_desc");
@@ -1033,57 +931,47 @@ async function fetchOrdersInDateRange(
     if (checkResponse.ok) {
       const checkPayload = await checkResponse.json();
       totalInPeriod = checkPayload?.paging?.total || 0;
-      console.log(`[Sync] ðŸ“Š PerÃ­odo ${dateFrom.toISOString().split('T')[0]} a ${dateTo.toISOString().split('T')[0]}: ${totalInPeriod} vendas`);
+      console.log(`[Sync] 📊 Período ${dateFrom.toISOString().split('T')[0]} a ${dateTo.toISOString().split('T')[0]}: ${totalInPeriod} vendas`);
 
-      // Se perÃ­odo tem mais de 9.950 vendas, precisa dividir
       if (totalInPeriod > MAX_OFFSET) {
         needsSplitting = true;
-        console.log(`[Sync] ðŸ”„ PerÃ­odo tem ${totalInPeriod} vendas (> ${MAX_OFFSET}) - dividindo em sub-perÃ­odos`);
+        console.log(`[Sync] 🔄 Período tem ${totalInPeriod} vendas (> ${MAX_OFFSET}) - dividindo em sub-períodos`);
       }
     }
   } catch (error) {
-    console.error(`[Sync] Erro ao verificar total do perÃ­odo:`, error);
-    // Continuar mesmo com erro na verificaÃ§Ã£o
+    console.error(`[Sync] Erro ao verificar total do período:`, error);
   }
 
-  // Se precisa dividir, criar sub-perÃ­odos
   if (needsSplitting) {
-    // Calcular duraÃ§Ã£o do perÃ­odo em dias
     const durationMs = dateTo.getTime() - dateFrom.getTime();
     const durationDays = Math.ceil(durationMs / (1000 * 60 * 60 * 24));
 
-    console.log(`[Sync] ðŸ“… PerÃ­odo de ${durationDays} dias - dividindo em sub-perÃ­odos menores`);
+    console.log(`[Sync] 📅 Período de ${durationDays} dias - dividindo em sub-períodos menores`);
 
-    // Determinar tamanho ideal do sub-perÃ­odo
-    // Se tem mais de 50k vendas, dividir em perÃ­odos de 7 dias
-    // Se tem 10k-50k vendas, dividir em perÃ­odos de 14 dias
-    // OTIMIZAÇÃO: Divisão mais agressiva baseada no volume de vendas
     let subPeriodDays: number;
     if (totalInPeriod > 100000) {
-      subPeriodDays = 3; // Períodos de 3 dias para volumes muito altos (>100k vendas)
+      subPeriodDays = 3;
     } else if (totalInPeriod > 50000) {
-      subPeriodDays = 5; // Períodos de 5 dias para volumes altos (50k-100k vendas)
+      subPeriodDays = 5;
     } else if (totalInPeriod > 30000) {
-      subPeriodDays = 7; // Períodos de 7 dias para volumes médio-altos (30k-50k vendas)
+      subPeriodDays = 7;
     } else {
-      subPeriodDays = 14; // Períodos de 14 dias para volumes médios (10k-30k vendas)
+      subPeriodDays = 14;
     }
 
-    console.log(`[Sync] ðŸ”„ Dividindo em sub-perÃ­odos de ${subPeriodDays} dias`);
+    console.log(`[Sync] 🔄 Dividindo em sub-períodos de ${subPeriodDays} dias`);
 
     let currentStart = new Date(dateFrom);
     while (currentStart < dateTo) {
       const currentEnd = new Date(currentStart);
       currentEnd.setDate(currentEnd.getDate() + subPeriodDays);
 
-      // Ajustar para nÃ£o ultrapassar dateTo
       if (currentEnd > dateTo) {
         currentEnd.setTime(dateTo.getTime());
       }
 
-      console.log(`[Sync] ðŸ“† Buscando sub-perÃ­odo: ${currentStart.toISOString().split('T')[0]} a ${currentEnd.toISOString().split('T')[0]}`);
+      console.log(`[Sync] 📆 Buscando sub-período: ${currentStart.toISOString().split('T')[0]} a ${currentEnd.toISOString().split('T')[0]}`);
 
-      // Buscar recursivamente (pode precisar dividir mais se ainda tiver >9.950)
       const subResults = await fetchOrdersInDateRange(
         account,
         headers,
@@ -1094,12 +982,11 @@ async function fetchOrdersInDateRange(
       );
 
       results.push(...subResults);
-      console.log(`[Sync] âœ… Sub-perÃ­odo: ${subResults.length} vendas baixadas (total acumulado: ${results.length})`);
+      console.log(`[Sync] ✅ Sub-período: ${subResults.length} vendas baixadas (total acumulado: ${results.length})`);
 
-      // Enviar progresso
       sendProgressToUser(userId, {
         type: 'sync_progress',
-        message: `${results.length}/${totalInPeriod} vendas baixadas (perÃ­odo histÃ³rico)`,
+        message: `${results.length}/${totalInPeriod} vendas baixadas (período histórico)`,
         current: results.length,
         total: totalInPeriod,
         fetched: results.length,
@@ -1108,16 +995,14 @@ async function fetchOrdersInDateRange(
         accountNickname: account.nickname,
       });
 
-      // AvanÃ§ar para prÃ³ximo sub-perÃ­odo
       currentStart = new Date(currentEnd);
-      currentStart.setDate(currentStart.getDate() + 1); // PrÃ³ximo dia apÃ³s o fim
+      currentStart.setDate(currentStart.getDate() + 1);
     }
 
-    console.log(`[Sync] ðŸŽ‰ PerÃ­odo completo: ${results.length} vendas de ${totalInPeriod} totais`);
+    console.log(`[Sync] 🎉 Período completo: ${results.length} vendas de ${totalInPeriod} totais`);
     return results;
   }
 
-  // Se nÃ£o precisa dividir, buscar normalmente
   while (offset < MAX_OFFSET) {
     const url = new URL(`${MELI_API_BASE}/orders/search`);
     url.searchParams.set("seller", account.ml_user_id.toString());
@@ -1131,9 +1016,8 @@ async function fetchOrdersInDateRange(
       const response = await fetchWithRetry(url.toString(), { headers }, 3, userId);
 
       if (!response.ok) {
-        // Se der erro 400, parar (atingiu limite)
         if (response.status === 400) {
-          console.log(`[Sync] âš ï¸ Atingiu limite no perÃ­odo - baixadas ${results.length} vendas`);
+          console.log(`[Sync] ⚠️ Atingiu limite no período - baixadas ${results.length} vendas`);
         }
         break;
       }
@@ -1143,7 +1027,6 @@ async function fetchOrdersInDateRange(
 
       if (orders.length === 0) break;
 
-      // Buscar detalhes dos orders
       const orderDetailsResults = await Promise.allSettled(
         orders.map(async (o: any) => {
           if (!o?.id) return o;
@@ -1154,10 +1037,11 @@ async function fetchOrdersInDateRange(
         })
       );
 
-      const detailedOrders = orderDetailsResults.map((r, i) => r.status === "fulfilled" ? r.value : orders[i]);
+      const detailedOrders = orderDetailsResults.map((r, i) =>
+        r.status === "fulfilled" && r.value ? r.value : orders[i]
+      );
 
-      // OTIMIZAÇÃO: Buscar shipments em batches menores (10 por vez)
-      const SHIPMENT_BATCH_SIZE = 10;
+      const SHIPMENT_BATCH_SIZE = 50;
       const shipments: any[] = new Array(orders.length).fill(null);
 
       for (let i = 0; i < orders.length; i += SHIPMENT_BATCH_SIZE) {
@@ -1197,477 +1081,18 @@ async function fetchOrdersInDateRange(
 
       offset += orders.length;
 
-      // IMPORTANTE: Parar antes de atingir limite
       if (offset >= MAX_OFFSET) {
-        console.log(`[Sync] âš ï¸ Atingiu ${offset} vendas no perÃ­odo - parando antes do limite`);
+        console.log(`[Sync] ⚠️ Atingiu ${offset} vendas no período - parando antes do limite`);
         break;
       }
     } catch (error) {
-      console.error(`[Sync] Erro ao buscar perÃ­odo:`, error);
+      console.error(`[Sync] Erro ao buscar período:`, error);
       break;
     }
   }
 
   return results;
 }
-
-async function fetchOrdersForWindow(
-
-  account: MeliAccount,
-
-  userId: string,
-
-  window?: SyncWindow,
-
-  specificOrderIds?: string[], // IDs especificos para buscar
-
-): Promise<OrdersFetchResult> {
-
-  const results: MeliOrderPayload[] = [];
-
-  const headers = { Authorization: `Bearer ${account.access_token}` };
-
-  if (specificOrderIds && specificOrderIds.length > 0) {
-
-    console.log(`[Sync] Buscando ${specificOrderIds.length} pedidos especificos para conta ${account.ml_user_id}`);
-
-
-
-    const detailedOrders = await Promise.all(
-
-      specificOrderIds.map(async (orderId) => {
-
-        try {
-
-          const res = await fetchWithRetry(`${MELI_API_BASE}/orders/${orderId}`, { headers }, 3, userId);
-
-          if (!res.ok) {
-
-            console.warn(`[Sync] Pedido ${orderId} retornou status ${res.status}, ignorando...`);
-
-            return null;
-
-          }
-
-          const data = await res.json();
-
-          return data;
-
-        } catch (error) {
-
-          console.error(`[Sync] Erro ao buscar pedido especifico ${orderId}:`, error);
-
-          sendProgressToUser(userId, {
-
-            type: 'sync_warning',
-
-            message: `Erro ao buscar pedido ${orderId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-
-            errorCode: 'ORDER_FETCH_ERROR',
-
-          });
-
-          return null;
-
-        }
-
-      })
-
-    );
-
-
-
-    const shipments = await Promise.all(
-
-      detailedOrders.map(async (order: any) => {
-
-        if (!order) return null;
-
-        const shippingId = order?.shipping?.id;
-
-        if (!shippingId) return null;
-
-        try {
-
-          const res = await fetchWithRetry(`${MELI_API_BASE}/shipments/${shippingId}`, { headers }, 3, userId);
-
-          if (!res.ok) {
-
-            console.warn(`[Sync] Envio ${shippingId} retornou status ${res.status}, continuando sem dados de envio...`);
-
-            return null;
-
-          }
-
-          const data = await res.json();
-
-          return data;
-
-        } catch (error) {
-
-          console.error(`[Sync] Erro ao buscar envio ${shippingId}:`, error);
-
-          return null;
-
-        }
-
-      })
-
-    );
-
-
-
-    detailedOrders.forEach((order: any, idx: number) => {
-
-      if (!order) return;
-
-      const shipment = shipments[idx] ?? undefined;
-
-      const freight = calculateFreight(order, shipment);
-
-      results.push({
-
-        accountId: account.id,
-
-        accountNickname: account.nickname,
-
-        mlUserId: account.ml_user_id,
-
-        order,
-
-        shipment,
-
-        freight,
-
-      });
-
-    });
-
-
-
-    return { orders: results, expectedTotal: specificOrderIds.length };
-
-  }
-
-
-
-  if (!window) {
-
-
-
-    throw new Error("Sync window is required when no specific order IDs are provided.");
-
-
-
-  }
-
-
-
-  const now = window.to;
-
-
-
-  const fetchFrom = window.from;
-
-
-
-  const fetchMode = window.mode;
-
-
-
-  const logisticStats = new Map<string, number>();
-
-  const windowLabel =
-
-    fetchMode === "initial"
-
-      ? "janela inicial"
-
-      : fetchMode === "historical"
-
-        ? "historico"
-
-        : fetchMode === "manual"
-
-          ? "manual"
-
-          : "ultimas 48h";
-
-
-
-  try {
-
-
-
-    sendProgressToUser(userId, {
-
-
-
-      type: "sync_progress",
-
-
-
-      message: `Conta ${account.nickname || account.ml_user_id}: preparando janelas (${windowLabel})...`,
-
-
-
-      current: 0,
-
-
-
-      total: 0,
-
-
-
-      accountId: account.id,
-
-
-
-      accountNickname: account.nickname,
-
-
-
-      debugData: { mode: fetchMode },
-
-
-
-    });
-
-
-
-  } catch (sseError) {
-
-
-
-    console.warn("[Sync] Erro ao enviar aviso de preparacao de janelas:", sseError);
-
-
-
-  }
-
-
-
-
-
-
-
-  const ranges = await buildSafeDateRanges(account, headers, fetchFrom, now, userId);
-
-
-
-  if (ranges.length === 0) {
-
-    console.log(
-
-      `[Sync] Conta ${account.ml_user_id} nao retornou vendas no intervalo selecionado (${windowLabel}).`,
-
-    );
-
-    try {
-
-      sendProgressToUser(userId, {
-
-        type: "sync_warning",
-
-        message: `Conta ${account.nickname || account.ml_user_id} nao possui vendas na janela ().`,
-
-        accountId: account.id,
-
-        accountNickname: account.nickname,
-
-        debugData: { mode: fetchMode },
-
-      });
-
-    } catch (sseError) {
-
-      console.warn("[Sync] Erro ao enviar aviso de ausencia de vendas:", sseError);
-
-    }
-
-    return { orders: results, expectedTotal: 0 };
-
-  }
-
-
-
-  let expectedTotal = ranges.reduce((sum, range) => sum + range.total, 0);
-
-  let totalFetchedAcrossRanges = 0;
-
-
-
-  try {
-
-    sendProgressToUser(userId, {
-
-      type: "sync_progress",
-
-      message: `Conta ${account.nickname || account.ml_user_id}: ${ranges.length} janela(s) detectadas (${expectedTotal} vendas estimadas).`,
-
-      current: 0,
-
-      total: expectedTotal,
-
-      accountId: account.id,
-
-      accountNickname: account.nickname,
-
-      debugData: { mode: fetchMode, ranges: ranges.length },
-
-    });
-
-  } catch (sseError) {
-
-    console.warn("[Sync] Erro ao enviar resumo das janelas:", sseError);
-
-  }
-
-
-
-  console.log(
-
-    `[Sync] Conta ${account.ml_user_id}: ${ranges.length} janela(s) para ${windowLabel}, total esperado inicial ${expectedTotal}.`,
-
-  );
-
-
-
-  for (const range of ranges) {
-
-    const chunkOrders = await fetchOrdersInRange(
-
-      account,
-
-      headers,
-
-      userId,
-
-      range,
-
-      logisticStats,
-
-      {
-
-        onPageFetched: ({ fetched, chunkOffset, chunkTotal, rangeLabel, page }) => {
-
-          totalFetchedAcrossRanges += fetched;
-
-          try {
-
-            sendProgressToUser(userId, {
-
-              type: 'sync_progress',
-
-              message: `Conta ${account.nickname || account.ml_user_id}: ${totalFetchedAcrossRanges}/${expectedTotal || chunkTotal} vendas baixadas (${windowLabel} - ${rangeLabel})`,
-
-              current: totalFetchedAcrossRanges,
-
-              total: expectedTotal || chunkTotal,
-
-              fetched: totalFetchedAcrossRanges,
-
-              expected: expectedTotal || chunkTotal,
-
-              accountId: account.id,
-
-              accountNickname: account.nickname,
-
-              page,
-
-              offset: chunkOffset,
-
-              debugData: {
-
-                range: rangeLabel,
-
-                chunkTotal,
-
-              },
-
-            });
-
-          } catch (sseError) {
-
-            console.warn('[Sync] Erro ao enviar progresso SSE (nao critico):', sseError);
-
-          }
-
-        },
-
-        onRangeTotalAdjusted: (delta) => {
-
-          if (!delta) return;
-
-          expectedTotal += delta;
-
-        },
-
-        onRangeLimitReached: ({ total, rangeLabel }) => {
-
-          const vendasRestantes = total - MAX_OFFSET;
-
-          console.log(
-
-            `[Sync] Aviso: limite de ${MAX_OFFSET} vendas atingido no intervalo ${rangeLabel}. ${vendasRestantes} vendas podem ter ficado de fora.`,
-
-          );
-
-          sendProgressToUser(userId, {
-
-            type: 'sync_warning',
-
-            message: `Limite de 10.000 vendas por intervalo atingido (${rangeLabel}). Sincronizadas ${MAX_OFFSET} de ${total} vendas disponiveis.`,
-
-            errorCode: 'MAX_OFFSET_REACHED',
-
-          });
-
-        },
-
-      },
-
-    );
-
-
-
-    results.push(...chunkOrders);
-
-  }
-
-
-
-  console.log(`[Sync] Conta ${account.ml_user_id} - tipos de logistica encontrados:`);
-
-  const sortedStats = Array.from(logisticStats.entries()).sort((a, b) => b[1] - a[1]);
-
-  sortedStats.forEach(([type, count]) => {
-
-    console.log(`  ${type}: ${count} vendas`);
-
-  });
-
-
-
-  if (!logisticStats.has('cross_docking')) {
-
-    console.log(
-
-      `[Sync] Nenhuma venda com cross_docking (Coleta) foi encontrada na API do Mercado Livre para esta conta.`,
-
-    );
-
-  }
-
-
-
-  return { orders: results, expectedTotal };
-
-}
-
-
-
-
 
 async function buildSkuCache(
   orders: MeliOrderPayload[],
@@ -1725,7 +1150,6 @@ async function buildSkuCache(
   return cache;
 }
 
-// FunÃ§Ã£o para salvar vendas em lotes - OTIMIZADA
 function extractOrderIdFromPayload(order: MeliOrderPayload): string | null {
   const rawOrder = (order?.order ?? null) as any;
   if (!rawOrder || rawOrder.id === undefined || rawOrder.id === null) {
@@ -1762,7 +1186,7 @@ function deduplicateOrders(
 async function saveVendasBatch(
   orders: MeliOrderPayload[],
   userId: string,
-  batchSize: number = 100 // OTIMIZADO: aumentado para 100 para batch operations
+  batchSize: number = 100
 ): Promise<{ saved: number; errors: number }> {
   let saved = 0;
   let errors = 0;
@@ -1784,18 +1208,14 @@ async function saveVendasBatch(
     const skuCache = await buildSkuCache(uniqueOrders, userId);
     let processedCount = 0;
 
-    // OTIMIZAÇÃO CRÍTICA: Processar em lotes com batch UPSERT
-    // Reduz de 500 queries individuais para 5-10 queries em lote
     for (let i = 0; i < totalOrders; i += batchSize) {
       const batch = uniqueOrders.slice(i, i + batchSize);
 
       try {
-        // Preparar todos os dados do batch primeiro
         const preparedData = await Promise.all(
           batch.map(order => prepareVendaData(order, userId, skuCache))
         );
 
-        // Filtrar dados válidos
         const validData = preparedData.filter(d => d !== null);
 
         if (validData.length === 0) {
@@ -1804,7 +1224,6 @@ async function saveVendasBatch(
           continue;
         }
 
-        // Buscar IDs existentes para dividir em creates vs updates
         const orderIds = validData.map(d => d!.orderId);
         const existingOrders = await prisma.meliVenda.findMany({
           where: { orderId: { in: orderIds } },
@@ -1816,12 +1235,11 @@ async function saveVendasBatch(
         const toCreate = validData.filter(d => !existingOrderIdSet.has(d!.orderId));
         const toUpdate = validData.filter(d => existingOrderIdSet.has(d!.orderId));
 
-        // BATCH CREATE: insere múltiplos registros de uma vez
         if (toCreate.length > 0) {
           try {
             await prisma.meliVenda.createMany({
               data: toCreate.map(d => d!.createData),
-              skipDuplicates: true // Evita erro se já existir
+              skipDuplicates: true
             });
             saved += toCreate.length;
           } catch (createError) {
@@ -1830,7 +1248,6 @@ async function saveVendasBatch(
           }
         }
 
-        // BATCH UPDATE: atualiza múltiplos registros em uma transação
         if (toUpdate.length > 0) {
           try {
             await prisma.$transaction(
@@ -1853,7 +1270,6 @@ async function saveVendasBatch(
         errors += batch.length;
       }
 
-      // Enviar progresso SSE apenas a cada lote (nao a cada venda) para reduzir overhead
       processedCount += batch.length;
       const percentage = Math.round((processedCount / totalOrders) * 100);
       try {
@@ -1866,20 +1282,17 @@ async function saveVendasBatch(
           expected: totalOrders
         });
       } catch (sseError) {
-        // Ignorar erros de SSE - nao sao criticos
-        console.warn(`[Sync] Erro ao enviar progresso SSE (nao critico):`, sseError);
+        console.warn(`[Sync] Erro ao enviar progresso SSE (não crítico):`, sseError);
       }
     }
   } catch (error) {
-    console.error(`[Sync] Erro critico em saveVendasBatch:`, error);
-    // Retornar o que foi salvo ate agora
+    console.error(`[Sync] Erro crítico em saveVendasBatch:`, error);
     errors = totalOrders - saved;
   }
 
   return { saved, errors };
 }
 
-// Nova função auxiliar para preparar dados da venda sem salvar
 async function prepareVendaData(
   order: MeliOrderPayload,
   userId: string,
@@ -1888,7 +1301,7 @@ async function prepareVendaData(
   const extractedOrderId = extractOrderIdFromPayload(order);
 
   if (!extractedOrderId) {
-    console.error(`[Sync] Venda sem ID valido, pulando...`);
+    console.error(`[Sync] Venda sem ID válido, pulando...`);
     return null;
   }
 
@@ -1940,6 +1353,22 @@ async function prepareVendaData(
     const internalTags: string[] = Array.isArray(o.internal_tags)
       ? o.internal_tags.map((t: unknown) => String(t))
       : [];
+
+    const context = (o as any).context;
+
+    const hasAdsInInternal = internalTags.some((t) =>
+      t.toLowerCase().includes("ads"),
+    );
+    const hasAdsInTags = tags.some((t) =>
+      t.toLowerCase().includes("ads"),
+    );
+
+    const isAdsContext =
+      context?.application === "product_ads" ||
+      context?.channel === "product_ads" ||
+      (typeof context === "string" && context.includes("ads"));
+
+    const isAds = hasAdsInInternal || hasAdsInTags || isAdsContext;
 
     const shippingStatus = (order.shipment as any)?.status || o?.shipping?.status || undefined;
     const shippingId = (order.shipment as any)?.id?.toString() || o?.shipping?.id?.toString();
@@ -2011,7 +1440,7 @@ async function prepareVendaData(
         return mapListingTypeToExposure(listingTypeId);
       })(),
       tipoAnuncio: tags.includes('catalog') ? 'Catalogo' : 'Proprio',
-      ads: internalTags.includes('ads') ? 'ADS' : null,
+      ads: isAds ? 'ADS' : null,
       plataforma: 'Mercado Livre',
       canal: 'ML',
       tags: truncateJsonData(tags),
@@ -2023,7 +1452,6 @@ async function prepareVendaData(
       })
     };
 
-    // Tentar incluir geo se disponível
     const geoData = latitude !== null && longitude !== null ? {
       latitude: new Decimal(latitude),
       longitude: new Decimal(longitude)
@@ -2050,13 +1478,13 @@ async function prepareVendaData(
   }
 }
 
-// REMOVIDA: saveVendaToDatabase() - refatorada em prepareVendaData() + batch operations
+/**
+ * HANDLER PRINCIPAL - SINCRONIZAÇÃO CONTA POR CONTA (sequencial)
+ */
 export async function POST(req: NextRequest) {
-  // Suportar tanto autenticação de usuário quanto cron job
   const sessionCookie = req.cookies.get("session")?.value;
   const cronSecret = req.headers.get('x-cron-secret');
 
-  // Ler body primeiro (só pode ser lido uma vez)
   let requestBody: {
     accountIds?: string[];
     orderIdsByAccount?: Record<string, string[]>;
@@ -2075,15 +1503,13 @@ export async function POST(req: NextRequest) {
 
   let userId: string;
 
-  // Autenticar via cron secret OU sessão de usuário
+  // Autenticação via cron OU sessão
   if (cronSecret && cronSecret === process.env.CRON_SECRET) {
-    // Requisição de cron job - pegar userId do body
     const accountId = requestBody.accountIds?.[0];
     if (!accountId) {
       return new NextResponse("Missing accountId for cron job", { status: 400 });
     }
 
-    // Buscar userId da conta
     const account = await prisma.meliAccount.findUnique({
       where: { id: accountId },
       select: { userId: true }
@@ -2096,7 +1522,6 @@ export async function POST(req: NextRequest) {
     userId = account.userId;
     console.log(`[Sync] Cron job autenticado para userId: ${userId}`);
   } else {
-    // Autenticação normal via sessão
     let session;
     try {
       session = await assertSessionToken(sessionCookie);
@@ -2106,23 +1531,20 @@ export async function POST(req: NextRequest) {
     userId = session.sub;
   }
 
-  // Por padr?o, usar quickMode=true para evitar timeout (mas desativar em fullSync)
-  const fullSync = requestBody.fullSync === true; // fullSync apenas se explicitamente true
-  const quickMode = fullSync ? false : requestBody.quickMode !== false; // true por padr?o, false apenas se explicitamente passado
+  const fullSync = requestBody.fullSync === true;
+  const quickMode = fullSync ? false : requestBody.quickMode === true;
   requestBody.quickMode = quickMode;
   requestBody.fullSync = fullSync;
 
-  console.log(`[Sync] Iniciando sincronizaÃ§Ã£o para usuÃ¡rio ${userId}`, {
+  console.log(`[Sync] Iniciando sincronização para usuário ${userId}`, {
     accountIds: requestBody.accountIds,
     hasOrderIds: !!requestBody.orderIdsByAccount,
-    quickMode: quickMode, // Log do modo
-    fullSync: fullSync // Log do modo fullSync
+    quickMode,
+    fullSync
   });
 
-  // Dar um delay para garantir que o SSE estÃ¡ conectado
   await new Promise(resolve => setTimeout(resolve, 500));
 
-  // Enviar evento de inÃ­cio da sincronizaÃ§Ã£o
   sendProgressToUser(userId, {
     type: "sync_start",
     message: "Conectando ao Mercado Livre...",
@@ -2132,12 +1554,11 @@ export async function POST(req: NextRequest) {
     expected: 0
   });
 
-  // Buscar contas - filtrar por IDs se fornecidos
   const accountsWhere: any = { userId };
   if (requestBody.accountIds && requestBody.accountIds.length > 0) {
     accountsWhere.id = { in: requestBody.accountIds };
   }
-  
+
   const accounts = await prisma.meliAccount.findMany({
     where: accountsWhere,
     orderBy: { created_at: "desc" },
@@ -2154,7 +1575,7 @@ export async function POST(req: NextRequest) {
       fetched: 0,
       expected: 0
     });
-    
+
     return NextResponse.json({
       syncedAt: new Date().toISOString(),
       accounts: [] as AccountSummary[],
@@ -2169,19 +1590,9 @@ export async function POST(req: NextRequest) {
   let totalExpectedOrders = 0;
   let totalFetchedOrders = 0;
   let totalSavedOrders = 0;
-  let forcedStop = false;
-  
-  // Preparar steps para cada conta
-  const steps = accounts.map(acc => ({
-    accountId: acc.id,
-    accountName: acc.nickname || `Conta ${acc.ml_user_id}`,
-    currentStep: 'pending' as 'pending' | 'fetching' | 'saving' | 'completed' | 'error',
-    progress: 0,
-    fetched: 0,
-    expected: 0,
-    error: undefined as string | undefined
-  }));
+  let hasMoreToSync = false;
 
+  // ⚠️ AQUI: CONTA POR CONTA, 100% SEQUENCIAL
   for (let accountIndex = 0; accountIndex < accounts.length; accountIndex++) {
     const account = accounts[accountIndex];
     const summary: AccountSummary = {
@@ -2193,20 +1604,15 @@ export async function POST(req: NextRequest) {
     summaries.push(summary);
 
     try {
-      // Atualizar step para fetching
-      steps[accountIndex].currentStep = 'fetching';
-
-      // Enviar progresso: processando conta
       sendProgressToUser(userId, {
         type: "sync_progress",
-        message: `Buscando vendas da conta ${account.nickname || account.ml_user_id}...`,
+        message: `Preparando conta ${account.nickname || account.ml_user_id} (${accountIndex + 1}/${accounts.length})...`,
         current: accountIndex,
         total: accounts.length,
         fetched: totalFetchedOrders,
         expected: totalExpectedOrders,
         accountId: account.id,
         accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-        steps: steps
       });
 
       let current = account;
@@ -2218,299 +1624,153 @@ export async function POST(req: NextRequest) {
         errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message });
         console.error(`[Sync] Erro ao renovar token da conta ${account.id}:`, error);
 
-        // Atualizar step para erro
-        steps[accountIndex].currentStep = 'error';
-        steps[accountIndex].error = message;
-
-        // Enviar erro via SSE
         sendProgressToUser(userId, {
           type: "sync_warning",
-          message: `Erro ao renovar token da conta ${account.nickname || account.ml_user_id}: ${message}. Continuando com prÃ³xima conta...`,
+          message: `Erro ao renovar token da conta ${account.nickname || account.ml_user_id}: ${message}. Pulando esta conta...`,
           errorCode: "TOKEN_REFRESH_FAILED"
         });
         continue;
       }
 
+      const headers = { Authorization: `Bearer ${current.access_token}` };
+
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Buscando vendas da conta ${current.nickname || current.ml_user_id}...`,
+        current: accountIndex,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: current.id,
+        accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+      });
+
+      let allOrders: MeliOrderPayload[] = [];
+      let expectedTotal = 0;
+      let accountForcedStop = false;
+
       try {
-        const specificOrderIds = requestBody.orderIdsByAccount?.[account.id];
-
-        const existingVendasCount = await prisma.meliVenda.count({
-
-          where: { meliAccountId: account.id },
-
-        });
-
-        const now = new Date();
-
-
-
-        const processAndSave = async (
-
-          fetchedOrders: MeliOrderPayload[],
-
-          expectedTotal: number,
-
-          label: string,
-
-        ) => {
-
-          const effectiveExpected = expectedTotal || fetchedOrders.length;
-
-          totalExpectedOrders += effectiveExpected;
-
-          totalFetchedOrders += fetchedOrders.length;
-
-
-
-          steps[accountIndex].expected += effectiveExpected;
-
-          steps[accountIndex].fetched += fetchedOrders.length;
-
-          steps[accountIndex].progress = fetchedOrders.length > 0 ? 50 : steps[accountIndex].progress;
-
-
-
-          console.log(
-
-            `[Sync] Conta ${account.nickname}: ${fetchedOrders.length} venda(s) encontradas na janela ${label}`,
-
-          );
-
-
-
-          if (fetchedOrders.length === 0) {
-
-            return;
-
-          }
-
-
-
-          steps[accountIndex].currentStep = 'saving';
-
-          sendProgressToUser(userId, {
-
-            type: "sync_progress",
-
-            message: `Salvando ${fetchedOrders.length} venda(s) (${label}) da conta ${account.nickname || account.ml_user_id}...`,
-
-            current: accountIndex,
-
-            total: accounts.length,
-
-            fetched: totalFetchedOrders,
-
-            expected: totalExpectedOrders,
-
-            accountId: account.id,
-
-            accountNickname: account.nickname || `Conta ${account.ml_user_id}`,
-
-            steps,
-
-          });
-
-
-
-          try {
-
-            const batchResult = await saveVendasBatch(fetchedOrders, userId, 50);
-
-            totalSavedOrders += batchResult.saved;
-
-
-
-            console.log(
-
-              `[Sync] Conta ${account.nickname}: ${batchResult.saved} vendas salvas (${label}), ${batchResult.errors} erros`,
-
-            );
-
-
-
-            if (batchResult.errors > 0) {
-
-              console.warn(`[Sync] ${batchResult.errors} vendas falharam ao salvar para conta ${current.id}`);
-
-              sendProgressToUser(userId, {
-
-                type: "sync_warning",
-
-                message: `${batchResult.errors} vendas da conta ${account.nickname || account.ml_user_id} nao puderam ser salvas (${label})`,
-
-                errorCode: "SAVE_ERRORS",
-
-              });
-
-            }
-
-          } catch (saveError) {
-
-            const saveErrorMsg = saveError instanceof Error ? saveError.message : 'Erro desconhecido';
-
-            console.error(`[Sync] Erro ao salvar vendas da conta ${current.id}:`, saveError);
-
-            errors.push({
-
-              accountId: current.id,
-
-              mlUserId: current.ml_user_id,
-
-              message: `Erro ao salvar vendas: ${saveErrorMsg}`
-
-            });
-
-
-
-            sendProgressToUser(userId, {
-
-              type: "sync_warning",
-
-              message: `Erro ao salvar vendas da conta ${account.nickname || account.ml_user_id}: ${saveErrorMsg}`,
-
-              errorCode: "SAVE_BATCH_ERROR",
-
-            });
-
-          }
-
-        };
-
-
-
-        steps[accountIndex].expected = 0;
-
-        steps[accountIndex].fetched = 0;
-
-
-
-        // NOVA LÃ“GICA SIMPLES: Buscar TODAS as vendas sem janelas complexas
-        const headers = { Authorization: `Bearer ${current.access_token}` };
-
-        console.log(`[Sync] ðŸš€ Buscando TODAS as vendas da conta ${current.ml_user_id} (${current.nickname})`);
-        console.log(`[Sync] Debug - accountIndex: ${accountIndex}, userId: ${userId}`);
-
-        let allOrders: MeliOrderPayload[] = [];
-        let expectedTotal = 0;
-        let accountForcedStop = false;
-
-        try {
-          const result = await fetchAllOrdersForAccount(
-            current,
-            headers,
-            userId,
-            quickMode, // NOVO: passa o modo de sincronizaÃ§Ã£o
-            fullSync, // NOVO: passa o modo fullSync
-          );
-          allOrders = result.orders;
-          expectedTotal = result.expectedTotal;
-          accountForcedStop = result.forcedStop;
-          forcedStop = forcedStop || accountForcedStop;
-
-          console.log(`[Sync] âœ… Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
-          console.log(`[Sync] Debug - allOrders.length: ${allOrders.length}, expectedTotal: ${expectedTotal}`);
-        } catch (fetchError) {
-          const fetchMsg = fetchError instanceof Error ? fetchError.message : 'Erro ao buscar vendas';
-          console.error(`[Sync] âŒ Erro ao buscar vendas da conta ${current.ml_user_id}:`, fetchError);
-          throw new Error(`Falha ao buscar vendas: ${fetchMsg}`);
-        }
-
-        console.log(`[Sync] ðŸ“¥ Iniciando salvamento de ${allOrders.length} vendas no banco...`);
-
-        // Enviar evento SSE informando que vai comeÃ§ar a salvar
-        sendProgressToUser(userId, {
-          type: "sync_progress",
-          message: `Preparando para salvar ${allOrders.length} vendas no banco de dados...`,
-          current: 0,
-          total: allOrders.length,
-          fetched: 0,
-          expected: allOrders.length,
+        const result = await fetchAllOrdersForAccount(
+          current,
+          headers,
+          userId,
+          quickMode,
+          fullSync,
+        );
+        allOrders = result.orders;
+        expectedTotal = result.expectedTotal;
+        accountForcedStop = result.forcedStop;
+
+        console.log(`[Sync] ✅ Conta ${current.ml_user_id}: ${allOrders.length} vendas baixadas de ${expectedTotal} totais`);
+      } catch (fetchError) {
+        const fetchMsg = fetchError instanceof Error ? fetchError.message : 'Erro ao buscar vendas';
+        console.error(`[Sync] ❌ Erro ao buscar vendas da conta ${current.ml_user_id}:`, fetchError);
+        errors.push({
           accountId: current.id,
-          accountNickname: current.nickname || `Conta ${current.ml_user_id}`
+          mlUserId: current.ml_user_id,
+          message: `Erro ao buscar vendas: ${fetchMsg}`
         });
+        continue;
+      }
 
-        try {
-          await processAndSave(allOrders, expectedTotal, 'completo');
-          console.log(`[Sync] âœ… Salvamento concluÃ­do para conta ${current.ml_user_id}`);
+      totalExpectedOrders += expectedTotal || allOrders.length;
+      totalFetchedOrders += allOrders.length;
 
-          // Enviar evento SSE confirmando conclusÃ£o do salvamento
-          sendProgressToUser(userId, {
-            type: "sync_progress",
-            message: `âœ… Salvamento concluÃ­do para ${current.nickname || current.ml_user_id}`,
-            current: allOrders.length,
-            total: allOrders.length,
-            fetched: allOrders.length,
-            expected: allOrders.length,
-            accountId: current.id,
-            accountNickname: current.nickname || `Conta ${current.ml_user_id}`
-          });
-        } catch (saveError) {
-          const saveMsg = saveError instanceof Error ? saveError.message : 'Erro ao salvar vendas';
-          console.error(`[Sync] âŒ Erro ao salvar vendas da conta ${current.ml_user_id}:`, saveError);
-          throw new Error(`Falha ao salvar vendas: ${saveMsg}`);
-        }
+      if (accountForcedStop || allOrders.length < expectedTotal) {
+        hasMoreToSync = true;
+      }
 
-      } catch (error) {
-        steps[accountIndex].currentStep = 'error';
-        steps[accountIndex].error = error instanceof Error ? error.message : 'Erro desconhecido';
-        const message = error instanceof Error ? error.message : "Erro desconhecido ao processar pedidos.";
-        errors.push({ accountId: current.id, mlUserId: current.ml_user_id, message });
-        console.error(`[Sync] Erro ao processar conta ${current.id}:`, error);
-
-        // Enviar erro via SSE
-        sendProgressToUser(userId, {
-          type: "sync_warning",
-          message: `Erro na conta ${current.nickname || current.ml_user_id}: ${message}. Continuando com prÃ³xima conta...`,
-          errorCode: "ACCOUNT_PROCESSING_ERROR"
-        });
-
-        // Atualizar progresso mesmo com erro
+      if (allOrders.length === 0) {
         sendProgressToUser(userId, {
           type: "sync_progress",
-          message: `Conta ${current.nickname || current.ml_user_id} com erro`,
+          message: `Nenhuma venda nova para a conta ${current.nickname || current.ml_user_id}.`,
           current: accountIndex + 1,
           total: accounts.length,
           fetched: totalFetchedOrders,
           expected: totalExpectedOrders,
           accountId: current.id,
           accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
-          steps: steps
+        });
+        continue;
+      }
+
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Salvando ${allOrders.length} venda(s) da conta ${current.nickname || current.ml_user_id}...`,
+        current: accountIndex,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: current.id,
+        accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+      });
+
+      try {
+        const batchResult = await saveVendasBatch(allOrders, userId, 50);
+        totalSavedOrders += batchResult.saved;
+
+        console.log(
+          `[Sync] Conta ${current.nickname}: ${batchResult.saved} vendas salvas, ${batchResult.errors} erros`,
+        );
+
+        if (batchResult.errors > 0) {
+          sendProgressToUser(userId, {
+            type: "sync_warning",
+            message: `${batchResult.errors} vendas da conta ${current.nickname || current.ml_user_id} não puderam ser salvas`,
+            errorCode: "SAVE_ERRORS",
+          });
+        }
+      } catch (saveError) {
+        const saveErrorMsg = saveError instanceof Error ? saveError.message : 'Erro desconhecido';
+        console.error(`[Sync] Erro ao salvar vendas da conta ${current.id}:`, saveError);
+        errors.push({
+          accountId: current.id,
+          mlUserId: current.ml_user_id,
+          message: `Erro ao salvar vendas: ${saveErrorMsg}`
+        });
+
+        sendProgressToUser(userId, {
+          type: "sync_warning",
+          message: `Erro ao salvar vendas da conta ${current.nickname || current.ml_user_id}: ${saveErrorMsg}`,
+          errorCode: "SAVE_BATCH_ERROR",
         });
       }
-    } catch (error) {
-      // Erro catastrÃ³fico na conta - continuar com prÃ³xima
-      const errorMsg = error instanceof Error ? error.message : 'Erro crÃ­tico desconhecido';
-      console.error(`[Sync] Erro catastrÃ³fico ao processar conta ${account.id}:`, error);
 
-      steps[accountIndex].currentStep = 'error';
-      steps[accountIndex].error = errorMsg;
+      sendProgressToUser(userId, {
+        type: "sync_progress",
+        message: `Conta ${current.nickname || current.ml_user_id} concluída.`,
+        current: accountIndex + 1,
+        total: accounts.length,
+        fetched: totalFetchedOrders,
+        expected: totalExpectedOrders,
+        accountId: current.id,
+        accountNickname: current.nickname || `Conta ${current.ml_user_id}`,
+      });
+
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Erro crítico desconhecido';
+      console.error(`[Sync] Erro catastrófico ao processar conta ${account.id}:`, error);
+
       errors.push({ accountId: account.id, mlUserId: account.ml_user_id, message: errorMsg });
 
       sendProgressToUser(userId, {
         type: "sync_warning",
-        message: `Erro crÃ­tico na conta ${account.nickname || account.ml_user_id}: ${errorMsg}. Continuando com prÃ³xima conta...`,
+        message: `Erro crítico na conta ${account.nickname || account.ml_user_id}: ${errorMsg}. Continuando com próxima conta...`,
         errorCode: "CRITICAL_ERROR"
       });
     }
   }
 
-  // Verificar se hÃ¡ mais vendas antigas para sincronizar
-  // Em fullSync ou quickMode, indicar se ainda faltam vendas
-  const pendingVolume = totalFetchedOrders < totalExpectedOrders;
-  const hasMoreToSync = forcedStop || ((fullSync || quickMode) && pendingVolume);
-
-  // Enviar evento de conclusão da sincronização
   let mensagemFinal = '';
-  if (forcedStop) {
-    mensagemFinal = `⚠️ ${totalSavedOrders} vendas processadas até agora. Tempo limite atingido, continuaremos automaticamente.`;
-  } else if (fullSync && hasMoreToSync) {
-    mensagemFinal = `✅ ${totalSavedOrders} vendas sincronizadas de ${totalExpectedOrders}! Clique novamente para continuar...`;
+  if (hasMoreToSync) {
+    const percentual = totalExpectedOrders > 0 ? Math.round((totalSavedOrders / totalExpectedOrders) * 100) : 0;
+    mensagemFinal = `⚠️ ${totalSavedOrders} de ${totalExpectedOrders} vendas processadas (${percentual}%). Ainda há vendas antigas para sincronizar.`;
   } else if (fullSync) {
-    mensagemFinal = `✅ Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders}`;
+    mensagemFinal = `✅ Sincronização completa (FULL). ${totalSavedOrders} vendas processadas.`;
   } else if (quickMode) {
-    mensagemFinal = `Vendas recentes sincronizadas! ${totalSavedOrders} vendas processadas${hasMoreToSync ? '. Sincronizando vendas antigas em background...' : ''}`;
+    mensagemFinal = `✅ Vendas recentes sincronizadas. ${totalSavedOrders} vendas processadas.`;
   } else {
-    mensagemFinal = `Sincronização completa! ${totalSavedOrders} vendas processadas de ${totalExpectedOrders} esperadas`;
+    mensagemFinal = `✅ Sincronização concluída. ${totalSavedOrders} vendas processadas.`;
   }
 
   sendProgressToUser(userId, {
@@ -2520,66 +1780,14 @@ export async function POST(req: NextRequest) {
     total: totalExpectedOrders,
     fetched: totalSavedOrders,
     expected: totalExpectedOrders,
-    hasMoreToSync // NOVO: indica se hÃ¡ mais vendas antigas
+    hasMoreToSync
   });
 
-  // Invalidar cache de vendas apÃ³s sincronizaÃ§Ã£o
   invalidateVendasCache(userId);
-  console.log(`[Cache] Cache de vendas invalidado para usuÃ¡rio ${userId}`);
+  console.log(`[Cache] Cache de vendas invalidado para usuário ${userId}`);
 
-  // AUTO-SYNC: Continuar automaticamente se houver mais vendas
-  if (hasMoreToSync) {
-    console.log(`[Sync] Iniciando proximo sync automaticamente...`);
-
-    sendProgressToUser(userId, {
-      type: "sync_continue",
-      message: `Continuando... ${totalSavedOrders} vendas salvas.`,
-      current: totalSavedOrders,
-      total: totalExpectedOrders,
-      fetched: totalFetchedOrders,
-      expected: totalExpectedOrders
-    });
-
-    // Trigger próximo sync (fire-and-forget - não espera resposta)
-    const internalBaseUrl =
-      process.env.INTERNAL_BACKEND_URL ||
-      process.env.RENDER_INTERNAL_URL ||
-      (process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null);
-
-    const baseUrl = internalBaseUrl ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-
-    // Fire-and-forget com timeout de 10 minutos para sincronizações longas
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos
-
-    fetch(`${baseUrl}/api/meli/vendas/sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': `session=${sessionCookie}`
-      },
-      body: JSON.stringify({
-        accountIds: requestBody.accountIds,
-        quickMode: requestBody.quickMode,
-        fullSync: requestBody.fullSync
-      }),
-      signal: controller.signal
-    })
-    .then(() => clearTimeout(timeoutId))
-    .catch(err => {
-      clearTimeout(timeoutId);
-      // Ignorar erros de abort - é esperado em sincronizações longas
-      if (err.name !== 'AbortError') {
-        console.error(`[Sync] Erro ao continuar:`, err);
-      }
-    });
-  } else {
-    // Fechar SSE apenas quando completar tudo
-    setTimeout(() => closeUserConnections(userId), 2000);
-  }
+  // Agora NÃO dispara mais auto-sync interno. Tudo é conta-por-conta e request-por-request.
+  setTimeout(() => closeUserConnections(userId), 2000);
 
   return NextResponse.json({
     syncedAt: new Date().toISOString(),
@@ -2591,9 +1799,8 @@ export async function POST(req: NextRequest) {
       fetched: totalFetchedOrders,
       saved: totalSavedOrders
     },
-    hasMoreToSync, // NOVO: flag indicando se hÃ¡ vendas antigas pendentes
-    quickMode, // NOVO: indica qual modo foi usado
-    autoSyncTriggered: hasMoreToSync
+    hasMoreToSync,
+    quickMode,
+    autoSyncTriggered: false
   });
 }
-
