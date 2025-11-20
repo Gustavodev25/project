@@ -250,11 +250,16 @@ const emptyStateIcons = [
 export default function Financas() {
   const toast = useToast();
   const { connect, disconnect, isConnected } = useSyncProgress();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(LS_KEY) === "1";
-  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
+
+  // Sync with localStorage after hydration
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored === "1") {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
   const [activeTab, setActiveTab] = useState<TabOption>("contas_pagar");
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<string>("");

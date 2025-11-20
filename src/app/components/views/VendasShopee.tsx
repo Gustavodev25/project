@@ -362,11 +362,16 @@ const HeaderVendasShopee = ({
 
 export default function VendasShopee() {
   const toast = useToast();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(LS_KEY) === "1";
-  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
+
+  // Sync with localStorage after hydration
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored === "1") {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
   const [isLoading, setIsLoading] = useState(true);
   const [filtroAtivo, setFiltroAtivo] = useState<FiltroStatus>("pagos");
   const [periodoAtivo, setPeriodoAtivo] = useState<FiltroPeriodo>("todos");

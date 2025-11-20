@@ -16,11 +16,16 @@ const LS_KEY = "cz_sidebar_collapsed";
 const useIsoLayout = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export default function DashboardFinanceiro() {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(LS_KEY) === "1";
-  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
+
+  // Sync with localStorage after hydration
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored === "1") {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
 
   // Filtros
   const [mesesSelecionados, setMesesSelecionados] = useState<Set<string>>(() => {

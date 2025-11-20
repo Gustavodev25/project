@@ -27,11 +27,16 @@ type Categoria = {
 };
 
 export default function DRE() {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(LS_KEY) === "1";
-  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
+
+  // Sync with localStorage after hydration
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored === "1") {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hasInitialSet = useRef(false);
