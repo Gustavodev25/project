@@ -19,18 +19,15 @@ export async function GET(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Criar um ID único para esta conexão
   const connectionId = `${session.sub}-${Date.now()}`;
   console.log('[SSE sync-progress] ID da conexão:', connectionId);
 
   const stream = new ReadableStream({
     start(controller) {
       try {
-        // Armazenar a conexão usando a função da lib
         addConnection(connectionId, controller);
         console.log('[SSE sync-progress] Conexão armazenada');
 
-        // Enviar evento de conexão estabelecida
         const connectEvent = `data: ${JSON.stringify({
           type: "connected",
           message: "Conexão estabelecida para sincronização de vendas",
@@ -46,7 +43,6 @@ export async function GET(req: NextRequest) {
     },
 
     cancel() {
-      // Limpar conexão quando cancelada usando a função da lib
       removeConnection(connectionId);
       console.log(`[SSE] ❌ Conexão cancelada para usuário ${session.sub} (${connectionId})`);
     }

@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
     client_id: clientId,
     redirect_uri: redirectUri,
     state,
+    prompt: "login", // Forçar login para permitir troca de conta
   });
   const url = `${authBase}/authorization?${params.toString()}`;
 

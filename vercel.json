@@ -5,6 +5,20 @@
       "destination": "https://project-backend-rjoh.onrender.com/api/:path*"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/meli-sync",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-tokens",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/recovery-meli",
+      "schedule": "0 */6 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

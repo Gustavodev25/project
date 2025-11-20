@@ -24,20 +24,20 @@ function toNumber(v: unknown): number {
 // 🌍 Função para obter a data/hora atual no timezone do Brasil
 function getNowInBrazil(): { year: number; month: number; day: number } {
   const now = new Date();
-  const brazilDateString = now.toLocaleString('en-US', { 
+  const brazilDateString = now.toLocaleString('en-US', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
-  
+
   const [month, day, year] = brazilDateString.split('/').map(Number);
   return { year, month, day };
 }
 
 export async function GET(req: NextRequest) {
   console.log('[Dashboard Stats] 📊 Requisição recebida');
-  
+
   const sessionCookie = req.cookies.get("session")?.value;
   let session;
   try {
@@ -91,14 +91,14 @@ export async function GET(req: NextRequest) {
           // 🌍 Usar data ATUAL do Brasil para calcular ontem
           const brazilToday = getNowInBrazil();
           const brazilYesterday = { ...brazilToday, day: brazilToday.day - 1 };
-          
+
           // Criar datas UTC que representam ontem no horário do Brasil
           // Brasil 00:00 = UTC 03:00 (adicionar 3h)
           // Brasil 23:59 = UTC 02:59 do dia seguinte (adicionar 3h)
           start = new Date(Date.UTC(brazilYesterday.year, brazilYesterday.month - 1, brazilYesterday.day, 3, 0, 0, 0));
           end = new Date(Date.UTC(brazilYesterday.year, brazilYesterday.month - 1, brazilYesterday.day + 1, 2, 59, 59, 999));
           useRange = true;
-          
+
           // Log detalhado para debug de timezone
           console.log('[Dashboard Stats] 📅 Calculando ONTEM (Brasil):', {
             serverNowUTC: now.toISOString(),
@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
             explicacao: 'Ontem no Brasil, buscando em UTC com offset +3h',
             isVercel: process.env.VERCEL === '1',
           });
-          
+
           break;
         }
         case "ultimos_7d": {
@@ -199,8 +199,11 @@ export async function GET(req: NextRequest) {
     const paidOnly = getStatusWhere('pagos');
 
     console.log('[Dashboard Stats] 🔍 Buscando vendas do banco de dados...');
-    
+
     // Buscar vendas do Mercado Livre e Shopee em PARALELO para melhor performance
+    // Se houver filtro de tipo de anúncio (exclusivo ML), não buscar Shopee
+    const shouldFetchShopee = !tipoAnuncioParam || tipoAnuncioParam === 'todos';
+
     const [vendasMeli, vendasShopee] = await Promise.all([
       prisma.meliVenda.findMany({
         where: useRange
@@ -219,10 +222,10 @@ export async function GET(req: NextRequest) {
         distinct: ['orderId'],
         orderBy: { dataVenda: "desc" },
       }),
-      prisma.shopeeVenda.findMany({
+      shouldFetchShopee ? prisma.shopeeVenda.findMany({
         where: useRange
-          ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere }
-          : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere },
+          ? { userId: session.sub, dataVenda: { gte: start, lte: end }, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere, ...modalidadeWhere }
+          : { userId: session.sub, ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}), ...statusWhere, ...modalidadeWhere },
         select: {
           orderId: true, // ⚠️ IMPORTANTE: Necessário para distinct e deduplicação
           valorTotal: true,
@@ -235,7 +238,7 @@ export async function GET(req: NextRequest) {
         },
         distinct: ['orderId'],
         orderBy: { dataVenda: "desc" },
-      })
+      }) : Promise.resolve([])
     ]);
 
     console.log('[Dashboard Stats] ✅ Vendas carregadas:', {
@@ -264,17 +267,17 @@ export async function GET(req: NextRequest) {
     // O distinct do Prisma pode não funcionar perfeitamente em todos os casos
     const vendasDeduplicadas: typeof vendas = [];
     const orderIdsVistos = new Set<string>();
-    
+
     for (const venda of vendas) {
       const orderId = (venda as any).orderId;
-      
+
       if (!orderId) {
         // Se não tiver orderId, incluir sempre (caso raro)
         vendasDeduplicadas.push(venda);
         console.warn('[Dashboard Stats] ⚠️ Venda sem orderId detectada');
         continue;
       }
-      
+
       if (!orderIdsVistos.has(orderId)) {
         orderIdsVistos.add(orderId);
         vendasDeduplicadas.push(venda);
@@ -302,9 +305,9 @@ export async function GET(req: NextRequest) {
 
     const skuCustos = skusUnicos.length
       ? await prisma.sKU.findMany({
-          where: { userId: session.sub, sku: { in: skusUnicos } },
-          select: { sku: true, custoUnitario: true },
-        })
+        where: { userId: session.sub, sku: { in: skusUnicos } },
+        select: { sku: true, custoUnitario: true },
+      })
       : [];
 
     const mapaCustos = new Map(skuCustos.map((s) => [s.sku, toNumber(s.custoUnitario)]));
@@ -374,7 +377,7 @@ export async function GET(req: NextRequest) {
 
     // Calcular impostos baseado nas alíquotas cadastradas
     let impostosTotal = 0;
-    
+
     // Buscar alíquotas ativas do usuário (com fallback se modelo não existir)
     let aliquotas: any[] = [];
     try {
@@ -397,15 +400,15 @@ export async function GET(req: NextRequest) {
     if (aliquotas.length > 0 && useRange) {
       // Agrupar vendas por mês/ano para aplicar alíquota específica de cada mês
       const faturamentoPorMes = new Map<string, number>();
-      
+
       for (const v of vendas) {
         if (!v.dataVenda) continue; // Pular vendas sem data
-        
+
         const dataVenda = new Date(v.dataVenda);
         // Chave no formato YYYY-MM
         const mesAno = `${dataVenda.getFullYear()}-${String(dataVenda.getMonth() + 1).padStart(2, '0')}`;
         const valorTotal = toNumber(v.valorTotal);
-        
+
         faturamentoPorMes.set(mesAno, (faturamentoPorMes.get(mesAno) || 0) + valorTotal);
       }
 
@@ -416,12 +419,12 @@ export async function GET(req: NextRequest) {
         const [year, month] = mesAno.split('-').map(Number);
         const primeiroDiaMes = new Date(year, month - 1, 1);
         const ultimoDiaMes = new Date(year, month, 0, 23, 59, 59, 999);
-        
+
         // Buscar alíquota para este mês específico
         const aliquotaMes = aliquotas.find((aliq: any) => {
           const aliqInicio = new Date(aliq.dataInicio);
           const aliqFim = new Date(aliq.dataFim);
-          
+
           // Verificar se a alíquota se aplica a este mês
           return (primeiroDiaMes <= aliqFim && ultimoDiaMes >= aliqInicio);
         });
@@ -430,7 +433,7 @@ export async function GET(req: NextRequest) {
           const aliquotaDecimal = toNumber(aliquotaMes.aliquota) / 100;
           const impostoMes = faturamentoMes * aliquotaDecimal;
           impostosTotal += impostoMes;
-          
+
           console.log(`Imposto de ${mesAno}:`, {
             faturamento: faturamentoMes,
             aliquota: aliquotaMes.aliquota,
@@ -536,8 +539,8 @@ export async function GET(req: NextRequest) {
     console.error("❌ [Dashboard Stats] Erro ao calcular stats:", err);
     console.error("❌ [Dashboard Stats] Stack trace:", err instanceof Error ? err.stack : 'N/A');
     console.error("❌ [Dashboard Stats] Mensagem:", err instanceof Error ? err.message : String(err));
-    
-    return NextResponse.json({ 
+
+    return NextResponse.json({
       error: "Erro ao calcular estatísticas",
       message: err instanceof Error ? err.message : "Erro desconhecido",
       // Não enviar stack trace em produção por segurança

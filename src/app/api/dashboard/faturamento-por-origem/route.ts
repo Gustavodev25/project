@@ -135,8 +135,11 @@ export async function GET(req: NextRequest) {
 
     // WhereClause para Shopee (sem tipoAnuncio e modalidade)
     const whereClauseShopee = usarTodasVendas
-      ? { userId: session.sub, ...statusWhere, ...canalWhere }
-      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere };
+      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...modalidadeWhere }
+      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...modalidadeWhere };
+
+    // Se houver filtro de tipo de anúncio (exclusivo ML), não buscar Shopee
+    const shouldFetchShopee = !tipoAnuncioParam || tipoAnuncioParam === 'todos';
 
     // Buscar vendas do Mercado Livre
     const vendasMeli = await prisma.meliVenda.findMany({
@@ -151,7 +154,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Buscar vendas do Shopee
-    const vendasShopee = await prisma.shopeeVenda.findMany({
+    const vendasShopee = shouldFetchShopee ? await prisma.shopeeVenda.findMany({
       where: whereClauseShopee,
       select: {
         valorTotal: true,
@@ -159,7 +162,7 @@ export async function GET(req: NextRequest) {
       },
       distinct: ['orderId'],
       orderBy: { dataVenda: "desc" },
-    });
+    }) : [];
 
     // Consolidar vendas baseado no filtro de canal
     let vendas;
@@ -190,13 +193,13 @@ export async function GET(req: NextRequest) {
 
     for (const venda of vendas) {
       const valor = toNumber(venda.valorTotal);
-      
+
       // Verificar se a venda tem ADS (apenas para Mercado Livre)
       // Para vendas do Shopee, sempre considerar como "Sem ADS"
-      const temAds = 'ads' in venda && venda.ads && 
-                    venda.ads !== null && 
-                    venda.ads.toString().toLowerCase() !== 'null' && 
-                    venda.ads.toString().trim() !== '';
+      const temAds = 'ads' in venda && venda.ads &&
+        venda.ads !== null &&
+        venda.ads.toString().toLowerCase() !== 'null' &&
+        venda.ads.toString().trim() !== '';
 
       if (temAds) {
         faturamentoComAds += valor;

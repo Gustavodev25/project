@@ -140,8 +140,11 @@ export async function GET(req: NextRequest) {
 
     // WhereClause para Shopee (sem tipoAnuncio e modalidade)
     const whereClauseShopee = usarTodasVendas
-      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...accountWhereShopee }
-      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...accountWhereShopee };
+      ? { userId: session.sub, ...statusWhere, ...canalWhere, ...accountWhereShopee, ...modalidadeWhere }
+      : { userId: session.sub, dataVenda: { gte: start, lte: end }, ...statusWhere, ...canalWhere, ...accountWhereShopee, ...modalidadeWhere };
+
+    // Se houver filtro de tipo de anúncio (exclusivo ML), não buscar Shopee
+    const shouldFetchShopee = !tipoAnuncioParam || tipoAnuncioParam === 'todos';
 
     // Buscar vendas do Mercado Livre
     const vendasMeli = await prisma.meliVenda.findMany({
@@ -161,7 +164,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Buscar vendas do Shopee
-    const vendasShopee = await prisma.shopeeVenda.findMany({
+    const vendasShopee = shouldFetchShopee ? await prisma.shopeeVenda.findMany({
       where: whereClauseShopee,
       select: {
         titulo: true,
@@ -175,7 +178,7 @@ export async function GET(req: NextRequest) {
       },
       distinct: ['orderId'],
       orderBy: { dataVenda: "desc" },
-    });
+    }) : [];
 
     // Consolidar vendas baseado no filtro de canal
     let vendas: any[];
@@ -201,9 +204,9 @@ export async function GET(req: NextRequest) {
 
     const skuCustos = skusUnicos.length
       ? await prisma.sKU.findMany({
-          where: { userId: session.sub, sku: { in: skusUnicos } },
-          select: { sku: true, custoUnitario: true },
-        })
+        where: { userId: session.sub, sku: { in: skusUnicos } },
+        select: { sku: true, custoUnitario: true },
+      })
       : [];
 
     const mapaCustos = new Map(skuCustos.map((s) => [s.sku, toNumber(s.custoUnitario)]));
@@ -229,7 +232,7 @@ export async function GET(req: NextRequest) {
     // Função para determinar a chave de agrupamento baseada no filtro
     function getGroupingKey(venda: typeof vendas[0]): string {
       const skuData = skuMap.get(venda.sku || "");
-      
+
       switch (agrupamentoSKUParam) {
         case "sku":
           return venda.sku || venda.titulo;
@@ -248,11 +251,11 @@ export async function GET(req: NextRequest) {
     // Função para determinar o nome de exibição baseado no agrupamento
     function getDisplayName(venda: typeof vendas[0], groupingKey: string): string {
       const skuData = skuMap.get(venda.sku || "");
-      
+
       switch (agrupamentoSKUParam) {
         case "sku":
-          return venda.titulo.length > 30 
-            ? venda.titulo.substring(0, 30) + "..." 
+          return venda.titulo.length > 30
+            ? venda.titulo.substring(0, 30) + "..."
             : venda.titulo;
         case "hierarquia1":
           return groupingKey;
@@ -262,8 +265,8 @@ export async function GET(req: NextRequest) {
           return groupingKey;
         case "mlb":
         default:
-          return venda.titulo.length > 30 
-            ? venda.titulo.substring(0, 30) + "..." 
+          return venda.titulo.length > 30
+            ? venda.titulo.substring(0, 30) + "..."
             : venda.titulo;
       }
     }
@@ -314,7 +317,7 @@ export async function GET(req: NextRequest) {
     const produtos = Array.from(produtosMap.values()).map(produto => {
       const margemContribuicao = produto.faturamento - produto.taxaPlataforma - produto.frete - produto.cmv;
       const percentualMargem = produto.faturamento > 0 ? (margemContribuicao / produto.faturamento) * 100 : 0;
-      
+
       return {
         produto: produto.produto,
         sku: produto.sku,

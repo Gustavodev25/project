@@ -65,9 +65,8 @@ function TokenReveal({ token, label }: { token: string; label: string }) {
   return (
     <div className="relative group">
       <div
-        className={`text-element text-gray-900 font-mono text-xs cursor-pointer transition-all duration-300 ${
-          isRevealed ? "select-text" : "filter blur-sm select-none"
-        }`}
+        className={`text-element text-gray-900 font-mono text-xs cursor-pointer transition-all duration-300 ${isRevealed ? "select-text" : "filter blur-sm select-none"
+          }`}
         title={
           isRevealed
             ? `${token} (clique para copiar)`
@@ -435,8 +434,8 @@ export default function TabelaContas({
         description: isAbortError
           ? "A exclusão demorou mais que o esperado. Tente novamente em instantes."
           : error instanceof Error
-          ? error.message
-          : "Não foi possível excluir esta conta. Tente novamente.",
+            ? error.message
+            : "Não foi possível excluir esta conta. Tente novamente.",
         duration: 5000,
       });
     } finally {

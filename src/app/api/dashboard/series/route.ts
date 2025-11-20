@@ -106,11 +106,11 @@ function getDateRange(periodo: string): { start: Date; end: Date; tipo: 'mensal'
 
 function groupByPeriod(vendas: any[], tipo: 'mensal' | 'semanal' | 'diario') {
   const grupos = new Map<string, any[]>();
-  
+
   for (const venda of vendas) {
     const data = new Date(venda.dataVenda);
     let chave: string;
-    
+
     switch (tipo) {
       case 'mensal':
         chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
@@ -128,13 +128,13 @@ function groupByPeriod(vendas: any[], tipo: 'mensal' | 'semanal' | 'diario') {
       default:
         chave = data.toISOString().split('T')[0];
     }
-    
+
     if (!grupos.has(chave)) {
       grupos.set(chave, []);
     }
     grupos.get(chave)!.push(venda);
   }
-  
+
   return grupos;
 }
 
@@ -170,7 +170,7 @@ export const GET = withCors(async (req: NextRequest) => {
       start = new Date(dataInicioParam);
       const endBase = new Date(dataFimParam);
       end = new Date(endBase.getTime() + (24 * 60 * 60 * 1000 - 1));
-      
+
       // Determinar tipo baseado na duração
       const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
       if (diffDays <= 31) {
@@ -200,39 +200,44 @@ export const GET = withCors(async (req: NextRequest) => {
     const modalidadeWhere = getModalidadeWhere(modalidadeParam);
     // WhereClause para Mercado Livre (com tipoAnuncio e modalidade)
     const whereClauseMeli = usarTodasVendas
-      ? { 
-          userId: session.sub, 
-          ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}),
-          ...statusWhere, 
-          ...canalWhere, 
-          ...tipoWhere, 
-          ...modalidadeWhere 
-        }
-      : { 
-          userId: session.sub, 
-          dataVenda: { gte: start, lte: end }, 
-          ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}),
-          ...statusWhere, 
-          ...canalWhere, 
-          ...tipoWhere, 
-          ...modalidadeWhere 
-        };
+      ? {
+        userId: session.sub,
+        ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}),
+        ...statusWhere,
+        ...canalWhere,
+        ...tipoWhere,
+        ...modalidadeWhere
+      }
+      : {
+        userId: session.sub,
+        dataVenda: { gte: start, lte: end },
+        ...(accountPlatformParam === 'meli' && accountIdParam ? { meliAccountId: accountIdParam } : {}),
+        ...statusWhere,
+        ...canalWhere,
+        ...tipoWhere,
+        ...modalidadeWhere
+      };
 
     // WhereClause para Shopee (sem tipoAnuncio e modalidade)
     const whereClauseShopee = usarTodasVendas
-      ? { 
-          userId: session.sub, 
-          ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}),
-          ...statusWhere, 
-          ...canalWhere 
-        }
-      : { 
-          userId: session.sub, 
-          dataVenda: { gte: start, lte: end }, 
-          ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}),
-          ...statusWhere, 
-          ...canalWhere 
-        };
+      ? {
+        userId: session.sub,
+        ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}),
+        ...statusWhere,
+        ...canalWhere,
+        ...modalidadeWhere
+      }
+      : {
+        userId: session.sub,
+        dataVenda: { gte: start, lte: end },
+        ...(accountPlatformParam === 'shopee' && accountIdParam ? { shopeeAccountId: accountIdParam } : {}),
+        ...statusWhere,
+        ...canalWhere,
+        ...modalidadeWhere
+      };
+
+    // Se houver filtro de tipo de anúncio (exclusivo ML), não buscar Shopee
+    const shouldFetchShopee = !tipoAnuncioParam || tipoAnuncioParam === 'todos';
 
     // Buscar vendas do Mercado Livre
     const vendasMeli = await prisma.meliVenda.findMany({
@@ -250,7 +255,7 @@ export const GET = withCors(async (req: NextRequest) => {
     });
 
     // Buscar vendas do Shopee
-    const vendasShopee = await prisma.shopeeVenda.findMany({
+    const vendasShopee = shouldFetchShopee ? await prisma.shopeeVenda.findMany({
       where: whereClauseShopee,
       select: {
         dataVenda: true,
@@ -262,7 +267,7 @@ export const GET = withCors(async (req: NextRequest) => {
       },
       distinct: ['orderId'],
       orderBy: { dataVenda: "asc" },
-    });
+    }) : [];
 
     // Consolidar vendas baseado no filtro de canal
     let vendas;
@@ -284,10 +289,10 @@ export const GET = withCors(async (req: NextRequest) => {
     if (usarTodasVendas) {
       const primeiraVenda = new Date(vendas[0].dataVenda);
       const ultimaVenda = new Date(vendas[vendas.length - 1].dataVenda);
-      
+
       // Calcular duração total em dias
       const diffDays = Math.ceil((ultimaVenda.getTime() - primeiraVenda.getTime()) / (1000 * 60 * 60 * 24));
-      
+
       // Ajustar tipo baseado na duração real das vendas
       if (diffDays <= 31) {
         tipo = 'diario';
@@ -296,7 +301,7 @@ export const GET = withCors(async (req: NextRequest) => {
       } else {
         tipo = 'mensal';
       }
-      
+
       start = primeiraVenda;
       end = ultimaVenda;
     }
@@ -308,9 +313,9 @@ export const GET = withCors(async (req: NextRequest) => {
 
     const skuCustos = skusUnicos.length
       ? await prisma.sKU.findMany({
-          where: { userId: session.sub, sku: { in: skusUnicos } },
-          select: { sku: true, custoUnitario: true },
-        })
+        where: { userId: session.sub, sku: { in: skusUnicos } },
+        select: { sku: true, custoUnitario: true },
+      })
       : [];
 
     const mapaCustos = new Map(skuCustos.map((s) => [s.sku, toNumber(s.custoUnitario)]));
@@ -324,7 +329,7 @@ export const GET = withCors(async (req: NextRequest) => {
 
     for (const chave of periodosOrdenados) {
       const vendasPeriodo = gruposPorPeriodo.get(chave)!;
-      
+
       let faturamento = 0;
       let taxaPlataforma = 0;
       let frete = 0;
