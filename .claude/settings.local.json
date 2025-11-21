@@ -30,7 +30,22 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(git pull:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(node check-vendas.js:*)",
+      "Bash(node test-sync.js:*)",
+      "Bash(git fetch:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(node_modules/.bin/prisma migrate:*)",
+      "Bash(npm install:*)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(npx prisma generate)",
+      "Bash(nul)",
+      "Bash(Get-Content \"c:\\Users\\de\\Desktop\\Zero Holding\\project\\.env.example\")",
+      "Bash(Select-String -Pattern \"NEXT_PUBLIC\")",
+      "Bash(Get-Content \"c:\\Users\\de\\Desktop\\Zero Holding\\project\\.env.local\")",
+      "Bash(Select-String \"NEXT_PUBLIC_API_URL\")"
     ],
     "deny": [],
     "ask": []

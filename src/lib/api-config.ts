@@ -33,15 +33,13 @@ function shouldUseExternalBackend(): boolean {
 
 export const API_CONFIG = {
   get baseURL(): string {
-    return shouldUseExternalBackend() ? process.env.NEXT_PUBLIC_API_URL || "" : "";
+    // SEMPRE usar rotas relativas (Next.js) - NUNCA chamar backend externo diretamente
+    return "";
   },
 
   getApiUrl(path: string): string {
-    if (!shouldUseExternalBackend()) {
-      return path;
-    }
-
-    return `${process.env.NEXT_PUBLIC_API_URL}${path}`;
+    // SEMPRE usar rotas relativas (Next.js) - NUNCA chamar backend externo diretamente
+    return path;
   },
 
   async fetch(path: string, options?: RequestInit) {
