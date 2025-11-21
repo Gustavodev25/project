@@ -10,7 +10,32 @@ GET https://project-backend-rjoh.onrender.com/api/meli/accounts 401 (Unauthorize
 
 ## 🔍 Causa Raiz
 
-O arquivo `src/lib/api-config.ts` continha lógica condicional que:
+**DUAS causas principais** foram identificadas:
+
+### 1. Rewrite Rule no vercel.json (CRÍTICO!)
+
+O arquivo `vercel.json` continha um **rewrite rule** que redirecionava todas as requisições:
+
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://project-backend-rjoh.onrender.com/api/:path*"
+    }
+  ]
+}
+```
+
+Isso fazia com que:
+- Requisições do browser para `/api/meli/accounts` fossem reescritas
+- Redirecionadas para `https://project-backend-rjoh.onrender.com/api/meli/accounts`
+- Resultando em chamadas cross-origin diretas sem cookies
+- **ERRO 401: Unauthorized**
+
+### 2. API_CONFIG com lógica condicional
+
+O arquivo `src/lib/api-config.ts` também continha lógica que:
 
 1. Verificava se estava em localhost ou produção
 2. Em produção, usava `NEXT_PUBLIC_API_URL` do ambiente Vercel
@@ -22,7 +47,31 @@ O arquivo `src/lib/api-config.ts` continha lógica condicional que:
 
 ## ✅ Solução Implementada
 
-**Modificação em `src/lib/api-config.ts`:**
+### 1. Remoção do Rewrite Rule (vercel.json)
+
+**ANTES:**
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://project-backend-rjoh.onrender.com/api/:path*"
+    }
+  ],
+  "crons": [...]
+}
+```
+
+**DEPOIS:**
+```json
+{
+  "crons": [...]
+}
+```
+
+Agora as requisições `/api/*` são processadas pelas **API Routes do Next.js**, não redirecionadas.
+
+### 2. Simplificação do API_CONFIG (src/lib/api-config.ts)
 
 ```typescript
 export const API_CONFIG = {
@@ -40,13 +89,14 @@ export const API_CONFIG = {
 };
 ```
 
-### O que mudou:
+### Resumo das Mudanças:
 
-1. **Removida toda lógica condicional** de ambiente
-2. **SEMPRE usa rotas relativas** (`/api/meli/accounts`)
-3. **NUNCA chama backend externo** diretamente do browser
-4. **Todas as chamadas passam** pelas API Routes do Next.js
-5. **Next.js faz chamadas server-side** ao backend externo usando variáveis de ambiente
+1. **Removido rewrite rule** do vercel.json
+2. **Removida lógica condicional** de ambiente do API_CONFIG
+3. **SEMPRE usa rotas relativas** (`/api/meli/accounts`)
+4. **NUNCA chama backend externo** diretamente do browser
+5. **Todas as chamadas passam** pelas API Routes do Next.js
+6. **Next.js faz chamadas server-side** ao backend externo usando variáveis de ambiente
 
 ## 🏗️ Arquitetura Correta
 
@@ -108,17 +158,26 @@ const backendUrl = process.env.NEXT_PUBLIC_API_URL;
 3. **Segurança**: Variáveis sensíveis nunca expostas ao browser
 4. **Consistência**: Mesmo código funciona em dev e produção
 
-## 📝 Commit
+## 📝 Commits
 
+Duas correções foram feitas em commits separados:
+
+### Commit 1: API_CONFIG
 ```bash
 git commit -m "fix: forçar uso exclusivo de rotas Next.js sem chamadas externas"
 ```
 
-## 🔗 Arquivos Relacionados
+### Commit 2: vercel.json (CRÍTICO)
+```bash
+git commit -m "fix: remover rewrite rule que causava 401 na Vercel"
+```
 
-- [src/lib/api-config.ts](src/lib/api-config.ts) - Configuração de API corrigida
-- [src/hooks/useVendas.ts](src/hooks/useVendas.ts) - Hook que usa API_CONFIG
-- [src/app/api/meli/accounts/route.ts](src/app/api/meli/accounts/route.ts) - API Route Next.js
+## 🔗 Arquivos Modificados
+
+1. **[vercel.json](vercel.json)** - Removido rewrite rule crítico
+2. **[src/lib/api-config.ts](src/lib/api-config.ts)** - Configuração de API simplificada
+3. **[src/hooks/useVendas.ts](src/hooks/useVendas.ts)** - Hook que usa API_CONFIG
+4. **[src/app/api/meli/accounts/route.ts](src/app/api/meli/accounts/route.ts)** - API Route Next.js
 
 ## ⚠️ Importante
 
