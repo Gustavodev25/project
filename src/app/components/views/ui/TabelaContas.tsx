@@ -398,7 +398,7 @@ export default function TabelaContas({
         : undefined;
 
     try {
-      const res = await fetch(`/api/meli/accounts?id=${encodeURIComponent(account.id)}`, {
+      const res = await API_CONFIG.fetch(`/api/meli/accounts?id=${encodeURIComponent(account.id)}`, {
         method: "DELETE",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -530,7 +530,7 @@ export default function TabelaContas({
   async function loadData() {
     try {
       if (platform === "Mercado Livre") {
-        const res = await fetch("/api/meli/accounts", {
+        const res = await API_CONFIG.fetch("/api/meli/accounts", {
           cache: "no-store",
           credentials: "include",
         });
@@ -558,7 +558,7 @@ export default function TabelaContas({
       }
 
       if (platform === "Shopee") {
-        const res = await fetch("/api/shopee/accounts", {
+        const res = await API_CONFIG.fetch("/api/shopee/accounts", {
           cache: "no-store",
           credentials: "include",
         });
@@ -586,7 +586,7 @@ export default function TabelaContas({
       }
 
       if (platform === "Bling") {
-        const res = await fetch("/api/bling/accounts", {
+        const res = await API_CONFIG.fetch("/api/bling/accounts", {
           cache: "no-store",
           credentials: "include",
         });
