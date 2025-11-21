@@ -5,6 +5,10 @@ import { withCors } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
+// NOTA: Se BACKEND_URL estiver configurado, o middleware.ts vai interceptar
+// esta rota e fazer proxy para o backend Render automaticamente.
+// Este código só executa quando BACKEND_URL NÃO estiver configurado (modo standalone).
+
 export const OPTIONS = withCors(async (_req: NextRequest) => {
   return new NextResponse(null, { status: 204 });
 });
