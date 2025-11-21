@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { EmptyState } from "./CardsContas";
 import { useToast } from "./toaster";
+import { API_CONFIG } from "@/lib/api-config";
 
 interface TabelaContasProps {
   platform: string;
@@ -26,11 +27,11 @@ const AUTH_ORIGIN =
 
 // Garantir que sempre tenha protocolo HTTPS para ngrok
 const getAuthOrigin = () => {
-  const origin = AUTH_ORIGIN;
+  const origin = API_CONFIG.baseURL || AUTH_ORIGIN;
   if (origin && !origin.startsWith("http")) {
     return `https://${origin}`;
   }
-  return origin;
+  return origin || "";
 };
 
 // Componente para revelar tokens com blur

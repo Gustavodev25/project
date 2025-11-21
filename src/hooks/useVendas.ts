@@ -214,25 +214,35 @@ export function useVendas(
     }
   }, [progress, platform, disconnect, autoConnectSSE, isSyncing]);
 
+  const resolveAuthOrigin = () => {
+    const origin =
+      API_CONFIG.baseURL ||
+      process.env.NEXT_PUBLIC_MELI_REDIRECT_ORIGIN ||
+      (typeof window !== "undefined" ? window.location.origin : "");
+
+    if (origin && !origin.startsWith("http")) {
+      return `https://${origin}`;
+    }
+
+    return origin;
+  };
 
   const handleConnectAccount = () => {
+    const authOrigin = resolveAuthOrigin();
+
     if (platform === "Mercado Livre") {
-      // Redirecionar para a autenticação do Mercado Livre
-      const AUTH_ORIGIN = process.env.NEXT_PUBLIC_MELI_REDIRECT_ORIGIN || 
-                         (typeof window !== "undefined" ? window.location.origin : "");
-      const url = `${AUTH_ORIGIN}/api/meli/auth`;
+      // Redirecionar para autenticacao do Mercado Livre
+      const url = `${authOrigin}/api/meli/auth`;
       window.location.href = url;
     } else if (platform === "Shopee") {
-      // Redirecionar para a autenticação da Shopee
-      const AUTH_ORIGIN = process.env.NEXT_PUBLIC_MELI_REDIRECT_ORIGIN || 
-                         (typeof window !== "undefined" ? window.location.origin : "");
-      const url = `${AUTH_ORIGIN}/api/shopee/auth`;
+      // Redirecionar para autenticacao da Shopee
+      const url = `${authOrigin}/api/shopee/auth`;
       window.location.href = url;
     } else if (platform === "Geral") {
-      // Para vendas gerais, não há conexão direta - usar as páginas individuais
-      console.log("Para conectar contas, acesse as páginas individuais do Shopee ou Mercado Livre.");
+      // Para vendas gerais, nao ha conexao direta - usar as paginas individuais
+      console.log("Para conectar contas, acesse as paginas individuais do Shopee ou Mercado Livre.");
     } else {
-      console.log(`Integração com ${platform} ainda não disponível.`);
+      console.log(`Integracao com ${platform} ainda nao disponivel.`);
     }
   };
 

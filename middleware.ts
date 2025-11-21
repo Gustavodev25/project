@@ -9,8 +9,15 @@ export async function middleware(request: NextRequest) {
   const currentUrl = new URL(request.url);
   const { pathname } = request.nextUrl;
   const sessionCookie = request.cookies.get("session")?.value;
-  const session = await tryVerifySessionToken(sessionCookie);
-  const isAuthenticated = Boolean(session);
+  const hasAuthSecret = Boolean(process.env.JWT_SECRET);
+  const usingExternalBackend = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const assumeExternalAuth = usingExternalBackend && !hasAuthSecret;
+
+  const session = hasAuthSecret
+    ? await tryVerifySessionToken(sessionCookie)
+    : null;
+  const isAuthenticated = assumeExternalAuth ? true : Boolean(session);
+  const shouldEnforceAuth = !assumeExternalAuth;
 
   console.log("🔍 Middleware Debug:", {
     pathname,
@@ -88,7 +95,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Proteger rotas que precisam de autenticação
-  if (protectedRoutes.some((route) => pathname.startsWith(route)) && !isAuthenticated) {
+  if (shouldEnforceAuth && protectedRoutes.some((route) => pathname.startsWith(route)) && !isAuthenticated) {
     const loginUrl = new URL("/login", request.url);
     if (loginUrl.hostname === "localhost" || loginUrl.hostname === "127.0.0.1") {
       loginUrl.protocol = "http:";
@@ -98,7 +105,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirecionar usuários autenticados que tentam acessar rotas de auth
-  if (authRoutes.some((route) => pathname.startsWith(route)) && isAuthenticated) {
+  if (shouldEnforceAuth && authRoutes.some((route) => pathname.startsWith(route)) && isAuthenticated) {
     const dashboardUrl = new URL("/dashboard", request.url);
     if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {
       dashboardUrl.protocol = "http:";
@@ -108,7 +115,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirecionar root baseado em autenticação
-  if (pathname === "/") {
+  if (shouldEnforceAuth && pathname === "/") {
     if (isAuthenticated) {
       const dashboardUrl = new URL("/dashboard", request.url);
       if (dashboardUrl.hostname === "localhost" || dashboardUrl.hostname === "127.0.0.1") {

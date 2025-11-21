@@ -46,14 +46,19 @@ export const API_CONFIG = {
 
   async fetch(path: string, options?: RequestInit) {
     const url = API_CONFIG.getApiUrl(path);
+    const isFormData =
+      typeof FormData !== "undefined" && options?.body instanceof FormData;
+
+    const headers = new Headers(options?.headers || {});
+
+    if (!headers.has("Content-Type") && options?.body && !isFormData) {
+      headers.set("Content-Type", "application/json");
+    }
 
     return fetch(url, {
-      credentials: "include",
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-      },
+      credentials: options?.credentials ?? "include",
+      headers,
     });
   },
 };
