@@ -1,0 +1,93 @@
+/* Input base - estilo principal com maior especificidade */
+.input-base {
+    @apply flex h-12 w-full rounded-xl border-2 bg-white px-4 py-3 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-300 text-gray-900;
+    --tw-ring-color: #C5837B;
+    color: #000000 !important;
+    border-color: #E5E7EB !important;
+    position: relative;
+    /* Remove box-shadow padrão para usar pseudo-elemento */
+}
+
+/* Input fantasma atrás - efeito de sobreposição */
+.input-base::before {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    right: -3px;
+    bottom: -3px;
+    background: #E5E7EB;
+    border-radius: 12px;
+    border: 2px solid #E5E7EB;
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Força a aplicação do estilo */
+input.input-base {
+    border-color: #E5E7EB !important;
+    position: relative;
+}
+
+/* Input fantasma para elementos input diretos */
+input.input-base::before {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    right: -3px;
+    bottom: -3px;
+    background: #E5E7EB;
+    border-radius: 12px;
+    border: 2px solid #E5E7EB;
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Estados especiais */
+.input-base:focus,
+.input-base:focus-visible,
+.input-focus-custom:focus,
+.input-focus-custom:focus-visible {
+    border-color: #C5837B !important;
+}
+
+/* Estado ativo - laranja */
+.input-base:active {
+    border-color: #FF8C00 !important;
+}
+
+/* Input fantasma no estado de foco */
+.input-base:focus::before,
+.input-base:focus-visible::before {
+    background: #C5837B;
+    border-color: #C5837B;
+}
+
+/* Input fantasma no estado ativo */
+.input-base:active::before {
+    background: #FF8C00;
+    border-color: #FF8C00;
+}
+
+/* Força aplicação do foco também */
+input.input-base:focus {
+    border-color: #C5837B !important;
+}
+
+/* Força aplicação do estado ativo também */
+input.input-base:active {
+    border-color: #FF8C00 !important;
+}
+
+/* Input fantasma no foco para elementos input diretos */
+input.input-base:focus::before {
+    background: #C5837B;
+    border-color: #C5837B;
+}
+
+/* Input fantasma no estado ativo para elementos input diretos */
+input.input-base:active::before {
+    background: #FF8C00;
+    border-color: #FF8C00;
+}

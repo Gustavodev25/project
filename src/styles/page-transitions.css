@@ -1,0 +1,62 @@
+/* Page Transition Styles */
+.page-transition-wrapper {
+  width: 100%;
+  min-height: 100vh;
+  transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out;
+}
+
+/* Estado de entrada (padrão) */
+.page-transition-enter {
+  opacity: 1;
+  filter: blur(0px);
+  animation: pageEnter 0.3s ease-in-out forwards;
+}
+
+/* Estado de saída */
+.page-transition-exit {
+  opacity: 0;
+  filter: blur(8px);
+  animation: pageExit 0.3s ease-in-out forwards;
+}
+
+/* Animação de entrada */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1);
+  }
+}
+
+/* Animação de saída */
+@keyframes pageExit {
+  from {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    filter: blur(8px);
+    transform: scale(0.98);
+  }
+}
+
+/* Previne scroll durante transição */
+.page-transition-exit {
+  pointer-events: none;
+}
+
+/* Otimizações de performance */
+.page-transition-wrapper {
+  will-change: opacity, filter, transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

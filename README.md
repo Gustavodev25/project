@@ -1,70 +1,60 @@
-# ContaZoom Backend
+# ContaZoom Frontend
 
-Backend API para o sistema ContaZoom - Gestão de vendas de marketplaces.
+Frontend Next.js do sistema ContaZoom - Interface de gestão de vendas de marketplaces.
 
 ## Stack
 
-- **Runtime**: Node.js
-- **Framework**: Next.js 15 (API Routes)
-- **Database**: PostgreSQL
-- **ORM**: Prisma
-- **Auth**: JWT (jose)
+- **Framework**: Next.js 15
+- **UI**: React 19, Tailwind CSS 4
+- **Charts**: Recharts, ECharts
+- **Maps**: Leaflet
+- **Forms**: React Hook Form, Zod
+
+## Arquitetura
+
+Este é o frontend que se conecta ao backend via middleware proxy.
+
+```
+Frontend (Vercel)  →  Middleware Proxy  →  Backend API (Render)
+```
+
+### Como funciona:
+1. Usuário acessa o frontend no Vercel
+2. Requisições para `/api/*` são interceptadas pelo middleware
+3. Middleware faz proxy para o backend no Render
+4. Resposta retorna para o usuário
 
 ## Estrutura
 
 ```
-project-backend/
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
+project/
 ├── src/
-│   ├── app/api/          # API Routes
-│   │   ├── auth/         # Autenticação
-│   │   ├── meli/         # Mercado Livre
-│   │   ├── shopee/       # Shopee
-│   │   ├── dashboard/    # Dashboard stats
-│   │   └── vendas/       # Vendas
-│   └── lib/              # Utilidades
-│       ├── prisma.ts     # Prisma client
-│       ├── auth.ts       # JWT helpers
-│       └── cache.ts      # Cache helpers
-├── package.json
-└── .env
+│   ├── app/
+│   │   ├── components/        # Componentes React
+│   │   ├── dashboard/         # Páginas do dashboard
+│   │   ├── vendas/            # Páginas de vendas
+│   │   ├── contas/            # Gestão de contas
+│   │   └── login/             # Autenticação
+│   ├── contexts/              # React Contexts
+│   ├── hooks/                 # Custom hooks
+│   ├── lib/                   # Utilidades
+│   └── middleware.ts          # Proxy para backend
+├── public/                    # Assets estáticos
+└── package.json
 ```
 
-## Variáveis de Ambiente
+## Variáveis de Ambiente (Vercel)
 
 ```env
-# Database
-DATABASE_URL="postgresql://user:password@host/database"
-
-# Auth
-AUTH_SECRET="your-secret-key"
-JWT_SECRET="your-jwt-secret"
-
-# Mercado Livre
-MELI_APP_ID=
-MELI_CLIENT_SECRET=
-MELI_REDIRECT_URI=
-MELI_REDIRECT_ORIGIN=
-
-# Shopee
-SHOPEE_PARTNER_ID=
-SHOPEE_PARTNER_KEY=
-SHOPEE_REDIRECT_URI=
-SHOPEE_REDIRECT_ORIGIN=
-
-# Cron
-CRON_SECRET=
+BACKEND_URL=https://project-backend-rjoh.onrender.com
 ```
 
-## Deploy (Render)
+## Deploy no Vercel
 
-1. Conectar repositório ao Render
-2. Configurar build command: `npm install && npm run build`
-3. Configurar start command: `npm start`
-4. Adicionar variáveis de ambiente
-5. Adicionar PostgreSQL addon
+1. Conectar repositório no Vercel
+2. Framework: Next.js
+3. Adicionar variável de ambiente `BACKEND_URL`
+4. Deploy automático
 
 ## Desenvolvimento Local
 
@@ -72,49 +62,25 @@ CRON_SECRET=
 # Instalar dependências
 npm install
 
-# Rodar migrations
-npx prisma migrate deploy
+# Criar .env.local
+echo "BACKEND_URL=https://project-backend-rjoh.onrender.com" > .env.local
 
-# Gerar Prisma Client
-npx prisma generate
-
-# Build
-npm run build
-
-# Start
-npm start
+# Rodar dev server
+npm run dev
 ```
 
-## API Endpoints
+Acesse: http://localhost:3000
 
-### Auth
-- `POST /api/auth/register` - Registro
-- `POST /api/auth/login` - Login
-- `GET /api/auth/me` - User info
+## Páginas
 
-### Mercado Livre
-- `GET /api/meli/auth` - Iniciar OAuth
-- `GET /api/meli/callback` - OAuth callback
-- `GET /api/meli/accounts` - Listar contas
-- `POST /api/meli/vendas/sync` - Sincronizar vendas
-- `GET /api/meli/vendas` - Listar vendas
-
-### Shopee
-- `GET /api/shopee/auth` - Iniciar OAuth
-- `GET /api/shopee/callback` - OAuth callback
-- `GET /api/shopee/accounts` - Listar contas
-- `POST /api/shopee/vendas/sync` - Sincronizar vendas
-- `GET /api/shopee/vendas` - Listar vendas
-
-### Dashboard
-- `GET /api/dashboard/stats` - Estatísticas gerais
-- `GET /api/dashboard/series` - Séries temporais
-- `GET /api/dashboard/faturamento-por-origem` - Faturamento por origem
-- `GET /api/dashboard/top-produtos-faturamento` - Top produtos
-- `GET /api/dashboard/top-produtos-margem` - Top margens
-
-### Vendas
-- `GET /api/vendas` - Listar todas vendas
+- `/login` - Login
+- `/dashboard` - Dashboard principal
+- `/vendas/mercado-livre` - Vendas Mercado Livre
+- `/vendas/shopee` - Vendas Shopee
+- `/vendas/geral` - Todas as vendas
+- `/contas` - Gestão de contas
+- `/sku` - Gestão de SKUs
+- `/financeiro/*` - Módulo financeiro
 
 ## Licença
 
